@@ -9,4 +9,8 @@ shader), rustybuzz shaping, and the `DrawList` contract that highbay_ui's
 node-graph lowers into. Runs native and on wasm32 (WebGPU); includes the lo-fi
 "pencil sketch" noise-distortion hook point (PLAN.md Phase 5).
 
-Status: Phase 1 contract stubs; Phase 5 implements (no wgpu dependency yet).
+Status: Phase 5 complete — extracted from matter-stream (VM/skills/cards pruned),
+wgpu 29 SDF/MSDF renderer, runtime compute-shader MSDF generation matching the CPU
+msdfgen baseline, dynamic atlas management, cubic-Bézier arc strokes, and the
+`DrawList` render contract. Native + wasm32 (WebGPU) compile-clean; GPU tests run
+headless on Metal. See `Cargo.toml` for the `cpu-bake` / `gpu-tests` feature notes.

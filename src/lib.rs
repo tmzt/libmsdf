@@ -1,70 +1,41 @@
-//! libmsdf — wgpu SDF/MSDF render engine + typography (Phase 1 contract stubs;
-//! Phase 5 extracts matter-stream's render stack and adds the wasm32/WebGPU
-//! port plus runtime compute-shader MSDF generation).
+//! libmsdf — wgpu SDF/MSDF render engine + typography.
+//!
+//! Extracted from matter-stream's render stack (same author:
+//! `matterstream-common` / `-font` / `-ui-gpu` / `-mtd1-format` +
+//! `mtd1_to_sdf`), with all VM/skills/card code pruned, plus Highbay
+//! additions: the wasm32/WebGPU port, runtime compute-shader MSDF
+//! generation, dynamic atlas management, cubic-Bézier arc strokes, and the
+//! lo-fi distortion hook (PLAN.md Phase 5).
+//!
+//! Module map:
+//! - [`core`] — `SdfDrawCmd` + SDF eval math, `RenderFrame`, `GpuFont`,
+//!   `Rasterizer`, color helpers (zero-dep).
+//! - [`font`] — rustybuzz shaping, MSDF atlases (CPU bake native-only;
+//!   loading wasm-clean), glyph tables, shelf packing, dynamic atlas
+//!   management, outline extraction for compute MSDF.
+//! - [`gpu`] — `GpuSdfRenderer` (single SDF fragment pipeline, caller-owned
+//!   device) + `MsdfCompute` (runtime MSDF via WGSL compute).
+//! - [`drawlist`] — the `DrawList` contract highbay_ui renders through,
+//!   plus the compact `Command32` stream lowering.
 
 #![forbid(unsafe_code)]
 
+pub mod core;
+pub mod drawlist;
+pub mod font;
+pub mod gpu;
+
+pub use crate::core::{
+    Anim, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE, DRAW_TYPE_MSDF_TEXT,
+    DRAW_TYPE_OUTLINE, DRAW_TYPE_SLAB, DRAW_TYPE_TEXT, GpuFont, RenderFrame, SdfDrawCmd,
+};
+pub use drawlist::{DrawList, SdfFrame, SdfInstance, SdfKind};
+pub use font::{
+    AtlasManager, AtlasRegion, FontAtlas, FontAtlasBuilder, GlyphEntry, ROBOTO_REGULAR_ASCII,
+    ShapedRun, TextShaper,
+};
+pub use gpu::{GpuSdfRenderer, MsdfCompute};
+
 /// Human-readable crate status, printed by the root `highbay` bin.
-pub const PHASE_STATUS: &str = "Phase 1 contract stubs (Phase 5: wgpu SDF/MSDF engine)";
-
-/// The SDF shape an instance renders (mirrors the extracted shader's coverage;
-/// Bézier strokes feed the Phase 8 nav-graph arcs).
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum SdfKind {
-    Box,
-    RoundedBox,
-    Circle,
-    Line,
-    /// Cubic Bézier stroke (containment / flow arcs).
-    BezierStroke,
-    /// MSDF glyph, indexed into the font atlas glyph table.
-    MsdfGlyph { glyph: u32 },
-}
-
-/// One GPU instance in the SDF pipeline.
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct SdfInstance {
-    pub kind: SdfKind,
-    /// Top-left position in logical pixels.
-    pub position: [f32; 2],
-    pub size: [f32; 2],
-    /// Corner radius (RoundedBox) or stroke width (Line/BezierStroke).
-    pub radius: f32,
-    /// Premultiplied RGBA.
-    pub color: [f32; 4],
-}
-
-/// The frame contract consumed by the renderer and produced by highbay_ui's
-/// node-graph lowering (Phase 7). Caller-owned; renderer never retains it.
-#[derive(Clone, Debug, Default)]
-pub struct DrawList {
-    pub instances: Vec<SdfInstance>,
-}
-
-impl DrawList {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn push(&mut self, instance: SdfInstance) {
-        self.instances.push(instance);
-    }
-
-    pub fn clear(&mut self) {
-        self.instances.clear();
-    }
-}
-
-/// Errors from the render backend.
-#[derive(Debug)]
-pub enum RenderError {
-    Backend(String),
-}
-
-/// The render seam. Phase 5 implements it over wgpu (`GpuSdfRenderer`
-/// pattern: caller owns the device/queue); a headless golden-image
-/// implementation backs tests.
-pub trait Renderer {
-    /// Render one frame's draw list.
-    fn render(&mut self, list: &DrawList) -> Result<(), RenderError>;
-}
+pub const PHASE_STATUS: &str =
+    "Phase 5: wgpu SDF/MSDF engine (extracted from matter-stream; native + wasm32)";

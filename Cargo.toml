@@ -1,9 +1,50 @@
 [package]
 name = "libmsdf"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "wgpu SDF/MSDF render engine and typography (extracted from matter-stream)"
 license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
+wgpu = "29"
+bytemuck = { version = "1", features = ["derive"] }
+log = "0.4"
+rustybuzz = "0.20"
+ttf-parser = "0.25"
+unicode-segmentation = "1.13"
+
+[features]
+default = []
+# CPU msdfgen reference baking. Off by default for two reasons:
+# 1. msdfgen is C++ FFI — it can never build for wasm32 (the compute-shader
+#    MSDF path is the runtime generator there);
+# 2. under the workspace's Cranelift dev profile on macOS, cranelift emits
+#    the C++ extern references with a doubled Mach-O underscore prefix
+#    (`___ZN7msdfgen…` vs the archive's `__ZN7msdfgen…`), so linking fails.
+#    Enable together with the LLVM backend, e.g.:
+#    CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm cargo test -p libmsdf --features cpu-bake
+cpu-bake = ["dep:msdfgen", "dep:ttf-parser-018"]
+# GPU integration tests (headless wgpu). Gated for the same reason: under
+# the Cranelift dev profile, wgpu init aborts at runtime on aarch64
+# ("llvm.aarch64.crc32b is not yet supported" — cranelift issue #171).
+# Run the full GPU suite with:
+#   CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm \
+#     cargo test -p libmsdf --features gpu-tests,cpu-bake
+gpu-tests = []
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+msdfgen = { version = "0.2", default-features = false, features = ["ttf-parser"], optional = true }
+# msdfgen's FontExt is implemented against ttf-parser 0.18; metrics use 0.25.
+ttf-parser-018 = { package = "ttf-parser", version = "0.18", optional = true }
+
+[[example]]
+name = "bake_atlas"
+required-features = ["cpu-bake"]
+
+[build-dependencies]
+naga = { version = "29", features = ["wgsl-in"] }
+
+[dev-dependencies]
+pollster = "0.4"
+png = "0.17"
