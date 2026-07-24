@@ -237,52 +237,6 @@ fn compute_matches_cpu_baseline() {
             }
         }
 
-        // TEMP DEBUG: locate deviations
-        if std::env::var("LIBMSDF_DEBUG").is_ok() {
-            let mut worst: Vec<(f32, u32, u32, f32, f32)> = Vec::new();
-            let mut band_near = (0usize, 0.0f64, 0usize); // |cpu-0.5|<=0.25
-            let mut band_far = (0usize, 0.0f64, 0usize);
-            for i in 0..total {
-                let c = &cpu.rgb[i * 3..i * 3 + 3];
-                let g = &gpu_rgba[i * 4..i * 4 + 3];
-                let m_cpu = median3(c[0], c[1], c[2]);
-                let m_gpu = median3(g[0], g[1], g[2]);
-                let d = (m_cpu - m_gpu).abs();
-                let (x, y) = (i as u32 % CELL, i as u32 / CELL);
-                if (m_cpu - 0.5).abs() <= 0.25 {
-                    band_near.0 += 1; band_near.1 += d as f64; if d > 0.125 { band_near.2 += 1; }
-                } else {
-                    band_far.0 += 1; band_far.1 += d as f64; if d > 0.125 { band_far.2 += 1; }
-                }
-                worst.push((d, x, y, m_cpu, m_gpu));
-            }
-            if ch == 'A' {
-                for (name, is_cpu) in [("CPU", true), ("GPU", false)] {
-                    eprintln!("  {name} median map:");
-                    for y in 0..CELL {
-                        let mut row = String::new();
-                        for x in 0..CELL {
-                            let i = (y*CELL+x) as usize;
-                            let m = if is_cpu { median3(cpu.rgb[i*3],cpu.rgb[i*3+1],cpu.rgb[i*3+2]) }
-                                    else { median3(gpu_rgba[i*4],gpu_rgba[i*4+1],gpu_rgba[i*4+2]) };
-                            row.push(char::from_digit((m*9.99) as u32, 10).unwrap_or('?'));
-                        }
-                        eprintln!("   {row}");
-                    }
-                }
-            }
-            for &(px, py) in &[(21u32,10u32),(23,7),(21,17),(10,38)] {
-                let i = (py*CELL+px) as usize;
-                let c=&cpu.rgb[i*3..i*3+3]; let g=&gpu_rgba[i*4..i*4+3];
-                eprintln!("  texel({px},{py}) cpu=({},{},{}) gpu=({},{},{})", c[0],c[1],c[2],g[0],g[1],g[2]);
-            }
-            worst.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-            eprintln!("  near band: n={} meanD={:.4} beyond={}", band_near.0, band_near.1 / band_near.0.max(1) as f64, band_near.2);
-            eprintln!("  far band:  n={} meanD={:.4} beyond={}", band_far.0, band_far.1 / band_far.0.max(1) as f64, band_far.2);
-            for w in worst.iter().take(12) {
-                eprintln!("  worst d={:.3} at ({},{}) cpu={:.3} gpu={:.3}", w.0, w.1, w.2, w.3, w.4);
-            }
-        }
         let mean = sum_abs / total as f64;
         let frac_beyond = beyond_tol as f64 / total as f64;
         let iou = if union == 0 { 1.0 } else { inter as f64 / union as f64 };
