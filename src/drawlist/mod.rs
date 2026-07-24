@@ -14,7 +14,7 @@ pub mod stream;
 
 use crate::core::sdf::{
     DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE, DRAW_TYPE_MSDF_TEXT,
-    DRAW_TYPE_OUTLINE, DRAW_TYPE_SLAB, SdfDrawCmd,
+    DRAW_TYPE_OUTLINE, DRAW_TYPE_RIBBON_BEGIN, DRAW_TYPE_RIBBON_END, DRAW_TYPE_SLAB, SdfDrawCmd,
 };
 use crate::font::atlas::FontAtlas;
 use crate::font::shaper::ShapedRun;
@@ -58,6 +58,15 @@ pub enum SdfKind {
         char_count: u32,
         px_range: f32,
     },
+    /// Begin a rectangular scissor clip: every instance pushed *after* this
+    /// one (until the matching [`SdfKind::ClipEnd`]) is clipped to the rect
+    /// `position`/`size`. Lets a caller confine a sub-scene — e.g. a device
+    /// "screen" — so its content, text included, cannot spill past the rect.
+    /// Lowers to the shader's ribbon-clip pass (no per-instance wire change).
+    /// Clips are a single active region, not a stack — do not nest.
+    ClipBegin,
+    /// End the current [`SdfKind::ClipBegin`] region.
+    ClipEnd,
 }
 
 /// One instance in the draw list.
@@ -129,6 +138,30 @@ impl DrawList {
             position: p0,
             size: [0.0, 0.0],
             color,
+            anim: 0,
+        });
+    }
+
+    /// Begin a rectangular scissor clip at `pos`/`size`. Instances pushed
+    /// after this (until [`DrawList::push_clip_end`]) are clipped to the rect.
+    /// See [`SdfKind::ClipBegin`].
+    pub fn push_clip(&mut self, pos: [f32; 2], size: [f32; 2]) {
+        self.instances.push(SdfInstance {
+            kind: SdfKind::ClipBegin,
+            position: pos,
+            size,
+            color: [0.0, 0.0, 0.0, 0.0],
+            anim: 0,
+        });
+    }
+
+    /// End the current [`DrawList::push_clip`] region.
+    pub fn push_clip_end(&mut self) {
+        self.instances.push(SdfInstance {
+            kind: SdfKind::ClipEnd,
+            position: [0.0, 0.0],
+            size: [0.0, 0.0],
+            color: [0.0, 0.0, 0.0, 0.0],
             anim: 0,
         });
     }
@@ -229,6 +262,15 @@ impl DrawList {
                         [DRAW_TYPE_MSDF_TEXT, px_range, X_MARGIN_FRAC, f32::from_bits(packed)],
                     )
                 }
+                // Clip control commands: pos/size carry the ribbon rect;
+                // params.y (scroll slot) = 0 and params.z (dir) = 0 mean a
+                // static, non-scrolling clip in the shader.
+                SdfKind::ClipBegin => {
+                    (inst.position, inst.size, [DRAW_TYPE_RIBBON_BEGIN, 0.0, 0.0, 0.0])
+                }
+                SdfKind::ClipEnd => {
+                    (inst.position, inst.size, [DRAW_TYPE_RIBBON_END, 0.0, 0.0, 0.0])
+                }
             };
             draws.push(SdfDrawCmd { pos, size, color: inst.color, params });
         }
@@ -300,6 +342,34 @@ mod tests {
             assert_eq!(d.params[3].to_bits(), i as u32);
         }
         assert_eq!(frame.param_bank.len(), 3);
+    }
+
+    #[test]
+    fn clip_maps_to_ribbon_control_commands() {
+        let mut list = DrawList::new();
+        list.push_clip([10.0, 20.0], [100.0, 50.0]);
+        list.push(SdfInstance {
+            kind: SdfKind::Box,
+            position: [12.0, 22.0],
+            size: [5.0, 5.0],
+            color: [1.0; 4],
+            anim: 0,
+        });
+        list.push_clip_end();
+
+        let frame = list.lower();
+        assert_eq!(frame.draws.len(), 3);
+        // ClipBegin → ribbon begin, carrying the clip rect in pos/size.
+        assert_eq!(frame.draws[0].params[0], DRAW_TYPE_RIBBON_BEGIN);
+        assert_eq!(frame.draws[0].pos, [10.0, 20.0]);
+        assert_eq!(frame.draws[0].size, [100.0, 50.0]);
+        // No scroll: the scroll slot + direction params are zero.
+        assert_eq!(frame.draws[0].params[1], 0.0);
+        assert_eq!(frame.draws[0].params[2], 0.0);
+        // The clipped shape passes through unchanged.
+        assert_eq!(frame.draws[1].params[0], DRAW_TYPE_BOX);
+        // ClipEnd → ribbon end.
+        assert_eq!(frame.draws[2].params[0], DRAW_TYPE_RIBBON_END);
     }
 
     #[test]
