@@ -26,8 +26,17 @@ fn main() {
     let glyph_size: u32 = args.get(3).map(|s| s.parse().expect("glyph_size")).unwrap_or(48);
     let px_range: f64 = args.get(4).map(|s| s.parse().expect("px_range")).unwrap_or(4.0);
 
-    let mut builder = libmsdf::FontAtlasBuilder::new(font_data, glyph_size, px_range);
+    let mut builder = libmsdf::FontAtlasBuilder::new(font_data.clone(), glyph_size, px_range);
     builder.add_ascii();
+    // Also bake the glyph ids the SHAPER actually produces for printable ASCII
+    // — for some subset fonts GSUB remaps digits to glyph ids the cmap-based
+    // `add_ascii` misses, which would render blank. Union guarantees coverage.
+    if let Ok(shaper) = libmsdf::TextShaper::new(font_data) {
+        let printable: String = (0x20u8..=0x7e).map(|b| b as char).collect();
+        for g in shaper.shape(&printable).glyphs {
+            builder.add_glyph(g.glyph_id);
+        }
+    }
     let atlas = builder.build().expect("atlas bake failed");
     let bytes = atlas.to_bytes();
     std::fs::write(&out_path, &bytes).expect("write atlas");
