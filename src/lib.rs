@@ -34,7 +34,7 @@ pub use font::{
     AtlasManager, AtlasRegion, FontAtlas, FontAtlasBuilder, GlyphEntry, ROBOTO_REGULAR_ASCII,
     ShapedRun, TextShaper,
 };
-pub use gpu::{GpuSdfRenderer, MsdfCompute};
+pub use gpu::{blur_params, BlurPass, GpuSdfRenderer, MsdfCompute};
 
 /// Human-readable crate status, printed by the root `highbay` bin.
 pub const PHASE_STATUS: &str =

@@ -13,6 +13,7 @@ fn main() {
     let shaders = [
         manifest_dir.join("src/gpu/sdf_render.wgsl"),
         manifest_dir.join("src/gpu/msdf_compute.wgsl"),
+        manifest_dir.join("src/gpu/blur.wgsl"),
     ];
 
     for path in &shaders {

@@ -13,8 +13,10 @@
 //! renderer.render_draw_list(&device, &queue, &view, w, h, 1.0, &list, 0.0);
 //! ```
 
+pub mod blur;
 pub mod compute;
 
+pub use blur::{blur_params, BlurPass};
 pub use compute::MsdfCompute;
 
 use crate::core::{RenderFrame, SdfDrawCmd};
