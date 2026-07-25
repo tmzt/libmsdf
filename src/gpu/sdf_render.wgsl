@@ -277,18 +277,26 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
         var d: f32 = 1e6;
         var shadow_d: f32 = 1e6;
+        // Whether shadow_d (above) is meaningful for this command — box/
+        // slab/circle shapes always cast one; a Bézier stroke (case 10u)
+        // only does when the caller opts in via the high bit of its
+        // param_bank slot (see BEZIER_SHADOW_BIT), since most strokes
+        // (nav-graph arcs, icon glyphs) are not meant to be shadowed.
+        var shadow_on: bool = false;
 
         switch ty {
             case 0u: {
                 let half = cmd.size * 0.5;
                 d = sd_box(p, half);
                 shadow_d = sd_box(p - vec2<f32>(2.0, 3.0), half);
+                shadow_on = true;
             }
             case 1u: {
                 let half = cmd.size * 0.5;
                 let radius = cmd.params.y;
                 d = sd_rounded_box(p, half, radius);
                 shadow_d = sd_rounded_box(p - vec2<f32>(2.0, 3.0), half, radius);
+                shadow_on = true;
             }
             case 11u: { // Per-corner rounded box — radii in the aux param bank
                 let half = cmd.size * 0.5;
@@ -299,11 +307,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 }
                 d = sd_rounded_box_pc(p, half, radii);
                 shadow_d = sd_rounded_box_pc(p - vec2<f32>(2.0, 3.0), half, radii);
+                shadow_on = true;
             }
             case 2u: {
                 let radius = cmd.params.y;
                 d = sd_circle(p, radius);
                 shadow_d = sd_circle(p - vec2<f32>(1.5, 2.0), radius);
+                shadow_on = true;
             }
             case 3u: {
                 let half_len = cmd.size.x * 0.5;
@@ -477,12 +487,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             case 10u: { // Cubic Bézier stroke (containment / flow arcs)
                 // pos = P0, size = P3 (absolute coords); params.y =
                 // thickness; params.w = bitcast param_bank index holding
-                // (C1.xy, C2.xy). Degenerate fallback: straight segment.
+                // (C1.xy, C2.xy) — high bit (BEZIER_SHADOW_BIT) is a
+                // per-instance opt-in flag for the drop shadow below, set
+                // by dashed-border corner arcs so they read uniformly with
+                // the straight dash boxes; unset (the common case: nav-graph
+                // arcs, icon glyphs) leaves those strokes unshadowed as
+                // before. Degenerate fallback: straight segment.
                 let p0 = cmd.pos;
                 let p3 = cmd.size;
                 var c1 = p0;
                 var c2 = p3;
-                let pidx = bitcast<u32>(cmd.params.w);
+                let raw_idx = bitcast<u32>(cmd.params.w);
+                let wants_shadow = (raw_idx & 0x80000000u) != 0u;
+                let pidx = raw_idx & 0x7FFFFFFFu;
                 if pidx < arrayLength(&param_bank) {
                     let ctrl = param_bank[pidx];
                     c1 = ctrl.xy;
@@ -490,21 +507,28 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 }
                 let thickness = max(cmd.params.y, 1.0);
                 // Control-hull bbox reject: the curve lies inside the
-                // convex hull of its control points.
-                let margin = vec2<f32>(thickness);
+                // convex hull of its control points. Padded further when
+                // shadowed so the offset+blurred shadow (reaches ~7px past
+                // the stroke, see the shadow block below) isn't clipped.
+                let margin = vec2<f32>(select(thickness, thickness + 8.0, wants_shadow));
                 let bb_min = min(min(p0, p3), min(c1, c2)) - margin;
                 let bb_max = max(max(p0, p3), max(c1, c2)) + margin;
                 if effective_pixel.x >= bb_min.x && effective_pixel.x <= bb_max.x &&
                    effective_pixel.y >= bb_min.y && effective_pixel.y <= bb_max.y {
                     d = sd_cubic_stroke(effective_pixel, p0, c1, c2, p3, thickness);
+                    if wants_shadow {
+                        shadow_d = sd_cubic_stroke(effective_pixel - vec2<f32>(2.0, 3.0), p0, c1, c2, p3, thickness);
+                        shadow_on = true;
+                    }
                 }
             }
             default: {
             }
         }
 
-        // Shadow (skip for outline/bezier/text)
-        if ty <= 2u || ty == 11u {
+        // Shadow (skip for outline/text, and for bezier strokes that don't
+        // opt in — see shadow_on above)
+        if shadow_on {
             let shadow_alpha = 0.15 * (1.0 - smoothstep(-1.0, 4.0, shadow_d));
             let shadow_color = vec4<f32>(0.0, 0.0, 0.0, shadow_alpha);
             result = blend_over(result, shadow_color);

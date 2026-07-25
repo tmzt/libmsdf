@@ -17,7 +17,15 @@ pub const DRAW_TYPE_MSDF_TEXT: f32 = 8.0;
 pub const DRAW_TYPE_OUTLINE: f32 = 9.0;
 /// Cubic Bézier stroke (nav-graph arcs). pos = P0, size = P3 (absolute),
 /// params: [10, thickness, anim_idx, param_bank index → (C1.xy, C2.xy)].
+/// The param_bank index's high bit is [`BEZIER_SHADOW_BIT`], a per-instance
+/// opt-in for the drop shadow the shader casts under Box/Slab/Circle/SlabPC
+/// (see `sdf_render.wgsl`'s `shadow_on`) — most strokes (nav arcs, icon
+/// glyphs) leave it unset and render unshadowed as before.
 pub const DRAW_TYPE_BEZIER: f32 = 10.0;
+/// High bit of the Bézier param_bank index (params.w, bitcast) that opts a
+/// stroke instance into the shader's drop shadow. Mirrored in
+/// `sdf_render.wgsl`'s case 10u decode — keep the two in sync.
+pub const BEZIER_SHADOW_BIT: u32 = 0x8000_0000;
 /// Rounded box with per-corner radii (e.g. the M3 modal nav drawer: square
 /// against the screen edge, rounded on the trailing side). Like SLAB but the
 /// four corner radii live in the aux param bank as [tl, tr, br, bl] (screen

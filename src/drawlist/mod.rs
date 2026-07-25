@@ -13,9 +13,9 @@
 pub mod stream;
 
 use crate::core::sdf::{
-    DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE, DRAW_TYPE_MSDF_TEXT,
-    DRAW_TYPE_OUTLINE, DRAW_TYPE_RIBBON_BEGIN, DRAW_TYPE_RIBBON_END, DRAW_TYPE_SLAB,
-    DRAW_TYPE_SLAB_PC, SdfDrawCmd,
+    BEZIER_SHADOW_BIT, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE,
+    DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_RIBBON_BEGIN, DRAW_TYPE_RIBBON_END,
+    DRAW_TYPE_SLAB, DRAW_TYPE_SLAB_PC, SdfDrawCmd,
 };
 use crate::font::atlas::FontAtlas;
 use crate::font::shaper::ShapedRun;
@@ -51,11 +51,15 @@ pub enum SdfKind {
     Outline { radius: f32, thickness: f32 },
     /// Cubic Bézier stroke from `position` to `end` (absolute coords) with
     /// control points `c1`, `c2` — nav-graph containment/flow arcs.
+    /// `shadow` opts this instance into the same drop shadow Box/RoundedBox/
+    /// Circle/RoundedBoxPerCorner cast (see [`DrawList::push_bezier_shadowed`]);
+    /// plain [`DrawList::push_bezier`] leaves it off, matching prior behavior.
     BezierStroke {
         c1: [f32; 2],
         c2: [f32; 2],
         end: [f32; 2],
         thickness: f32,
+        shadow: bool,
     },
     /// A shaped MSDF text run referencing `char_count` packed entries at
     /// `char_start` in the list's char buffer. Produced by
@@ -141,7 +145,30 @@ impl DrawList {
         color: [f32; 4],
     ) {
         self.instances.push(SdfInstance {
-            kind: SdfKind::BezierStroke { c1, c2, end: p3, thickness },
+            kind: SdfKind::BezierStroke { c1, c2, end: p3, thickness, shadow: false },
+            position: p0,
+            size: [0.0, 0.0],
+            color,
+            anim: 0,
+        });
+    }
+
+    /// Same as [`DrawList::push_bezier`], but the stroke casts the same
+    /// offset drop shadow as filled shapes (Box/RoundedBox/Circle). For
+    /// strokes that stand in for a shadowed shape's outline — e.g. the
+    /// rounded-corner arcs of a dashed border whose straight runs are drawn
+    /// as shadowed boxes — so the shadow reads continuously across both.
+    pub fn push_bezier_shadowed(
+        &mut self,
+        p0: [f32; 2],
+        c1: [f32; 2],
+        c2: [f32; 2],
+        p3: [f32; 2],
+        thickness: f32,
+        color: [f32; 4],
+    ) {
+        self.instances.push(SdfInstance {
+            kind: SdfKind::BezierStroke { c1, c2, end: p3, thickness, shadow: true },
             position: p0,
             size: [0.0, 0.0],
             color,
@@ -261,13 +288,15 @@ impl DrawList {
                     // quirk inherited from upstream) — anim unsupported.
                     [DRAW_TYPE_OUTLINE, radius, thickness, 0.0],
                 ),
-                SdfKind::BezierStroke { c1, c2, end, thickness } => {
+                SdfKind::BezierStroke { c1, c2, end, thickness, shadow } => {
                     let idx = param_bank.len() as u32;
+                    debug_assert!(idx & BEZIER_SHADOW_BIT == 0, "param_bank overflowed the Bézier shadow flag bit");
                     param_bank.push([c1[0], c1[1], c2[0], c2[1]]);
+                    let slot = if shadow { idx | BEZIER_SHADOW_BIT } else { idx };
                     (
                         inst.position,
                         end,
-                        [DRAW_TYPE_BEZIER, thickness, anim, f32::from_bits(idx)],
+                        [DRAW_TYPE_BEZIER, thickness, anim, f32::from_bits(slot)],
                     )
                 }
                 SdfKind::MsdfText { char_start, char_count, px_range } => {
