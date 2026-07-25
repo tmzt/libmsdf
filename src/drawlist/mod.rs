@@ -28,6 +28,29 @@ pub const X_MARGIN_FRAC: f32 = 0.15;
 /// safety margin baked into atlas cells).
 pub const LINE_BOX_RATIO: f32 = 1.3;
 
+/// The narrowest alpha ramp the MSDF shader will use, in screen pixels.
+/// Below one pixel the ramp stops being antialiasing and starts being a
+/// threshold — see [`crate::FontAtlas::min_antialiased_font_size`].
+pub const MIN_SCREEN_PX_RANGE: f32 = 1.0;
+
+/// The screen-space distance range of an MSDF text run — Chlumsky's
+/// `screenPxRange`, and the single source of truth for the number
+/// `sdf_render.wgsl` (case `8u`) recomputes per fragment.
+///
+/// The atlas field spans `atlas_px_range` **texels** of a `cell_px` glyph
+/// cell; that cell is drawn scaled to the run's line box (`font_size ×`
+/// [`LINE_BOX_RATIO`]), so on screen the same field spans
+/// `atlas_px_range × line_box_h / cell_px` **pixels**. Feeding the atlas-space
+/// range into the alpha ramp instead over-sharpens it by the minification
+/// factor and drops sub-pixel-thin glyph features; clamping at
+/// [`MIN_SCREEN_PX_RANGE`] keeps the ramp usable at extreme minification.
+pub fn screen_px_range(atlas_px_range: f32, cell_px: f32, font_size: f32) -> f32 {
+    if cell_px <= 0.0 {
+        return MIN_SCREEN_PX_RANGE;
+    }
+    (atlas_px_range * font_size * LINE_BOX_RATIO / cell_px).max(MIN_SCREEN_PX_RANGE)
+}
+
 /// The SDF shape an instance renders. Geometry parameters that aren't the
 /// bounding box live here; color/animation are per-instance fields.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -208,6 +231,16 @@ impl DrawList {
     /// standard advances exactly like the extracted mtd1 lowering. Glyphs
     /// missing from the atlas fall back to table index 0.
     ///
+    /// Keep `font_size` at or above the atlas's
+    /// [`FontAtlas::min_antialiased_font_size`] for `px_range`: that is where
+    /// the baked field still covers a full pixel of alpha ramp. Below it
+    /// antialiasing degrades smoothly (a continuously zooming view is expected
+    /// to pass through it — the ZUI's nav graph and hi-fi phone both scale
+    /// their type), so this is guidance, not a hard error. What IS asserted, in
+    /// debug builds, is the point where the field has less than HALF a pixel of
+    /// range left and antialiasing is simply gone: a fixed style down there is
+    /// a bug, not a zoom level.
+    ///
     /// Returns the width of the run in pixels.
     pub fn push_shaped_text(
         &mut self,
@@ -218,6 +251,15 @@ impl DrawList {
         px_range: f32,
         color: [f32; 4],
     ) -> f32 {
+        debug_assert!(
+            font_size + 1e-3 >= 0.5 * atlas.min_antialiased_font_size(px_range),
+            "font size {font_size} leaves this atlas under half a pixel of \
+             distance range (antialiasing floor {:.2}px for {}px cells at \
+             px_range {px_range}) — glyph hairlines are gone at that size; \
+             bake a finer atlas (smaller cells or a wider px_range) instead",
+            atlas.min_antialiased_font_size(px_range),
+            atlas.cell_px().unwrap_or(0.0),
+        );
         let char_start = self.chars.len() as u32;
         let scale = font_size / run.units_per_em as f32;
         let mut total_advance = 0.0f32;

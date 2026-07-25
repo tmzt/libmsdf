@@ -166,6 +166,41 @@ impl FontAtlas {
         }
     }
 
+    /// The (square) glyph cell size in atlas texels, or `None` for an atlas
+    /// with no glyphs. Every cell in an atlas is baked at one size.
+    pub fn cell_px(&self) -> Option<f32> {
+        self.glyphs.first().map(|g| g.atlas_h as f32)
+    }
+
+    /// The smallest font size (logical px) this atlas can still antialias, for
+    /// a bake of `px_range` texels — the **documented minimum** of the MSDF
+    /// text path.
+    ///
+    /// A glyph cell is drawn scaled to the line box (`font_size ×
+    /// LINE_BOX_RATIO`), so the baked field is minified by
+    /// `cell_px / line_box_h` and the usable screen-space distance range is
+    /// `px_range × line_box_h / cell_px` pixels (see
+    /// [`crate::drawlist::screen_px_range`]). Antialiasing needs at least one
+    /// pixel of range, which bottoms out at
+    ///
+    /// ```text
+    /// font_size >= cell_px / (LINE_BOX_RATIO * px_range)
+    /// ```
+    ///
+    /// — 6.15px for the shipped 48px/6.0 Roboto atlas. Below it the shader
+    /// clamps the ramp to one pixel but the field itself has nothing left to
+    /// give, so glyph edges harden and sub-pixel features (a 't' crossbar, an
+    /// 'e' bar) start dropping out. Bake a finer atlas (smaller cells at the
+    /// same `px_range`, or a larger `px_range`) rather than shipping text
+    /// below this size.
+    pub fn min_antialiased_font_size(&self, px_range: f32) -> f32 {
+        let cell = self.cell_px().unwrap_or(0.0);
+        if px_range <= 0.0 || cell <= 0.0 {
+            return 0.0;
+        }
+        cell / (crate::drawlist::LINE_BOX_RATIO * px_range)
+    }
+
     /// Register a glyph entry (dynamic append path). Replaces any existing
     /// entry for the same glyph id and returns the table index.
     pub fn insert_entry(&mut self, entry: GlyphEntry) -> usize {
@@ -331,8 +366,58 @@ impl FontAtlasBuilder {
     }
 
     /// Queue common Latin + digit + punctuation glyphs.
+    ///
+    /// cmap-only: this is the glyph a codepoint maps to *in isolation*. Text is
+    /// not laid out in isolation — see [`FontAtlasBuilder::add_shaped_ascii`].
     pub fn add_ascii(&mut self) {
         self.add_codepoint_range(' ', '~');
+    }
+
+    /// Queue every glyph the SHAPER can emit for printable ASCII, which is a
+    /// superset of [`FontAtlasBuilder::add_ascii`]'s cmap lookups.
+    ///
+    /// Two ways shaping escapes the cmap set:
+    /// * **GSUB substitutions on a single codepoint** — some subset fonts remap
+    ///   digits (`lnum`/`pnum`) to glyphs the cmap never names;
+    /// * **ligatures**, which only appear when the right characters are
+    ///   *adjacent*: Roboto's `liga` folds `fi`/`fl`/`ffi`/`ffl` into single
+    ///   glyphs. Shaping the alphabet one character at a time never produces
+    ///   them, and a glyph with no atlas cell falls back to table index 0 and
+    ///   draws blank — "fifty" renders as "fty", silently.
+    ///
+    /// So this shapes every ordered PAIR of printable ASCII (plus `ff`-led
+    /// triples, for the three-glyph ligatures), interleaved into one string per
+    /// leading character to keep it to ~100 shaping calls.
+    pub fn add_shaped_ascii(&mut self) {
+        let Ok(shaper) = crate::font::shaper::TextShaper::new(self.font_data.clone()) else {
+            return;
+        };
+        let printable: Vec<char> = (0x20u8..=0x7e).map(|b| b as char).collect();
+
+        let mut probes: Vec<String> = Vec::with_capacity(printable.len() + 2);
+        probes.push(printable.iter().collect());
+        // `x y0 x y1 x y2 …` carries every (x, yn) AND (yn, x) pair.
+        for &x in &printable {
+            let mut s = String::with_capacity(printable.len() * 2);
+            for &y in &printable {
+                s.push(x);
+                s.push(y);
+            }
+            probes.push(s);
+        }
+        // `ff y0 ff y1 …` carries every ffi/ffl-shaped triple.
+        let mut triples = String::new();
+        for &y in &printable {
+            triples.push_str("ff");
+            triples.push(y);
+        }
+        probes.push(triples);
+
+        for probe in probes {
+            for g in shaper.shape(&probe).glyphs {
+                self.add_glyph(g.glyph_id);
+            }
+        }
     }
 }
 
@@ -392,8 +477,23 @@ impl FontAtlasBuilder {
 
         if has_outline {
             let proj = projection.unwrap();
+            // CRITICAL (unit of `Framing::range`): msdfgen evaluates distances
+            // in SHAPE (font) space — `Projection::unproject` maps the sample
+            // back before the distance finder runs — and `range` is in those
+            // same shape units; the projection scale never enters. Its output
+            // texel is `distance/range + 0.5`.
+            //
+            // So to make the field span `px_range` ATLAS TEXELS, the range has
+            // to be *expressed* in shape units: `px_range / proj.scale`
+            // (`proj.scale` is atlas px per font unit). Passing `px_range`
+            // straight through — as this did before — asks for a range of 4
+            // FONT UNITS, i.e. 4·scale ≈ 0.07 atlas px at 48px/2048upem: the
+            // field saturates within a fraction of a texel and the atlas
+            // degenerates into a 1-bit mask, which no amount of shader
+            // antialiasing can recover (sub-pixel features simply drop).
+            let range_shape = self.px_range / proj.scale;
             let g_framing = Framing {
-                range: self.px_range,
+                range: range_shape,
                 projection: msdfgen::Projection::new(
                     msdfgen::Vector2::new(proj.scale, proj.scale),
                     msdfgen::Vector2::new(proj.tx, proj.ty),
@@ -407,15 +507,14 @@ impl FontAtlasBuilder {
                 shape.correct_sign(&mut bitmap, &g_framing, FillRule::default());
             }
 
-            let inv_range = 0.5 / self.px_range as f32;
             for y in 0..gs {
                 for x in 0..gs {
                     let pixel = bitmap.pixel(x, y);
                     // msdfgen bitmaps are y-up; atlas cells are top-down.
                     let idx = (((gs - 1 - y) * gs + x) * channels) as usize;
-                    rgb[idx] = msdf_to_u8(pixel.r, inv_range);
-                    rgb[idx + 1] = msdf_to_u8(pixel.g, inv_range);
-                    rgb[idx + 2] = msdf_to_u8(pixel.b, inv_range);
+                    rgb[idx] = msdf_to_u8(pixel.r);
+                    rgb[idx + 1] = msdf_to_u8(pixel.g);
+                    rgb[idx + 2] = msdf_to_u8(pixel.b);
                 }
             }
 
@@ -496,14 +595,18 @@ impl FontAtlasBuilder {
     }
 }
 
-/// Map a raw MSDF signed distance to u8 [0,255].
-/// `inv_range` = 0.5 / px_range.
-/// msdfgen with TrueType: positive = inside. Inside maps > 0.5 (light),
-/// outside < 0.5 (dark) — the standard MSDF convention.
+/// Quantize one msdfgen output channel to u8.
+///
+/// msdfgen already writes `distance / range + 0.5` (see `DistancePixelConversion`
+/// in msdfgen's `core/msdfgen.cpp`), and [`FontAtlasBuilder::bake_cell`] passes a
+/// `range` expressed in shape units such that it equals the atlas-texel
+/// `px_range` — so the value arriving here is ALREADY the unit-normalized field
+/// the shader expects: 0.5 on the outline, 1.0 at `px_range/2` texels inside,
+/// 0.0 at `px_range/2` texels outside. All that is left is the clamp + scale.
+/// msdfgen with TrueType: positive = inside → inside maps > 0.5 (light).
 #[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
-pub(crate) fn msdf_to_u8(value: f32, inv_range: f32) -> u8 {
-    let normalized = (value * inv_range + 0.5).clamp(0.0, 1.0);
-    (normalized * 255.0) as u8
+pub(crate) fn msdf_to_u8(unit_value: f32) -> u8 {
+    (unit_value.clamp(0.0, 1.0) * 255.0) as u8
 }
 
 #[cfg(test)]

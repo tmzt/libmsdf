@@ -17,6 +17,8 @@ use libmsdf::gpu::GpuSdfRenderer;
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 400;
 const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
+/// Distance range the fixture atlas was baked with, in atlas texels.
+const PX_RANGE: f32 = 6.0;
 const GOLDEN_PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/golden_scene.png"
@@ -87,11 +89,14 @@ fn scene(atlas: &FontAtlas) -> DrawList {
         2.0,
         [0.60, 0.85, 0.70, 1.0],
     );
-    // MSDF text from the baked fixture atlas.
+    // MSDF text from the baked fixture atlas. PX_RANGE must match the bake or
+    // the shader's screen-space alpha ramp is scaled wrong.
     let run = shaper.shape("Highbay MSDF");
-    list.push_shaped_text(&run, atlas, [80.0, 80.0], 42.0, 4.0, [0.93, 0.93, 0.95, 1.0]);
-    let small = shaper.shape("wgpu SDF pipeline: box circle line outline bezier");
-    list.push_shaped_text(&small, atlas, [80.0, 132.0], 17.0, 4.0, [0.75, 0.76, 0.80, 1.0]);
+    list.push_shaped_text(&run, atlas, [80.0, 80.0], 42.0, PX_RANGE, [0.93, 0.93, 0.95, 1.0]);
+    // Small text with hairlines (t/f crossbars, i dots) — the size band where a
+    // wrong distance range eats sub-pixel strokes.
+    let small = shaper.shape("tftlt: fifty little SDF outlines, effortlessly");
+    list.push_shaped_text(&small, atlas, [80.0, 132.0], 12.0, PX_RANGE, [0.75, 0.76, 0.80, 1.0]);
 
     list
 }

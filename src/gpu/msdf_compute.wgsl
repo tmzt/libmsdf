@@ -150,13 +150,14 @@ fn edge_winding(ei: u32, p: vec2<f32>) -> i32 {
 
 fn to_u8(sd_shape: f32) -> u32 {
     // Mirror the CPU msdfgen bake exactly. msdfgen measures distance in SHAPE
-    // (font) units and stores distance/range — Framing.range is a bare f64, so
-    // msdfgen treats it as Range::Unit (shape units), and the projection scale
-    // never enters the stored value. The CPU bake then maps that stored value
-    // through msdf_to_u8: value * 0.5/px_range + 0.5. range == px_range ==
-    // params.range_px, so the two divisions collapse to 0.5/range_px².
-    let stored = sd_shape / params.range_px;
-    let normalized = clamp(stored * 0.5 / params.range_px + 0.5, 0.0, 1.0);
+    // (font) units and stores distance/range, with `range` in those same shape
+    // units and the projection scale never entering. font::atlas::bake_cell
+    // therefore passes range = px_range / scale, which makes the stored value
+    //     sd_shape / (px_range/scale) + 0.5 = sd_shape*scale/px_range + 0.5,
+    // i.e. the field spans px_range ATLAS TEXELS: 0.5 on the outline, 0.0/1.0
+    // at ∓px_range/2 texels. sd_shape*scale is just the distance in cell px.
+    let sd_px = sd_shape * params.scale;
+    let normalized = clamp(sd_px / params.range_px + 0.5, 0.0, 1.0);
     return u32(normalized * 255.0);
 }
 

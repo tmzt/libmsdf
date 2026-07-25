@@ -6,8 +6,12 @@
 //! ```text
 //! cargo run -p libmsdf --example bake_atlas -- <font.ttf> <out.atlas> [glyph_size] [px_range]
 //! ```
-//! With no arguments, bakes the bundled Roboto ASCII subset at 48px/4.0
-//! to `roboto-ascii-48.atlas` in the current directory.
+//! With no arguments, bakes the bundled Roboto ASCII subset at 48px/6.0
+//! to `roboto-ascii-48.atlas` in the current directory — the shipped
+//! `highbay/src/assets/roboto-ascii-48.atlas`. `px_range` must be large enough
+//! that the smallest style still gets a pixel of distance range: see
+//! [`libmsdf::FontAtlas::min_antialiased_font_size`] (48px cells at 6.0 →
+//! 6.15px, covering the ZUI's 8px zoomed-out graph labels).
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
@@ -24,19 +28,14 @@ fn main() {
         )
     };
     let glyph_size: u32 = args.get(3).map(|s| s.parse().expect("glyph_size")).unwrap_or(48);
-    let px_range: f64 = args.get(4).map(|s| s.parse().expect("px_range")).unwrap_or(4.0);
+    let px_range: f64 = args.get(4).map(|s| s.parse().expect("px_range")).unwrap_or(6.0);
 
-    let mut builder = libmsdf::FontAtlasBuilder::new(font_data.clone(), glyph_size, px_range);
+    let mut builder = libmsdf::FontAtlasBuilder::new(font_data, glyph_size, px_range);
     builder.add_ascii();
-    // Also bake the glyph ids the SHAPER actually produces for printable ASCII
-    // — for some subset fonts GSUB remaps digits to glyph ids the cmap-based
-    // `add_ascii` misses, which would render blank. Union guarantees coverage.
-    if let Ok(shaper) = libmsdf::TextShaper::new(font_data) {
-        let printable: String = (0x20u8..=0x7e).map(|b| b as char).collect();
-        for g in shaper.shape(&printable).glyphs {
-            builder.add_glyph(g.glyph_id);
-        }
-    }
+    // Union with everything the SHAPER can emit for printable ASCII — GSUB
+    // digit remaps and, crucially, the fi/fl/ffi/ffl ligatures, which only
+    // appear for ADJACENT characters and would otherwise draw blank.
+    builder.add_shaped_ascii();
     let atlas = builder.build().expect("atlas bake failed");
     let bytes = atlas.to_bytes();
     std::fs::write(&out_path, &bytes).expect("write atlas");

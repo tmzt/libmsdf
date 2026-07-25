@@ -385,7 +385,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 }
             }
             case 8u: { // MSDF Text — uniform em-square projection
-                let px_range = max(cmd.params.y, 2.0);
+                // The distance range the ATLAS was baked with, in atlas
+                // texels. It is NOT the screen-space range: the glyph cell is
+                // scaled to the line box, so the field is minified with it
+                // (see `screen_px_range` below).
+                let atlas_px_range = max(cmd.params.y, 1.0);
                 let x_margin_frac = cmd.params.z;
                 let packed = bitcast<u32>(cmd.params.w);
                 let char_offset = packed >> 16u;
@@ -436,6 +440,21 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                     // Derived EM size on screen:
                     let font_size = px_per_em_atlas / scale;
 
+                    // Screen-space distance range (Chlumsky's `screenPxRange`).
+                    // The baked field spans `atlas_px_range` TEXELS; the cell is
+                    // minified by `scale` texels per screen pixel, so on screen
+                    // the field spans `atlas_px_range / scale` PIXELS. Feeding
+                    // the atlas-space range straight into the alpha ramp (as
+                    // this did before) makes the ramp `scale`× too steep — at
+                    // 12px text on 48px cells that is 3.08×, a near-binary
+                    // threshold that drops any feature thinner than one pixel
+                    // whenever it falls between two pixel centres (Roboto's 't'
+                    // crossbar is 0.069em ≈ 0.83px at 12px). Clamping at 1.0
+                    // keeps the ramp at least a pixel wide under extreme
+                    // minification, which is also where the baked range runs
+                    // out — see FontAtlas::min_antialiased_font_size.
+                    let screen_px_range = max(atlas_px_range / scale, 1.0);
+
                     let advance_x_norm = bitcast<f32>(g0.w);
                     let advance_px = advance_x_norm * font_size + delta_px;
 
@@ -465,8 +484,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                         let sample = textureSampleLevel(msdf_atlas, msdf_sampler, vec2<f32>(u, v), 0.0);
                         let sd = msdf_median(sample.r, sample.g, sample.b);
 
-                        // Standard: sd > 0.5 is inside
-                        let alpha = clamp(px_range * (sd - 0.5) + 0.5, 0.0, 1.0);
+                        // Standard: sd > 0.5 is inside. (sd - 0.5) *
+                        // screen_px_range is the signed distance to the
+                        // outline in SCREEN pixels, so + 0.5 is the pixel's
+                        // coverage — proper analytic antialiasing.
+                        let alpha = clamp(screen_px_range * (sd - 0.5) + 0.5, 0.0, 1.0);
 
                         if alpha > 0.01 {
                             let glyph_color = vec4<f32>(cmd.color.rgb, cmd.color.a * alpha);
