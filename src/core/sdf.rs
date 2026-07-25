@@ -18,6 +18,11 @@ pub const DRAW_TYPE_OUTLINE: f32 = 9.0;
 /// Cubic Bézier stroke (nav-graph arcs). pos = P0, size = P3 (absolute),
 /// params: [10, thickness, anim_idx, param_bank index → (C1.xy, C2.xy)].
 pub const DRAW_TYPE_BEZIER: f32 = 10.0;
+/// Rounded box with per-corner radii (e.g. the M3 modal nav drawer: square
+/// against the screen edge, rounded on the trailing side). Like SLAB but the
+/// four corner radii live in the aux param bank as [tl, tr, br, bl] (screen
+/// space, +x right / +y down). params: [11, 0, anim_idx, param_bank index].
+pub const DRAW_TYPE_SLAB_PC: f32 = 11.0;
 
 /// Maximum draw commands per frame.
 pub const MAX_DRAW_CMDS: usize = 4096;
@@ -128,6 +133,22 @@ pub fn sd_box(px: f32, py: f32, half_w: f32, half_h: f32) -> f32 {
     sd_rounded_box(px, py, half_w, half_h, 0.0)
 }
 
+/// Signed distance to a rounded box with independent per-corner radii.
+/// `radii` = [top-left, top-right, bottom-right, bottom-left] in screen space
+/// (+x right, +y down). Selects the radius for the quadrant `(px, py)` lands in
+/// then evaluates the standard rounded-box distance — the exact per-corner
+/// isometry with [`sd_rounded_box`] (matches the `sd_rounded_box_pc` WGSL fn).
+pub fn sd_rounded_box_per_corner(px: f32, py: f32, half_w: f32, half_h: f32, radii: [f32; 4]) -> f32 {
+    let r = if px > 0.0 {
+        if py > 0.0 { radii[2] } else { radii[1] } // right side: br / tr
+    } else if py > 0.0 {
+        radii[3] // bl
+    } else {
+        radii[0] // tl
+    };
+    sd_rounded_box(px, py, half_w, half_h, r)
+}
+
 /// Signed distance to a circle centered at origin.
 pub fn sd_circle(px: f32, py: f32, radius: f32) -> f32 {
     (px * px + py * py).sqrt() - radius
@@ -235,6 +256,12 @@ pub fn sdf_eval_with_params(
             };
             sd_cubic_stroke(px, py, p0, c1, c2, p3, cmd.radius().max(1.0))
         }
+        11 => {
+            // Per-corner slab: param bank holds [tl, tr, br, bl].
+            let idx = cmd.params[3].to_bits() as usize;
+            let radii = param_bank.get(idx).copied().unwrap_or([cmd.radius(); 4]);
+            sd_rounded_box_per_corner(local_x, local_y, hw, hh, radii)
+        }
         _ => f32::MAX,
     };
 
@@ -329,6 +356,35 @@ mod tests {
         // Point at corner, just outside the rounding
         let d = sd_rounded_box(9.0, 9.0, 10.0, 10.0, 2.0);
         assert!(d < 0.0); // inside the rounded box
+    }
+
+    #[test]
+    fn sd_rounded_box_per_corner_squares_and_rounds() {
+        // Square on the leading (left) corners, rounded on the trailing (right)
+        // corners — the M3 modal drawer shape. radii = [tl, tr, br, bl].
+        let radii = [0.0, 8.0, 8.0, 0.0];
+        // Top-left corner (square) contains its near-corner point…
+        assert!(sd_rounded_box_per_corner(-9.0, -9.0, 10.0, 10.0, radii) < 0.0);
+        assert!(sd_rounded_box_per_corner(-9.0, 9.0, 10.0, 10.0, radii) < 0.0);
+        // …while the top-right/bottom-right corners are cut away by the radius.
+        assert!(sd_rounded_box_per_corner(9.0, -9.0, 10.0, 10.0, radii) > 0.0);
+        assert!(sd_rounded_box_per_corner(9.0, 9.0, 10.0, 10.0, radii) > 0.0);
+    }
+
+    #[test]
+    fn sdf_eval_per_corner_slab_reads_param_bank() {
+        // 20×20 box centered at (10,10); square left, rounded right.
+        let cmd = SdfDrawCmd {
+            pos: [0.0, 0.0],
+            size: [20.0, 20.0],
+            color: [1.0; 4],
+            params: [DRAW_TYPE_SLAB_PC, 0.0, 0.0, f32::from_bits(0)],
+        };
+        let bank = [[0.0f32, 8.0, 8.0, 0.0]]; // [tl, tr, br, bl]
+        // Near the top-left corner (square) → inside.
+        assert!(sdf_eval_with_params(&cmd, 1.0, 1.0, &bank).0 < 0.0);
+        // Near the top-right corner (rounded) → outside.
+        assert!(sdf_eval_with_params(&cmd, 19.0, 1.0, &bank).0 > 0.0);
     }
 
     #[test]

@@ -14,7 +14,8 @@ pub mod stream;
 
 use crate::core::sdf::{
     DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE, DRAW_TYPE_MSDF_TEXT,
-    DRAW_TYPE_OUTLINE, DRAW_TYPE_RIBBON_BEGIN, DRAW_TYPE_RIBBON_END, DRAW_TYPE_SLAB, SdfDrawCmd,
+    DRAW_TYPE_OUTLINE, DRAW_TYPE_RIBBON_BEGIN, DRAW_TYPE_RIBBON_END, DRAW_TYPE_SLAB,
+    DRAW_TYPE_SLAB_PC, SdfDrawCmd,
 };
 use crate::font::atlas::FontAtlas;
 use crate::font::shaper::ShapedRun;
@@ -35,6 +36,12 @@ pub enum SdfKind {
     Box,
     /// Filled rounded box with corner `radius`.
     RoundedBox { radius: f32 },
+    /// Filled rounded box with independent per-corner radii, `[top-left,
+    /// top-right, bottom-right, bottom-left]` in screen space (+x right, +y
+    /// down). The M3 modal navigation drawer uses this: square against the
+    /// screen edge, rounded on the exposed trailing side. Lowers through the
+    /// aux param bank like [`SdfKind::BezierStroke`].
+    RoundedBoxPerCorner { radii: [f32; 4] },
     /// Filled circle inscribed in `size` (radius = min(w,h)/2).
     Circle,
     /// Horizontal line across the rect: length = size.x, thickness = size.y.
@@ -233,6 +240,15 @@ impl DrawList {
                 SdfKind::RoundedBox { radius } => {
                     (inst.position, inst.size, [DRAW_TYPE_SLAB, radius, anim, 0.0])
                 }
+                SdfKind::RoundedBoxPerCorner { radii } => {
+                    let idx = param_bank.len() as u32;
+                    param_bank.push(radii);
+                    (
+                        inst.position,
+                        inst.size,
+                        [DRAW_TYPE_SLAB_PC, 0.0, anim, f32::from_bits(idx)],
+                    )
+                }
                 SdfKind::Circle => {
                     let radius = inst.size[0].min(inst.size[1]) * 0.5;
                     (inst.position, inst.size, [DRAW_TYPE_CIRCLE, radius, anim, 0.0])
@@ -328,6 +344,24 @@ mod tests {
         assert_eq!(frame.param_bank.len(), 1);
         assert_eq!(frame.param_bank[0], [10.0, 0.0, 20.0, 10.0]);
         assert_eq!(frame.draws[2].size, [30.0, 10.0], "size slot = P3");
+    }
+
+    #[test]
+    fn per_corner_slab_lowers_through_param_bank() {
+        let mut list = DrawList::new();
+        list.push(SdfInstance {
+            kind: SdfKind::RoundedBoxPerCorner { radii: [0.0, 16.0, 16.0, 0.0] },
+            position: [4.0, 8.0],
+            size: [200.0, 400.0],
+            color: [0.5; 4],
+            anim: 3,
+        });
+        let frame = list.lower();
+        assert_eq!(frame.draws[0].params[0], DRAW_TYPE_SLAB_PC);
+        assert_eq!(frame.draws[0].params[2], 3.0, "anim index carried");
+        // params.w bitcasts to the aux-bank index holding the four radii.
+        let idx = frame.draws[0].params[3].to_bits() as usize;
+        assert_eq!(frame.param_bank[idx], [0.0, 16.0, 16.0, 0.0]);
     }
 
     #[test]

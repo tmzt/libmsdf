@@ -112,6 +112,20 @@ fn sd_rounded_box(p: vec2<f32>, half_size: vec2<f32>, radius: f32) -> f32 {
     return sd_box(p, half_size - vec2<f32>(r)) - r;
 }
 
+// Rounded box with independent per-corner radii. `radii` = (tl, tr, br, bl) in
+// screen space (+x right, +y down): pick the quadrant's radius, then evaluate
+// the standard rounded-box distance (mirrors core::sdf::sd_rounded_box_per_corner).
+fn sd_rounded_box_pc(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) -> f32 {
+    var r: f32;
+    if p.x > 0.0 {
+        r = select(radii.y, radii.z, p.y > 0.0); // right: tr / br
+    } else {
+        r = select(radii.x, radii.w, p.y > 0.0); // left: tl / bl
+    }
+    let rr = min(r, min(half_size.x, half_size.y));
+    return sd_box(p, half_size - vec2<f32>(rr)) - rr;
+}
+
 fn sd_circle(p: vec2<f32>, radius: f32) -> f32 {
     return length(p) - radius;
 }
@@ -275,6 +289,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 let radius = cmd.params.y;
                 d = sd_rounded_box(p, half, radius);
                 shadow_d = sd_rounded_box(p - vec2<f32>(2.0, 3.0), half, radius);
+            }
+            case 11u: { // Per-corner rounded box — radii in the aux param bank
+                let half = cmd.size * 0.5;
+                let pidx = bitcast<u32>(cmd.params.w);
+                var radii = vec4<f32>(0.0);
+                if pidx < arrayLength(&param_bank) {
+                    radii = param_bank[pidx];
+                }
+                d = sd_rounded_box_pc(p, half, radii);
+                shadow_d = sd_rounded_box_pc(p - vec2<f32>(2.0, 3.0), half, radii);
             }
             case 2u: {
                 let radius = cmd.params.y;
@@ -480,7 +504,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
 
         // Shadow (skip for outline/bezier/text)
-        if ty <= 2u {
+        if ty <= 2u || ty == 11u {
             let shadow_alpha = 0.15 * (1.0 - smoothstep(-1.0, 4.0, shadow_d));
             let shadow_color = vec4<f32>(0.0, 0.0, 0.0, shadow_alpha);
             result = blend_over(result, shadow_color);
