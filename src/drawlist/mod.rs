@@ -117,6 +117,153 @@ pub struct SdfInstance {
     pub anim: u32,
 }
 
+/// A rotation to apply to every instance pushed while [`DrawList`]'s
+/// transform stack is non-empty (see [`DrawList::push_rotate`]).
+///
+/// Tim, 2026-07-28 (relayed from the coordinator): **do not run trig for
+/// right angles.** `cos(PI/2)` in `f32` is not exactly `0.0` — it is about
+/// `-4.37e-8` — so building a rotation matrix from `sin`/`cos` at a
+/// multiple of 90 degrees lands the geometry a fraction of a pixel off the
+/// pixel grid: text resamples soft instead of crisp, edges that should be
+/// exactly vertical/horizontal pick up a sub-pixel slope, and the AABB
+/// [`rotate_rect`] derives for hit-testing no longer matches the drawn rect
+/// exactly. [`SdfRotate::Quarter`] sidesteps this entirely: its matrix
+/// entries are chosen by an integer `match`, never by `sin`/`cos`, so they
+/// are exactly `0.0`/`1.0`/`-1.0` — a rotated axis-aligned rect is still an
+/// EXACT axis-aligned rect. Taking the turn count as its own variant
+/// (rather than snapping a radians value with an epsilon check) makes an
+/// exact right angle the only thing `Quarter` can express — there is no
+/// "nearly 90 degrees" value to accidentally construct.
+///
+/// [`SdfRotate::Radians`] is the escape hatch for genuinely arbitrary
+/// angles; it is never exact and callers needing a right angle should use
+/// `Quarter` instead. Today's only caller — the Add-form tabs — are exactly
+/// 90 degrees, so they use `Quarter`; `Radians` exists to be correct, not to
+/// be fast, and has no caller yet.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum SdfRotate {
+    /// An exact multiple of 90 degrees, `(dx, dy) -> (-dy, dx)` per turn
+    /// (screen space, +y down — this reads as clockwise on screen).
+    /// Normalized mod 4, so `Quarter(-1) == Quarter(3)`.
+    Quarter(i32),
+    /// An arbitrary angle in radians. General trig matrix — not exact even
+    /// when the value happens to be a right angle; use `Quarter` for those.
+    Radians(f32),
+}
+
+impl SdfRotate {
+    /// The forward 2x2 rotation matrix as `[m00, m01, m10, m11]`
+    /// (row-major: `x' = m00*x + m01*y`, `y' = m10*x + m11*y`). Exact
+    /// (0.0/1.0/-1.0 only, no float error) for [`SdfRotate::Quarter`].
+    fn matrix2(self) -> [f32; 4] {
+        match self {
+            SdfRotate::Quarter(q) => match q.rem_euclid(4) {
+                0 => [1.0, 0.0, 0.0, 1.0],
+                1 => [0.0, -1.0, 1.0, 0.0],
+                2 => [-1.0, 0.0, 0.0, -1.0],
+                3 => [0.0, 1.0, -1.0, 0.0],
+                _ => unreachable!("rem_euclid(4) is always 0..4"),
+            },
+            SdfRotate::Radians(theta) => {
+                let (s, c) = theta.sin_cos();
+                [c, -s, s, c]
+            }
+        }
+    }
+}
+
+/// A composed forward affine transform: `x' = a*x + b*y + tx`, `y' = c*x +
+/// d*y + ty`. Always a rotation (the 2x2 [a,b,c,d] part is orthogonal) about
+/// some absolute pivot baked into `tx`/`ty` — never a general affine (no
+/// scale/shear), which is what lets both the shader and [`rotate_rect`]
+/// invert it by transposing the 2x2 part instead of a general matrix
+/// inverse.
+#[derive(Copy, Clone, Debug, PartialEq)]
+struct RotationTransform {
+    a: f32,
+    b: f32,
+    c: f32,
+    d: f32,
+    tx: f32,
+    ty: f32,
+}
+
+impl RotationTransform {
+    const IDENTITY: Self = Self { a: 1.0, b: 0.0, c: 0.0, d: 1.0, tx: 0.0, ty: 0.0 };
+
+    /// The transform for `rotation` about the absolute pivot `pivot`:
+    /// `forward(v) = M * (v - pivot) + pivot`, expanded to affine form.
+    /// Exact when `rotation` is [`SdfRotate::Quarter`] (`m00..m11` are
+    /// exactly 0/1/-1, so every product/sum here is an exact float op).
+    fn about(rotation: SdfRotate, pivot: [f32; 2]) -> Self {
+        let [m00, m01, m10, m11] = rotation.matrix2();
+        let (px, py) = (pivot[0], pivot[1]);
+        Self {
+            a: m00,
+            b: m01,
+            c: m10,
+            d: m11,
+            tx: px - m00 * px - m01 * py,
+            ty: py - m10 * px - m11 * py,
+        }
+    }
+
+    /// Compose so the result applies `inner` FIRST, then `outer` —
+    /// `glPushMatrix`/`glRotate` semantics (`M' = M * R`; a vertex
+    /// transforms via `M * (R * v)`). Nesting `push_rotate` while one is
+    /// already active passes the previous top as `outer` and the
+    /// newly-requested rotation as `inner`. Exact when both inputs are
+    /// exact (composing two `Quarter` transforms stays exact: products and
+    /// sums of `{-1,0,1}` introduce no rounding).
+    fn compose(outer: &Self, inner: &Self) -> Self {
+        Self {
+            a: outer.a * inner.a + outer.b * inner.c,
+            b: outer.a * inner.b + outer.b * inner.d,
+            c: outer.c * inner.a + outer.d * inner.c,
+            d: outer.c * inner.b + outer.d * inner.d,
+            tx: outer.a * inner.tx + outer.b * inner.ty + outer.tx,
+            ty: outer.c * inner.tx + outer.d * inner.ty + outer.ty,
+        }
+    }
+
+    /// Apply the forward transform to a point.
+    fn apply(&self, v: [f32; 2]) -> [f32; 2] {
+        [self.a * v[0] + self.b * v[1] + self.tx, self.c * v[0] + self.d * v[1] + self.ty]
+    }
+}
+
+/// Rotate the axis-aligned rect `(pos, size)` by `rotation` about the
+/// absolute `pivot`, returning the axis-aligned bounding box of the result
+/// as `(pos, size)`. **Hit-testing must call this** rather than
+/// re-deriving the matrix independently, so a click is tested against
+/// exactly what got drawn ([`DrawList::push_rotate`]'s doc has the full
+/// rationale).
+///
+/// For [`SdfRotate::Quarter`] this AABB is not an approximation: rotating
+/// an axis-aligned rect by an exact multiple of 90 degrees yields another
+/// axis-aligned rect (only w/h can swap), so the bounding box of its four
+/// rotated corners **is** the rotated rect, bit-for-bit. For
+/// [`SdfRotate::Radians`] this is the usual looser AABB bound.
+pub fn rotate_rect(pos: [f32; 2], size: [f32; 2], rotation: SdfRotate, pivot: [f32; 2]) -> ([f32; 2], [f32; 2]) {
+    let t = RotationTransform::about(rotation, pivot);
+    let corners = [
+        [pos[0], pos[1]],
+        [pos[0] + size[0], pos[1]],
+        [pos[0], pos[1] + size[1]],
+        [pos[0] + size[0], pos[1] + size[1]],
+    ];
+    let mut min = [f32::MAX, f32::MAX];
+    let mut max = [f32::MIN, f32::MIN];
+    for c in corners {
+        let p = t.apply(c);
+        min[0] = min[0].min(p[0]);
+        min[1] = min[1].min(p[1]);
+        max[0] = max[0].max(p[0]);
+        max[1] = max[1].max(p[1]);
+    }
+    (min, [max[0] - min[0], max[1] - min[1]])
+}
+
 /// GPU-ready lowered frame: what [`DrawList::lower`] produces and
 /// `GpuSdfRenderer` consumes.
 #[derive(Clone, Debug, Default)]
@@ -131,6 +278,33 @@ pub struct SdfFrame {
 pub struct DrawList {
     pub instances: Vec<SdfInstance>,
     chars: Vec<u32>,
+    /// The `SdfRotate` transform bank, in push order: an entry's 1-based
+    /// index is what `instance_transforms` records for the instances pushed
+    /// under it. Baked into the lowered [`SdfFrame`]'s `param_bank` (two
+    /// consecutive vec4 slots per entry — see [`DrawList::lower`]).
+    transforms: Vec<RotationTransform>,
+    /// The active (possibly nested) rotation stack, holding 1-based
+    /// `transforms` ids: [`DrawList::push_rotate`] composes a new entry onto
+    /// `active_transform.last()` (or identity) and pushes its id here;
+    /// [`DrawList::push_rotate_end`] pops it. Mirrors `push_clip`/
+    /// `push_clip_end`'s API shape, but — per the "every instance carries a
+    /// transform" contract — this stack tags instances directly rather than
+    /// emitting Begin/End control commands into the stream the way clip
+    /// does, since clip's "current region" is a single active scissor rect
+    /// the shader can track sequentially, while a rotation must travel with
+    /// the exact instances it applies to.
+    active_transform: Vec<u32>,
+    /// Parallel to `instances` (same length, same index): the 1-based
+    /// `transforms` id each instance was tagged with at push time (`0` =
+    /// none). Kept OUT of [`SdfInstance`] itself — deliberately — rather
+    /// than as a field on it: dozens of call sites across `highbay_ui`
+    /// construct `SdfInstance` literals directly (then hand them to
+    /// [`DrawList::push`], the one and only place instances enter the
+    /// list), and a struct-literal field every one of those has to name
+    /// (even as an inert `0`) is exactly the kind of churn a side channel
+    /// avoids: `push` is already the sole intercept point, so it can tag
+    /// here without the instance's own shape ever needing to change.
+    instance_transforms: Vec<u32>,
 }
 
 impl DrawList {
@@ -141,6 +315,9 @@ impl DrawList {
     pub fn clear(&mut self) {
         self.instances.clear();
         self.chars.clear();
+        self.transforms.clear();
+        self.active_transform.clear();
+        self.instance_transforms.clear();
     }
 
     pub fn is_empty(&self) -> bool {
@@ -152,9 +329,45 @@ impl DrawList {
         &self.chars
     }
 
-    /// Push a shape instance.
+    /// The 1-based id of the currently active [`DrawList::push_rotate`]
+    /// scope (`0` = none) — what every instance pushed right now will be
+    /// tagged with.
+    fn active_transform(&self) -> u32 {
+        self.active_transform.last().copied().unwrap_or(0)
+    }
+
+    /// Push a shape instance, tagging it (in the side-channel
+    /// `instance_transforms`, not on `instance` itself) with whatever
+    /// [`DrawList::push_rotate`] scope is currently active (`0` if none) —
+    /// the single point every other push method routes through, so no
+    /// caller has to know about the rotate stack.
     pub fn push(&mut self, instance: SdfInstance) {
+        self.instance_transforms.push(self.active_transform());
         self.instances.push(instance);
+    }
+
+    /// Begin a rotation scope: every instance pushed after this — until the
+    /// matching [`DrawList::push_rotate_end`] — is rotated by `rotation`
+    /// about the absolute `pivot`. Nestable, exactly like
+    /// `glPushMatrix`/`glRotate`/`glPopMatrix`: a rotation pushed while
+    /// another is already active composes ONTO it (applied to the instance
+    /// first, with the enclosing rotation applied after), never replaces
+    /// it. Mirrors [`DrawList::push_clip`]'s API shape.
+    pub fn push_rotate(&mut self, rotation: SdfRotate, pivot: [f32; 2]) {
+        let outer = self
+            .active_transform
+            .last()
+            .map(|&id| self.transforms[(id - 1) as usize])
+            .unwrap_or(RotationTransform::IDENTITY);
+        let inner = RotationTransform::about(rotation, pivot);
+        self.transforms.push(RotationTransform::compose(&outer, &inner));
+        self.active_transform.push(self.transforms.len() as u32);
+    }
+
+    /// End the current [`DrawList::push_rotate`] scope, reverting to
+    /// whatever scope (if any) enclosed it.
+    pub fn push_rotate_end(&mut self) {
+        self.active_transform.pop();
     }
 
     /// Convenience: push a cubic Bézier stroke from `p0` to `p3`.
@@ -167,7 +380,7 @@ impl DrawList {
         thickness: f32,
         color: [f32; 4],
     ) {
-        self.instances.push(SdfInstance {
+        self.push(SdfInstance {
             kind: SdfKind::BezierStroke { c1, c2, end: p3, thickness, shadow: false },
             position: p0,
             size: [0.0, 0.0],
@@ -190,7 +403,7 @@ impl DrawList {
         thickness: f32,
         color: [f32; 4],
     ) {
-        self.instances.push(SdfInstance {
+        self.push(SdfInstance {
             kind: SdfKind::BezierStroke { c1, c2, end: p3, thickness, shadow: true },
             position: p0,
             size: [0.0, 0.0],
@@ -203,7 +416,7 @@ impl DrawList {
     /// after this (until [`DrawList::push_clip_end`]) are clipped to the rect.
     /// See [`SdfKind::ClipBegin`].
     pub fn push_clip(&mut self, pos: [f32; 2], size: [f32; 2]) {
-        self.instances.push(SdfInstance {
+        self.push(SdfInstance {
             kind: SdfKind::ClipBegin,
             position: pos,
             size,
@@ -214,7 +427,7 @@ impl DrawList {
 
     /// End the current [`DrawList::push_clip`] region.
     pub fn push_clip_end(&mut self) {
-        self.instances.push(SdfInstance {
+        self.push(SdfInstance {
             kind: SdfKind::ClipEnd,
             position: [0.0, 0.0],
             size: [0.0, 0.0],
@@ -284,7 +497,7 @@ impl DrawList {
         let left_margin = X_MARGIN_FRAC * line_box_h;
         let box_w = total_advance + 2.0 * left_margin;
 
-        self.instances.push(SdfInstance {
+        self.push(SdfInstance {
             kind: SdfKind::MsdfText { char_start, char_count: count, px_range },
             // The shader recovers the pen origin via pos.x + margin.
             position: [pos[0] - left_margin, pos[1]],
@@ -297,12 +510,38 @@ impl DrawList {
     }
 
     /// Lower to the GPU wire format: one `SdfDrawCmd` per instance, plus
-    /// the packed char buffer and the aux param bank (Bézier controls).
+    /// the packed char buffer and the aux param bank (Bézier controls, and
+    /// the `SdfRotate` transform bank — see below).
     pub fn lower(&self) -> SdfFrame {
+        debug_assert!(
+            self.active_transform.is_empty(),
+            "DrawList::lower called with {} unclosed push_rotate scope(s) — every \
+             push_rotate needs a matching push_rotate_end, or the leaked transform \
+             silently keeps applying to every instance drawn afterward this frame",
+            self.active_transform.len(),
+        );
+
         let mut draws = Vec::with_capacity(self.instances.len());
         let mut param_bank: Vec<[f32; 4]> = Vec::new();
 
-        for inst in &self.instances {
+        // Bake the SdfRotate transform bank FIRST, at fixed slots [0..2N),
+        // so an instance's 1-based `transform` id maps directly to
+        // `param_bank[(id-1)*2]`/`[(id-1)*2+1]` with no extra bookkeeping —
+        // every per-instance param_bank push below (Bézier controls,
+        // per-corner radii) is appended after and never disturbs this
+        // range.
+        for t in &self.transforms {
+            param_bank.push([t.a, t.b, t.c, t.d]);
+            param_bank.push([t.tx, t.ty, 0.0, 0.0]);
+        }
+
+        debug_assert_eq!(
+            self.instances.len(),
+            self.instance_transforms.len(),
+            "instances and instance_transforms are always pushed together in DrawList::push"
+        );
+
+        for (inst, &transform) in self.instances.iter().zip(&self.instance_transforms) {
             let anim = inst.anim as f32;
             let (pos, size, params) = match inst.kind {
                 SdfKind::Box => (inst.position, inst.size, [DRAW_TYPE_BOX, 0.0, anim, 0.0]),
@@ -359,7 +598,8 @@ impl DrawList {
                     (inst.position, inst.size, [DRAW_TYPE_RIBBON_END, 0.0, 0.0, 0.0])
                 }
             };
-            draws.push(SdfDrawCmd { pos, size, color: inst.color, params });
+            let xform = [transform as f32, 0.0, 0.0, 0.0];
+            draws.push(SdfDrawCmd { pos, size, color: inst.color, params, xform });
         }
 
         SdfFrame {
@@ -511,5 +751,139 @@ mod tests {
         for c in frame.char_buffer {
             assert!(((c >> 16) as usize) < atlas.glyphs.len());
         }
+    }
+
+    // ── SdfRotate ────────────────────────────────────────────────────────
+
+    #[test]
+    fn quarter_turn_matrices_are_bit_exact_integers_never_trig() {
+        // The whole point: NO sin/cos call anywhere on this path, so these
+        // must be the LITERAL 0.0/1.0/-1.0 values, not "very close to".
+        assert_eq!(SdfRotate::Quarter(0).matrix2(), [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(SdfRotate::Quarter(1).matrix2(), [0.0, -1.0, 1.0, 0.0]);
+        assert_eq!(SdfRotate::Quarter(2).matrix2(), [-1.0, 0.0, 0.0, -1.0]);
+        assert_eq!(SdfRotate::Quarter(3).matrix2(), [0.0, 1.0, -1.0, 0.0]);
+        // Normalized mod 4, both directions.
+        assert_eq!(SdfRotate::Quarter(4).matrix2(), SdfRotate::Quarter(0).matrix2());
+        assert_eq!(SdfRotate::Quarter(-1).matrix2(), SdfRotate::Quarter(3).matrix2());
+        assert_eq!(SdfRotate::Quarter(-4).matrix2(), SdfRotate::Quarter(0).matrix2());
+    }
+
+    #[test]
+    fn rotate_rect_maps_a_known_rect_to_the_exact_expected_aabb() {
+        // A 40x10 rect at (100,50), rotated 90 degrees about its own center
+        // (120,55), becomes a 10x40 rect centered on the same point:
+        // top-left (115,35). `assert_eq!` on the floats, not an epsilon —
+        // this is exactly the assertion a regression back to trig would
+        // fail (cos(PI/2) in f32 is off by ~4.37e-8, which would leak into
+        // every one of these coordinates).
+        let (pos, size) = rotate_rect([100.0, 50.0], [40.0, 10.0], SdfRotate::Quarter(1), [120.0, 55.0]);
+        assert_eq!(pos, [115.0, 35.0]);
+        assert_eq!(size, [10.0, 40.0]);
+
+        // A full 180 about an off-center pivot (the origin): every corner
+        // reflects through it (w/h unchanged — 180 degrees never swaps
+        // width/height).
+        let (pos, size) = rotate_rect([100.0, 50.0], [40.0, 10.0], SdfRotate::Quarter(2), [0.0, 0.0]);
+        assert_eq!(pos, [-140.0, -60.0]);
+        assert_eq!(size, [40.0, 10.0]);
+
+        // Quarter(0) is a true no-op, bit for bit.
+        let (pos, size) = rotate_rect([100.0, 50.0], [40.0, 10.0], SdfRotate::Quarter(0), [120.0, 55.0]);
+        assert_eq!(pos, [100.0, 50.0]);
+        assert_eq!(size, [40.0, 10.0]);
+    }
+
+    #[test]
+    fn nested_push_rotate_composes_like_gl_push_matrix() {
+        // Two nested 90-degree turns about the SAME pivot compose to
+        // exactly Quarter(2)'s matrix — still bit-exact, since composing
+        // two integer-valued matrices introduces no rounding.
+        let mut list = DrawList::new();
+        list.push_rotate(SdfRotate::Quarter(1), [50.0, 50.0]);
+        list.push_rotate(SdfRotate::Quarter(1), [50.0, 50.0]);
+        list.push(SdfInstance {
+            kind: SdfKind::Box,
+            position: [40.0, 40.0],
+            size: [20.0, 20.0],
+            color: [1.0; 4],
+            anim: 0,
+        });
+        list.push_rotate_end();
+        // Back to the single outer 90-degree scope.
+        list.push(SdfInstance {
+            kind: SdfKind::Box,
+            position: [0.0, 0.0],
+            size: [1.0, 1.0],
+            color: [1.0; 4],
+            anim: 0,
+        });
+        list.push_rotate_end();
+        // Stack empty: unrotated.
+        list.push(SdfInstance {
+            kind: SdfKind::Box,
+            position: [0.0, 0.0],
+            size: [1.0, 1.0],
+            color: [1.0; 4],
+            anim: 0,
+        });
+
+        let frame = list.lower();
+        assert_eq!(frame.draws.len(), 3);
+
+        // Innermost (180 total): xform id 2, param_bank[2..4]. NOTE: xform.x
+        // is a plain small integer VALUE (like anim_idx), not a bitcast
+        // payload like the Bézier/SlabPC `params[3]` slot — `as u32`, never
+        // `.to_bits()`.
+        let nested_id = frame.draws[0].xform[0] as u32;
+        assert_ne!(nested_id, 0);
+        let base = ((nested_id - 1) * 2) as usize;
+        let expect180 = SdfRotate::Quarter(2).matrix2();
+        assert_eq!(frame.param_bank[base], expect180, "two nested 90s == one 180, bit-exact");
+
+        // Middle instance: back to the outer 90-degree scope, a DIFFERENT
+        // (smaller) transform id than the nested one, and NOT zero.
+        let outer_id = frame.draws[1].xform[0] as u32;
+        assert_ne!(outer_id, 0, "still inside the outer push_rotate after the inner pop");
+        assert_ne!(outer_id, nested_id, "popped back to a different scope than the nested one");
+        let outer_base = ((outer_id - 1) * 2) as usize;
+        assert_eq!(frame.param_bank[outer_base], SdfRotate::Quarter(1).matrix2());
+
+        // Last instance: both scopes popped, stack empty, no leak.
+        assert_eq!(frame.draws[2].xform[0], 0.0, "transform stack must not leak past its pop");
+    }
+
+    #[test]
+    #[should_panic(expected = "unclosed push_rotate")]
+    fn lower_asserts_the_rotate_stack_is_empty() {
+        // An unmatched push_rotate (missing its push_rotate_end) is exactly
+        // the "transform stack leaks" failure mode call out as the classic
+        // bug here — catch it at the source instead of silently rotating
+        // every subsequent instance in the frame.
+        let mut list = DrawList::new();
+        list.push_rotate(SdfRotate::Quarter(1), [0.0, 0.0]);
+        list.push(SdfInstance {
+            kind: SdfKind::Box,
+            position: [0.0, 0.0],
+            size: [1.0, 1.0],
+            color: [1.0; 4],
+            anim: 0,
+        });
+        let _ = list.lower();
+    }
+
+    #[test]
+    fn instances_outside_any_push_rotate_scope_carry_no_transform() {
+        let mut list = DrawList::new();
+        list.push(SdfInstance {
+            kind: SdfKind::Box,
+            position: [0.0, 0.0],
+            size: [1.0, 1.0],
+            color: [1.0; 4],
+            anim: 0,
+        });
+        let frame = list.lower();
+        assert_eq!(frame.draws[0].xform, [0.0, 0.0, 0.0, 0.0]);
+        assert!(frame.param_bank.is_empty(), "no push_rotate ever happened -> nothing baked");
     }
 }

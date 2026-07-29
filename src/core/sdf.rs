@@ -79,7 +79,7 @@ impl Anim {
 
 /// A single SDF draw command. repr(C) for GPU buffer upload.
 ///
-/// Wire format: 48 bytes (12 × f32).
+/// Wire format: 64 bytes (16 × f32).
 /// ```text
 /// pos:    [f32; 2]   x, y
 /// size:   [f32; 2]   w, h
@@ -89,7 +89,21 @@ impl Anim {
 ///   params[1] = radius (Slab, Circle) / thickness (Outline, Bézier)
 ///   params[2] = anim_bank index (0 = no animation, 1+ = AnimBank[idx-1])
 ///   params[3] = slot (Text: string ref; Bézier: param_bank index, bitcast)
+/// xform:  [f32; 4]   [xform_idx, reserved, reserved, reserved]
+///   xform[0] = SdfRotate transform bank index (0 = none/identity, 1+ =
+///     `param_bank[(idx-1)*2]` = [a,b,c,d], `param_bank[(idx-1)*2+1]` =
+///     [tx,ty,_,_] — the forward affine `x'=a*x+b*y+tx`, `y'=c*x+d*y+ty`.
+///     Applied to `effective_pixel` BEFORE any per-type SDF evaluation (see
+///     `sdf_render.wgsl`'s xform block and `sdf_eval_with_params` below) so
+///     every draw type — shapes and text alike — sees the pre-rotation
+///     frame uniformly, with no per-type special case.
 /// ```
+/// A trailing full vec4 (rather than a lone scalar) is deliberate: WGSL
+/// pads a storage-buffer array's stride up to its element's own alignment
+/// (16, forced by the vec4 members), so a scalar 5th field would leave 12
+/// bytes of stride padding the Rust-side struct wouldn't otherwise have,
+/// silently misaligning every command after the first when uploaded as raw
+/// bytes. A full vec4 keeps both sides at an already-16-byte-aligned 64.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SdfDrawCmd {
@@ -97,6 +111,7 @@ pub struct SdfDrawCmd {
     pub size: [f32; 2],
     pub color: [f32; 4],
     pub params: [f32; 4],
+    pub xform: [f32; 4],
 }
 
 impl SdfDrawCmd {
@@ -105,6 +120,7 @@ impl SdfDrawCmd {
         size: [0.0; 2],
         color: [0.0; 4],
         params: [0.0; 4],
+        xform: [0.0; 4],
     };
 
     /// Draw type from params[0].
@@ -224,14 +240,35 @@ pub fn sdf_eval(cmd: &SdfDrawCmd, px: f32, py: f32) -> (f32, [f32; 4]) {
     sdf_eval_with_params(cmd, px, py, &[])
 }
 
+/// Undo a command's `SdfRotate` (see `SdfDrawCmd::xform` doc) so the
+/// remainder of evaluation runs in the shape's pre-rotation frame, exactly
+/// mirroring `sdf_render.wgsl`'s xform block — keep the two in sync.
+/// `xform[0] == 0` (no rotation, overwhelmingly the common case) is a no-op.
+fn undo_xform(cmd: &SdfDrawCmd, px: f32, py: f32, param_bank: &[[f32; 4]]) -> (f32, f32) {
+    let idx = cmd.xform[0] as u32;
+    if idx == 0 {
+        return (px, py);
+    }
+    let base = ((idx - 1) * 2) as usize;
+    let (Some(row0), Some(row1)) = (param_bank.get(base), param_bank.get(base + 1)) else {
+        return (px, py);
+    };
+    let (rel_x, rel_y) = (px - row1[0], py - row1[1]);
+    // Inverse of a rotation matrix is its transpose — exact for the
+    // quarter-turn case, whose entries are only ever 0/1/-1.
+    (row0[0] * rel_x + row0[2] * rel_y, row0[1] * rel_x + row0[3] * rel_y)
+}
+
 /// Evaluate the SDF for a single draw command, with access to the aux
-/// param bank (`param_bank[bitcast(params[3])]` = Bézier C1.xy, C2.xy).
+/// param bank (`param_bank[bitcast(params[3])]` = Bézier C1.xy, C2.xy; also
+/// where `SdfRotate` transforms live — see [`SdfDrawCmd::xform`]).
 pub fn sdf_eval_with_params(
     cmd: &SdfDrawCmd,
     px: f32,
     py: f32,
     param_bank: &[[f32; 4]],
 ) -> (f32, [f32; 4]) {
+    let (px, py) = undo_xform(cmd, px, py, param_bank);
     let cx = cmd.pos[0] + cmd.size[0] * 0.5;
     let cy = cmd.pos[1] + cmd.size[1] * 0.5;
     let local_x = px - cx;
@@ -387,6 +424,7 @@ mod tests {
             size: [20.0, 20.0],
             color: [1.0; 4],
             params: [DRAW_TYPE_SLAB_PC, 0.0, 0.0, f32::from_bits(0)],
+            xform: [0.0; 4],
         };
         let bank = [[0.0f32, 8.0, 8.0, 0.0]]; // [tl, tr, br, bl]
         // Near the top-left corner (square) → inside.
@@ -412,6 +450,7 @@ mod tests {
             size: [20.0, 20.0],
             color: [1.0, 0.0, 0.0, 1.0],
             params: [DRAW_TYPE_BOX, 0.0, 0.0, 0.0],
+            xform: [0.0; 4],
         };
         let (d, _) = sdf_eval(&cmd, 20.0, 20.0); // center
         assert!(d < 0.0);
@@ -452,6 +491,7 @@ mod tests {
             size: [100.0, 100.0], // P3
             color: [1.0; 4],
             params: [DRAW_TYPE_BEZIER, 6.0, 0.0, f32::from_bits(0)],
+            xform: [0.0; 4],
         };
         let params = [[30.0f32, 0.0, 70.0, 0.0]]; // C1, C2 pull the curve to y≈25..75
         let mid = cubic_point([0.0, 100.0], [30.0, 0.0], [70.0, 0.0], [100.0, 100.0], 0.5);
@@ -460,5 +500,51 @@ mod tests {
         // Chord midpoint is far from the bowed curve.
         let (d_chord, _) = sdf_eval_with_params(&cmd, 50.0, 100.0, &params);
         assert!(d_chord > 10.0, "chord midpoint should be outside: {d_chord}");
+    }
+
+    // ── SdfRotate (xform) — mirrors the `sdf_render.wgsl` xform block ──────
+
+    #[test]
+    fn sdf_eval_undoes_a_quarter_turn_so_a_rotated_box_still_hits_at_its_drawn_spot() {
+        // A 40x10 box at (0,0), rotated 90 degrees about its own center
+        // (20,5) — on screen this reads as a 10x40 box. Evaluating at a
+        // point that lies on the ROTATED shape (but well outside the
+        // unrotated pos/size box) must land inside once xform is undone.
+        let cmd = SdfDrawCmd {
+            pos: [0.0, 0.0],
+            size: [40.0, 10.0],
+            color: [1.0; 4],
+            params: [DRAW_TYPE_BOX, 0.0, 0.0, 0.0],
+            xform: [1.0, 0.0, 0.0, 0.0], // transform bank id 1 -> param_bank[0..2]
+        };
+        // Quarter(1) about pivot (20,5): a=0,b=-1,c=1,d=0, tx=25,ty=-15
+        // (see drawlist::tests for the derivation of this exact matrix).
+        let bank = [[0.0f32, -1.0, 1.0, 0.0], [25.0, -15.0, 0.0, 0.0]];
+        // (20, -10) is inside the drawn (rotated) 10x40 box (it spans
+        // x:[15,25], y:[-15,25]) but well outside the original 40x10
+        // pos/size box (y:[0,10]) entirely.
+        let (d_on, _) = sdf_eval_with_params(&cmd, 20.0, -10.0, &bank);
+        assert!(d_on < 0.0, "point on the rotated box should be inside: {d_on}");
+        // (35, 5) is inside the UN-rotated footprint (x:[0,40], y:[0,10])
+        // but outside the rotated one (x:[15,25]) — must now read outside.
+        let (d_off, _) = sdf_eval_with_params(&cmd, 35.0, 5.0, &bank);
+        assert!(d_off > 0.0, "point outside the rotated box should be outside: {d_off}");
+    }
+
+    #[test]
+    fn xform_zero_is_a_no_op_even_with_a_nonempty_bank() {
+        // The overwhelmingly common case (no rotation): xform[0] == 0 must
+        // never consult param_bank at all, so a caller can share the same
+        // bank across rotated and unrotated commands safely.
+        let cmd = SdfDrawCmd {
+            pos: [10.0, 10.0],
+            size: [20.0, 20.0],
+            color: [1.0; 4],
+            params: [DRAW_TYPE_BOX, 0.0, 0.0, 0.0],
+            xform: [0.0; 4],
+        };
+        let bank = [[9.0f32, 9.0, 9.0, 9.0], [9.0, 9.0, 9.0, 9.0]];
+        let (d, _) = sdf_eval_with_params(&cmd, 20.0, 20.0, &bank);
+        assert!(d < 0.0);
     }
 }

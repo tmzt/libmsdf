@@ -281,6 +281,7 @@ pub fn lower_stream(
                 size: [total_width, font_size],
                 color,
                 params: [DRAW_TYPE_TEXT, 0.0, 0.0, f32::from_bits(packed_slot)],
+                xform: [0.0; 4],
             });
         } else {
             // MSDF path — default for all text. The atlas cell has a 15%
@@ -296,6 +297,7 @@ pub fn lower_stream(
                 color,
                 // params.z = x_margin_frac so the shader can re-derive the pen origin
                 params: [DRAW_TYPE_MSDF_TEXT, px_range, x_margin_frac, f32::from_bits(packed_slot)],
+                xform: [0.0; 4],
             });
         }
     };
@@ -391,6 +393,7 @@ pub fn lower_stream(
                     size: [w as f32, h as f32],
                     color: current_color,
                     params: [DRAW_TYPE_BOX, 0.0, 0.0, 0.0],
+                    xform: [0.0; 4],
                 });
             }
 

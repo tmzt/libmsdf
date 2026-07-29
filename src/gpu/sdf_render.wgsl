@@ -10,7 +10,12 @@
 // Each DrawCmd specifies type via params.x:
 //   0 = Box, 1 = Slab (rounded rect), 2 = Circle, 3 = Line, 4 = Text,
 //   5 = Texture, 6/7 = Ribbon clip begin/end, 8 = MSDF Text, 9 = Outline,
-//   10 = Cubic Bézier stroke
+//   10 = Cubic Bézier stroke, 11 = Slab per-corner
+//
+// SdfRotate (xform.x, a separate per-instance field, not a params.x type):
+// an optional rotation-about-a-pivot applied to `effective_pixel` BEFORE
+// the type switch below, so every type — shapes and text alike — is
+// rotated uniformly with no per-type special case.
 
 // ── DrawCmd ──
 
@@ -19,6 +24,11 @@ struct DrawCmd {
     size: vec2<f32>,
     color: vec4<f32>,
     params: vec4<f32>,   // [ty, radius, anim_idx, slot]
+    // SdfRotate transform bank index (see param_bank, binding 12): 0 = none
+    // (identity, the overwhelmingly common case), 1+ = 1-based index; the
+    // forward affine lives at param_bank[(xform.x-1)*2] = [a,b,c,d] and
+    // param_bank[(xform.x-1)*2+1] = [tx,ty,_,_]. .y/.z/.w reserved.
+    xform: vec4<f32>,
 };
 
 struct GpuUniforms {
@@ -257,6 +267,35 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         var effective_pixel = pixel;
         if in_ribbon {
             effective_pixel = pixel - ribbon_scroll;
+        }
+
+        // SdfRotate: undo the instance's rotation-about-a-pivot BEFORE
+        // anything below reads effective_pixel, so every draw type inherits
+        // it uniformly (MSDF/bitmap text read effective_pixel directly;
+        // shapes read it via `p = effective_pixel - center` just below) —
+        // no per-type special case. xform.x == 0 (no rotation) is the
+        // overwhelmingly common path and costs one branch.
+        //
+        // The forward transform is `x' = a*x + b*y + tx`, `y' = c*x + d*y +
+        // ty`; it is always a pure rotation (the [a,b;c,d] part is
+        // orthogonal — never a general affine), so its inverse is its own
+        // transpose. That is exact for a quarter-turn (a/b/c/d are only
+        // ever 0/1/-1, chosen by the CPU side without any sin/cos call —
+        // see `SdfRotate::Quarter` in libmsdf's drawlist), which is what
+        // keeps a 90-degree-rotated rect landing back on the exact pixel
+        // grid instead of a fraction of a pixel off it.
+        let xform_idx = u32(cmd.xform.x);
+        if xform_idx != 0u {
+            let base = (xform_idx - 1u) * 2u;
+            if base + 1u < arrayLength(&param_bank) {
+                let row_ab_cd = param_bank[base];       // [a, b, c, d]
+                let row_txty = param_bank[base + 1u];   // [tx, ty, 0, 0]
+                let rel = effective_pixel - row_txty.xy;
+                effective_pixel = vec2<f32>(
+                    row_ab_cd.x * rel.x + row_ab_cd.z * rel.y,
+                    row_ab_cd.y * rel.x + row_ab_cd.w * rel.y,
+                );
+            }
         }
 
         // Cheap vertical-band reject for the TEXT commands (4u bitmap,
