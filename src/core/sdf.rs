@@ -32,6 +32,23 @@ pub const BEZIER_SHADOW_BIT: u32 = 0x8000_0000;
 /// space, +x right / +y down). params: [11, 0, anim_idx, param_bank index].
 pub const DRAW_TYPE_SLAB_PC: f32 = 11.0;
 
+/// `xform[1]`, the per-instance **flat** flag: `0.0` (the default) leaves the
+/// instance casting the drop shadow every filled shape has always cast, and
+/// this value suppresses it.
+///
+/// It lives in `xform` rather than in `params` because `params` is already full
+/// on two of the four shadow-casting types (`params[1]` is the radius for SLAB
+/// and CIRCLE, `params[3]` the aux-bank index for SLAB_PC), while `xform[1..4]`
+/// were reserved on *every* type — so one decode in the shader covers all four
+/// rather than four per-type ones. Mirrored in `sdf_render.wgsl`'s shadow block
+/// — keep the two in sync.
+///
+/// The Bézier stroke's own shadow opt-IN ([`BEZIER_SHADOW_BIT`]) is the mirror
+/// image of this and stays where it is: strokes default to *no* shadow, filled
+/// shapes to having one, and neither default is changed by adding the other's
+/// knob.
+pub const XFORM_FLAT: f32 = 1.0;
+
 /// Maximum draw commands per frame.
 pub const MAX_DRAW_CMDS: usize = 4096;
 
@@ -89,7 +106,9 @@ impl Anim {
 ///   params[1] = radius (Slab, Circle) / thickness (Outline, Bézier)
 ///   params[2] = anim_bank index (0 = no animation, 1+ = AnimBank[idx-1])
 ///   params[3] = slot (Text: string ref; Bézier: param_bank index, bitcast)
-/// xform:  [f32; 4]   [xform_idx, reserved, reserved, reserved]
+/// xform:  [f32; 4]   [xform_idx, flat, reserved, reserved]
+///   xform[1] = [`XFORM_FLAT`] to suppress this instance's drop shadow, 0.0
+///     to cast it (the default for every filled shape).
 ///   xform[0] = SdfRotate transform bank index (0 = none/identity, 1+ =
 ///     `param_bank[(idx-1)*2]` = [a,b,c,d], `param_bank[(idx-1)*2+1]` =
 ///     [tx,ty,_,_] — the forward affine `x'=a*x+b*y+tx`, `y'=c*x+d*y+ty`.

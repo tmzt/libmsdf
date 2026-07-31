@@ -27,7 +27,14 @@ struct DrawCmd {
     // SdfRotate transform bank index (see param_bank, binding 12): 0 = none
     // (identity, the overwhelmingly common case), 1+ = 1-based index; the
     // forward affine lives at param_bank[(xform.x-1)*2] = [a,b,c,d] and
-    // param_bank[(xform.x-1)*2+1] = [tx,ty,_,_]. .y/.z/.w reserved.
+    // param_bank[(xform.x-1)*2+1] = [tx,ty,_,_].
+    //
+    // .y is the per-instance FLAT flag (XFORM_FLAT in core::sdf): 0 = this
+    // instance casts the drop shadow filled shapes have always cast, nonzero
+    // = it casts none. It is the paint layer's whole vocabulary for M3
+    // elevation, and it lives here rather than in `params` because `params`
+    // is already full on SLAB/CIRCLE (radius) and SLAB_PC (aux index) — one
+    // decode below covers all four shadow-casting types. .z/.w reserved.
     xform: vec4<f32>,
 };
 
@@ -585,6 +592,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             }
             default: {
             }
+        }
+
+        // Elevation, per instance: a FLAT shape (xform.y == XFORM_FLAT) sits
+        // ON the surface behind it and casts nothing. Applied here rather
+        // than in each `case` so it reads as one rule over every caster —
+        // and so a shape that opted a Bézier stroke IN above can be turned
+        // off by the same declaration that turns a box off. `xform.y` is 0
+        // for every instance that says nothing, which is what keeps the
+        // renderer's historical unconditional shadow the default.
+        if cmd.xform.y >= 0.5 {
+            shadow_on = false;
         }
 
         // Shadow (skip for outline/text, and for bezier strokes that don't

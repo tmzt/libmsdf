@@ -15,7 +15,7 @@ pub mod stream;
 use crate::core::sdf::{
     BEZIER_SHADOW_BIT, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE,
     DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_RIBBON_BEGIN, DRAW_TYPE_RIBBON_END,
-    DRAW_TYPE_SLAB, DRAW_TYPE_SLAB_PC, SdfDrawCmd,
+    DRAW_TYPE_SLAB, DRAW_TYPE_SLAB_PC, SdfDrawCmd, XFORM_FLAT,
 };
 use crate::font::atlas::FontAtlas;
 use crate::font::shaper::ShapedRun;
@@ -101,6 +101,51 @@ pub enum SdfKind {
     ClipBegin,
     /// End the current [`SdfKind::ClipBegin`] region.
     ClipEnd,
+}
+
+/// **Whether an instance casts the renderer's drop shadow** — the paint
+/// layer's whole vocabulary for elevation, and the answer to what used to be
+/// an unconditional rule.
+///
+/// Every filled shape (Box / RoundedBox / RoundedBoxPerCorner / Circle) casts
+/// a soft offset shadow, and until this existed nothing could opt out. Two
+/// things followed, both load-bearing: paint order between *non-overlapping*
+/// neighbours a few pixels apart was visible, and **a surface spanning two
+/// abutting bands could not be split into one node per band**, because each
+/// band would shadow the one below and put a dark seam between them.
+///
+/// **What this type is NOT.** It is not an M3 elevation scale. This layer owns
+/// one shadow and knows whether to cast it; *which* elevation level a surface
+/// is at, and therefore whether it should, is a design-system question that
+/// belongs above the renderer — see `libteststand`'s `elevation` node prop,
+/// which maps a declared M3 level onto this. Growing a per-level shadow spec
+/// (offset/reach/alpha as a function of dp) is the honest next step and is
+/// deliberately not taken here: it would change every existing frame, and it
+/// is not what unblocked the split.
+///
+/// [`Elevation::Default`] is what an instance pushed through
+/// [`DrawList::push`] gets, so nothing that does not ask changes.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum Elevation {
+    /// Cast the shadow — the behaviour every filled shape has always had, and
+    /// what [`DrawList::push`] tags an instance with.
+    #[default]
+    Default,
+    /// **Flat**: the shape sits directly on whatever is behind it and casts
+    /// nothing. M3 elevation level 0 — a `surface` app bar at rest, a status
+    /// strip, any band abutting another band of the same surface.
+    Flat,
+}
+
+impl Elevation {
+    /// This elevation as the wire format's `xform[1]` (see
+    /// [`crate::core::sdf::XFORM_FLAT`]).
+    fn to_wire(self) -> f32 {
+        match self {
+            Elevation::Default => 0.0,
+            Elevation::Flat => XFORM_FLAT,
+        }
+    }
 }
 
 /// One instance in the draw list.
@@ -305,6 +350,12 @@ pub struct DrawList {
     /// avoids: `push` is already the sole intercept point, so it can tag
     /// here without the instance's own shape ever needing to change.
     instance_transforms: Vec<u32>,
+    /// Parallel to `instances` in exactly the way `instance_transforms` is,
+    /// and a side channel for exactly the same reason (see its doc): the
+    /// [`Elevation`] each instance was pushed at. [`DrawList::push`] tags
+    /// [`Elevation::Default`]; [`DrawList::push_fill`] is the door for
+    /// anything else.
+    instance_elevation: Vec<Elevation>,
 }
 
 impl DrawList {
@@ -318,6 +369,7 @@ impl DrawList {
         self.transforms.clear();
         self.active_transform.clear();
         self.instance_transforms.clear();
+        self.instance_elevation.clear();
     }
 
     pub fn is_empty(&self) -> bool {
@@ -343,7 +395,31 @@ impl DrawList {
     /// caller has to know about the rotate stack.
     pub fn push(&mut self, instance: SdfInstance) {
         self.instance_transforms.push(self.active_transform());
+        self.instance_elevation.push(Elevation::Default);
         self.instances.push(instance);
+    }
+
+    /// [`DrawList::push`], at an explicit [`Elevation`] — the one way to say
+    /// that a filled shape casts **no** drop shadow.
+    ///
+    /// Named for the *fill* because that is the whole of what it affects: the
+    /// four filled shape kinds are the only unconditional casters, an
+    /// `Outline` and an MSDF run never cast one, and a Bézier stroke has its
+    /// own opt-IN ([`DrawList::push_bezier_shadowed`]). Passing a non-filled
+    /// kind here is harmless and inert rather than an error — the shader
+    /// simply has no shadow to suppress.
+    ///
+    /// It routes through [`DrawList::push`] rather than beside it, so that
+    /// method stays the single point at which an instance enters the list —
+    /// which is what `libteststand`'s drawing-allowlist scan is written
+    /// against. The name is likewise deliberate: that scan's `fill(` needle
+    /// already matches `push_fill(`, so a module that reached for this
+    /// instead of `push` to slip past the check would trip it anyway.
+    pub fn push_fill(&mut self, instance: SdfInstance, elevation: Elevation) {
+        self.push(instance);
+        if let Some(last) = self.instance_elevation.last_mut() {
+            *last = elevation;
+        }
     }
 
     /// Begin a rotation scope: every instance pushed after this — until the
@@ -540,8 +616,18 @@ impl DrawList {
             self.instance_transforms.len(),
             "instances and instance_transforms are always pushed together in DrawList::push"
         );
+        debug_assert_eq!(
+            self.instances.len(),
+            self.instance_elevation.len(),
+            "instances and instance_elevation are always pushed together in DrawList::push"
+        );
 
-        for (inst, &transform) in self.instances.iter().zip(&self.instance_transforms) {
+        for ((inst, &transform), &elevation) in self
+            .instances
+            .iter()
+            .zip(&self.instance_transforms)
+            .zip(&self.instance_elevation)
+        {
             let anim = inst.anim as f32;
             let (pos, size, params) = match inst.kind {
                 SdfKind::Box => (inst.position, inst.size, [DRAW_TYPE_BOX, 0.0, anim, 0.0]),
@@ -598,7 +684,7 @@ impl DrawList {
                     (inst.position, inst.size, [DRAW_TYPE_RIBBON_END, 0.0, 0.0, 0.0])
                 }
             };
-            let xform = [transform as f32, 0.0, 0.0, 0.0];
+            let xform = [transform as f32, elevation.to_wire(), 0.0, 0.0];
             draws.push(SdfDrawCmd { pos, size, color: inst.color, params, xform });
         }
 
@@ -673,6 +759,77 @@ mod tests {
         // params.w bitcasts to the aux-bank index holding the four radii.
         let idx = frame.draws[0].params[3].to_bits() as usize;
         assert_eq!(frame.param_bank[idx], [0.0, 16.0, 16.0, 0.0]);
+    }
+
+    /// **An instance can say it is flat, and one that says nothing is not.**
+    ///
+    /// The default is asserted first and asserted on `push` itself, because
+    /// the whole safety of adding this knob is that every existing caller —
+    /// which is every caller — keeps lowering to exactly the bytes it did
+    /// before. The flag rides `xform[1]`, so it is also asserted not to
+    /// disturb `xform[0]`, which the rotate stack owns.
+    #[test]
+    fn an_instance_can_be_pushed_flat_and_the_default_is_unchanged() {
+        let boxy = |y: f32| SdfInstance {
+            kind: SdfKind::Box,
+            position: [0.0, y],
+            size: [10.0, 10.0],
+            color: [1.0; 4],
+            anim: 0,
+        };
+
+        let mut list = DrawList::new();
+        list.push(boxy(0.0));
+        list.push_fill(boxy(10.0), Elevation::Flat);
+        list.push_fill(boxy(20.0), Elevation::Default);
+        let frame = list.lower();
+
+        assert_eq!(frame.draws[0].xform, [0.0, 0.0, 0.0, 0.0], "push says nothing");
+        assert_eq!(frame.draws[1].xform, [0.0, XFORM_FLAT, 0.0, 0.0], "flat is on the wire");
+        assert_eq!(frame.draws[2].xform, [0.0, 0.0, 0.0, 0.0], "an explicit default is the default");
+        // Nothing but xform[1] moved: the three commands are otherwise the
+        // same shape, and the rotate slot is untouched.
+        for d in &frame.draws {
+            assert_eq!(d.params[0], DRAW_TYPE_BOX);
+            assert_eq!(d.xform[0], 0.0);
+        }
+
+        // ...and it travels with the instance through a rotate scope, whose
+        // own slot it must not collide with.
+        let mut list = DrawList::new();
+        list.push_rotate(SdfRotate::Quarter(1), [5.0, 5.0]);
+        list.push_fill(boxy(0.0), Elevation::Flat);
+        list.push_rotate_end();
+        let frame = list.lower();
+        assert_eq!(frame.draws[0].xform[0], 1.0, "the rotate id still lands in xform[0]");
+        assert_eq!(frame.draws[0].xform[1], XFORM_FLAT);
+    }
+
+    /// `clear` resets the elevation channel with everything else — a reused
+    /// list must not inherit the previous frame's flags, which is the failure
+    /// mode a parallel `Vec` has and a struct field does not.
+    #[test]
+    fn clear_resets_the_elevation_channel() {
+        let mut list = DrawList::new();
+        list.push_fill(
+            SdfInstance {
+                kind: SdfKind::Box,
+                position: [0.0, 0.0],
+                size: [1.0, 1.0],
+                color: [1.0; 4],
+                anim: 0,
+            },
+            Elevation::Flat,
+        );
+        list.clear();
+        list.push(SdfInstance {
+            kind: SdfKind::Box,
+            position: [0.0, 0.0],
+            size: [1.0, 1.0],
+            color: [1.0; 4],
+            anim: 0,
+        });
+        assert_eq!(list.lower().draws[0].xform[1], 0.0);
     }
 
     #[test]
