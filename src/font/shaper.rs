@@ -126,6 +126,38 @@ impl TextShaper {
             total_advance += pos.x_advance;
         }
 
+        // **A codepoint this face cannot draw renders as NOTHING, silently.**
+        // The baked face is an ASCII subset, so an em-dash, a curly quote or an
+        // ellipsis shapes to `.notdef` (glyph 0), which the atlas has no cell
+        // for - the text simply loses a character, with no warning anywhere.
+        //
+        // That has shipped three times: two module-error messages formatted
+        // with curly quotes, and a truncation marker that was U+2026, so a
+        // clipped string lost the very mark that said it was clipped. All three
+        // were found by eye, long after the fact, and the reviewer's ASCII grep
+        // could not see any of them because it only inspects strings added in
+        // the diff under review.
+        //
+        // Debug-only: this is the text hot path, and a release build must not
+        // pay for it. Checked here rather than at `push_shaped_text` because by
+        // then the run is glyph ids and the offending character is gone.
+        //
+        // Deliberately `.notdef`-based rather than an `is_ascii()` assertion:
+        // it asks what this face can actually draw, so widening the atlas
+        // relaxes the check automatically instead of leaving a stale rule.
+        #[cfg(debug_assertions)]
+        if let Some(bad) = glyphs.iter().find(|g| g.glyph_id == 0) {
+            let ch = text[bad.cluster as usize..].chars().next().unwrap_or('\u{fffd}');
+            panic!(
+                "text contains a character this face cannot draw, so it would render as an \
+                 INVISIBLE GAP: {ch:?} (U+{:04X}) at byte {} of {text:?}.\n\
+                 The baked atlas is an ASCII subset. Use the ASCII equivalent -- '...' not an \
+                 ellipsis, \"quotes\" not curly ones, '-' not an em-dash. Comments and test \
+                 names are unaffected; anything DRAWN is not.",
+                ch as u32, bad.cluster
+            );
+        }
+
         ShapedRun {
             glyphs,
             total_advance,
@@ -244,5 +276,40 @@ mod tests {
         let clusters = TextShaper::grapheme_indices("é");
         // 'é' can be 1 or 2 grapheme clusters depending on normalization
         assert!(!clusters.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod notdef_guard_control {
+    use super::TextShaper;
+
+    fn shaper() -> TextShaper {
+        let data = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/Roboto-Regular-ascii.ttf"
+        ))
+        .expect("the baked ASCII face");
+        TextShaper::new(data).expect("face parses")
+    }
+
+    /// The guard must FIRE. A check nobody has watched fail is not known to
+    /// work -- three invisible-glyph bugs shipped past a grep that was being
+    /// run correctly.
+    #[test]
+    #[should_panic(expected = "INVISIBLE GAP")]
+    fn a_curly_quote_is_refused() {
+        let _ = shaper().shape("Script \u{201c}Chat\u{201d}");
+    }
+
+    #[test]
+    #[should_panic(expected = "INVISIBLE GAP")]
+    fn an_ellipsis_is_refused() {
+        let _ = shaper().shape("clipped\u{2026}");
+    }
+
+    /// ...and must not fire on the ASCII the app actually draws.
+    #[test]
+    fn plain_ascii_shapes_fine() {
+        assert!(!shaper().shape("Script 'Chat': clipped...").glyphs.is_empty());
     }
 }
