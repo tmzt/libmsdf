@@ -170,6 +170,23 @@ impl TextShaper {
         self.units_per_em
     }
 
+    /// **Can this face draw `ch`?** A cmap lookup, and the non-panicking form
+    /// of the `.notdef` guard in [`TextShaper::shape`].
+    ///
+    /// The guard is right to panic for *authored text*: a curly quote in a
+    /// label is a bug in the label, and losing it silently is the failure mode
+    /// it exists to stop. But a caller that resolves a NAME to a codepoint -
+    /// an icon - has a legitimate reason to ask first and report a miss as a
+    /// missing asset instead of aborting the frame. Asking here is how it does
+    /// that without reaching for its own font parser, and without the answer
+    /// coming from a hard-coded list that can drift from the face.
+    pub fn covers(&self, ch: char) -> bool {
+        ttf_parser::Face::parse(&self.face_data, 0)
+            .ok()
+            .and_then(|face| face.glyph_index(ch))
+            .is_some_and(|glyph| glyph.0 != 0)
+    }
+
     /// Get grapheme cluster boundaries for a string (for line-breaking).
     pub fn grapheme_indices(text: &str) -> Vec<(usize, &str)> {
         text.grapheme_indices(true).collect()

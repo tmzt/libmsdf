@@ -12,6 +12,20 @@
 //! that the smallest style still gets a pixel of distance range: see
 //! [`libmsdf::FontAtlas::min_antialiased_font_size`] (48px cells at 6.0 →
 //! 6.15px, covering the ZUI's 8px zoomed-out graph labels).
+//!
+//! Every bake also picks up whatever the face defines in the **Private Use
+//! Area**, which is where an icon font puts its glyphs. That is how
+//! `libhbui`'s atlas gets its Material Symbols cells:
+//!
+//! ```text
+//! cargo run -p libmsdf --features cpu-bake --example bake_atlas -- \
+//!     deps/libmsdf/fonts/Roboto-Regular-ascii-msymbols.ttf \
+//!     crates/libhbui/assets/roboto-msymbols-48.atlas 48 6.0
+//! ```
+//!
+//! Plain Roboto defines no PUA glyph, so that step queues nothing for it and
+//! re-baking `Roboto-Regular-ascii.ttf` still reproduces the shipped
+//! `src/assets/roboto-ascii-48.atlas` byte for byte.
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
@@ -36,6 +50,12 @@ fn main() {
     // digit remaps and, crucially, the fi/fl/ffi/ffl ligatures, which only
     // appear for ADJACENT characters and would otherwise draw blank.
     builder.add_shaped_ascii();
+    // Whatever the face defines in the Private Use Area, which is where an
+    // icon font puts its glyphs — Material Symbols' `menu` is U+E5D2. Stated
+    // as "this face's PUA coverage" rather than a list of names so the bake
+    // tool never has to learn an icon set: a face that defines no PUA glyph
+    // (plain Roboto) queues nothing and bakes byte-identically to before.
+    builder.add_codepoint_range('\u{E000}', '\u{F8FF}');
     let atlas = builder.build().expect("atlas bake failed");
     let bytes = atlas.to_bytes();
     std::fs::write(&out_path, &bytes).expect("write atlas");
