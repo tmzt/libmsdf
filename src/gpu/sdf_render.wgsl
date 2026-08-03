@@ -537,7 +537,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                         // coverage — proper analytic antialiasing.
                         let softened_range = screen_px_range / (1.0 + max(cmd.xform.z, 0.0));
                         let ombre_y = clamp((effective_pixel.y - cmd.pos.y) / max(cmd.size.y, 1.0), 0.0, 1.0);
-                        let ombre_alpha = 1.0 - clamp(cmd.xform.w, 0.0, 1.0) * ombre_y;
+                        let ombre_alpha = 1.0 - clamp(cmd.xform.w, 0.0, 1.0)
+                            * smoothstep(0.0, 1.0, ombre_y);
                         let alpha = clamp(softened_range * (sd - 0.5) + 0.5, 0.0, 1.0) * ombre_alpha;
 
                         if alpha > 0.01 {
@@ -641,7 +642,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         if ty != 5u && ty != 8u {
             let blur = max(cmd.xform.z, 0.0);
             let ombre_y = clamp((effective_pixel.y - cmd.pos.y) / max(cmd.size.y, 1.0), 0.0, 1.0);
-            let ombre_alpha = 1.0 - clamp(cmd.xform.w, 0.0, 1.0) * ombre_y;
+            let ombre_alpha = 1.0 - clamp(cmd.xform.w, 0.0, 1.0)
+                * smoothstep(0.0, 1.0, ombre_y);
             let fill_alpha = cmd.color.a * anim_alpha * ombre_alpha
                 * (1.0 - smoothstep(-0.5 - blur, 0.5 + blur, d));
             if fill_alpha > 0.001 {
