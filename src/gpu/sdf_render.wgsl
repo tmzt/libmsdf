@@ -34,7 +34,8 @@ struct DrawCmd {
     // = it casts none. It is the paint layer's whole vocabulary for M3
     // elevation, and it lives here rather than in `params` because `params`
     // is already full on SLAB/CIRCLE (radius) and SLAB_PC (aux index) — one
-    // decode below covers all four shadow-casting types. .z/.w reserved.
+    // decode below covers all four shadow-casting types. .z is the node-scoped
+    // blur radius and .w is the node-scoped alpha-ombre strength.
     xform: vec4<f32>,
 };
 
@@ -534,7 +535,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                         // screen_px_range is the signed distance to the
                         // outline in SCREEN pixels, so + 0.5 is the pixel's
                         // coverage — proper analytic antialiasing.
-                        let alpha = clamp(screen_px_range * (sd - 0.5) + 0.5, 0.0, 1.0);
+                        let softened_range = screen_px_range / (1.0 + max(cmd.xform.z, 0.0));
+                        let ombre_y = clamp((effective_pixel.y - cmd.pos.y) / max(cmd.size.y, 1.0), 0.0, 1.0);
+                        let ombre_alpha = 1.0 - clamp(cmd.xform.w, 0.0, 1.0) * ombre_y;
+                        let alpha = clamp(softened_range * (sd - 0.5) + 0.5, 0.0, 1.0) * ombre_alpha;
 
                         if alpha > 0.01 {
                             let glyph_color = vec4<f32>(cmd.color.rgb, cmd.color.a * alpha);
@@ -635,7 +639,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
         // Shape fill (skip for texture and MSDF text — they blend internally)
         if ty != 5u && ty != 8u {
-            let fill_alpha = cmd.color.a * anim_alpha * (1.0 - smoothstep(-0.5, 0.5, d));
+            let blur = max(cmd.xform.z, 0.0);
+            let ombre_y = clamp((effective_pixel.y - cmd.pos.y) / max(cmd.size.y, 1.0), 0.0, 1.0);
+            let ombre_alpha = 1.0 - clamp(cmd.xform.w, 0.0, 1.0) * ombre_y;
+            let fill_alpha = cmd.color.a * anim_alpha * ombre_alpha
+                * (1.0 - smoothstep(-0.5 - blur, 0.5 + blur, d));
             if fill_alpha > 0.001 {
                 let shape_color = vec4<f32>(cmd.color.rgb, fill_alpha);
                 result = blend_over(result, shape_color);

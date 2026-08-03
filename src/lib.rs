@@ -29,7 +29,7 @@ pub use crate::core::{
     Anim, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE, DRAW_TYPE_MSDF_TEXT,
     DRAW_TYPE_OUTLINE, DRAW_TYPE_SLAB, DRAW_TYPE_TEXT, GpuFont, RenderFrame, SdfDrawCmd,
 };
-pub use drawlist::{rotate_rect, DrawList, Elevation, SdfFrame, SdfInstance, SdfKind, SdfRotate};
+pub use drawlist::{rotate_rect, DrawEffects, DrawList, Elevation, SdfFrame, SdfInstance, SdfKind, SdfRotate};
 pub use font::{
     AtlasManager, AtlasRegion, FontAtlas, FontAtlasBuilder, GlyphEntry, MSYMBOLS_ICONS,
     ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII, ShapedRun, TextShaper, msymbols_codepoint,

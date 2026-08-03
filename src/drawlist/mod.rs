@@ -137,6 +137,15 @@ pub enum Elevation {
     Flat,
 }
 
+/// Visual effects inherited by every instance emitted in a node scope.
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct DrawEffects {
+    /// Gaussian edge-softening radius in logical pixels.
+    pub blur_radius: f32,
+    /// Bottom-fade strength for an alpha ombré, from 0 (none) to 1 (full).
+    pub alpha_ombre: f32,
+}
+
 impl Elevation {
     /// This elevation as the wire format's `xform[1]` (see
     /// [`crate::core::sdf::XFORM_FLAT`]).
@@ -356,6 +365,11 @@ pub struct DrawList {
     /// [`Elevation::Default`]; [`DrawList::push_fill`] is the door for
     /// anything else.
     instance_elevation: Vec<Elevation>,
+    /// Stack of node-scoped visual effects. Every pushed instance snapshots
+    /// the current top, so descendants inherit without special push methods.
+    active_effects: Vec<DrawEffects>,
+    /// Effects snapshot parallel to `instances`.
+    instance_effects: Vec<DrawEffects>,
 }
 
 impl DrawList {
@@ -370,6 +384,8 @@ impl DrawList {
         self.active_transform.clear();
         self.instance_transforms.clear();
         self.instance_elevation.clear();
+        self.active_effects.clear();
+        self.instance_effects.clear();
     }
 
     pub fn is_empty(&self) -> bool {
@@ -396,7 +412,18 @@ impl DrawList {
     pub fn push(&mut self, instance: SdfInstance) {
         self.instance_transforms.push(self.active_transform());
         self.instance_elevation.push(Elevation::Default);
+        self.instance_effects.push(self.active_effects.last().copied().unwrap_or_default());
         self.instances.push(instance);
+    }
+
+    /// Begin a node-scoped effects scope. Descendant instances inherit it.
+    pub fn begin_effects(&mut self, effects: DrawEffects) {
+        self.active_effects.push(effects);
+    }
+
+    /// End the innermost node-scoped effects scope.
+    pub fn end_effects(&mut self) {
+        self.active_effects.pop();
     }
 
     /// [`DrawList::push`], at an explicit [`Elevation`] — the one way to say
@@ -621,12 +648,18 @@ impl DrawList {
             self.instance_elevation.len(),
             "instances and instance_elevation are always pushed together in DrawList::push"
         );
+        debug_assert_eq!(
+            self.instances.len(),
+            self.instance_effects.len(),
+            "instances and instance_effects are always pushed together in DrawList::push"
+        );
 
-        for ((inst, &transform), &elevation) in self
+        for (((inst, &transform), &elevation), &effects) in self
             .instances
             .iter()
             .zip(&self.instance_transforms)
             .zip(&self.instance_elevation)
+            .zip(&self.instance_effects)
         {
             let anim = inst.anim as f32;
             let (pos, size, params) = match inst.kind {
@@ -684,7 +717,7 @@ impl DrawList {
                     (inst.position, inst.size, [DRAW_TYPE_RIBBON_END, 0.0, 0.0, 0.0])
                 }
             };
-            let xform = [transform as f32, elevation.to_wire(), 0.0, 0.0];
+            let xform = [transform as f32, elevation.to_wire(), effects.blur_radius.max(0.0), effects.alpha_ombre.clamp(0.0, 1.0)];
             draws.push(SdfDrawCmd { pos, size, color: inst.color, params, xform });
         }
 
@@ -1042,5 +1075,29 @@ mod tests {
         let frame = list.lower();
         assert_eq!(frame.draws[0].xform, [0.0, 0.0, 0.0, 0.0]);
         assert!(frame.param_bank.is_empty(), "no push_rotate ever happened -> nothing baked");
+    }
+
+    #[test]
+    fn node_effect_scope_is_snapshotted_by_children_and_restored_after_pop() {
+        let mut list = DrawList::new();
+        list.begin_effects(DrawEffects { blur_radius: 4.0, alpha_ombre: 0.5 });
+        list.push(SdfInstance {
+            kind: SdfKind::Box,
+            position: [0.0, 0.0],
+            size: [1.0, 1.0],
+            color: [1.0; 4],
+            anim: 0,
+        });
+        list.end_effects();
+        list.push(SdfInstance {
+            kind: SdfKind::Box,
+            position: [1.0, 0.0],
+            size: [1.0, 1.0],
+            color: [1.0; 4],
+            anim: 0,
+        });
+        let frame = list.lower();
+        assert_eq!(frame.draws[0].xform, [0.0, 0.0, 4.0, 0.5]);
+        assert_eq!(frame.draws[1].xform, [0.0, 0.0, 0.0, 0.0]);
     }
 }

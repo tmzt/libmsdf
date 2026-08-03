@@ -106,7 +106,7 @@ impl Anim {
 ///   params[1] = radius (Slab, Circle) / thickness (Outline, Bézier)
 ///   params[2] = anim_bank index (0 = no animation, 1+ = AnimBank[idx-1])
 ///   params[3] = slot (Text: string ref; Bézier: param_bank index, bitcast)
-/// xform:  [f32; 4]   [xform_idx, flat, reserved, reserved]
+/// xform:  [f32; 4]   [xform_idx, flat, blur_radius, alpha_ombre]
 ///   xform[1] = [`XFORM_FLAT`] to suppress this instance's drop shadow, 0.0
 ///     to cast it (the default for every filled shape).
 ///   xform[0] = SdfRotate transform bank index (0 = none/identity, 1+ =
@@ -116,6 +116,8 @@ impl Anim {
 ///     `sdf_render.wgsl`'s xform block and `sdf_eval_with_params` below) so
 ///     every draw type — shapes and text alike — sees the pre-rotation
 ///     frame uniformly, with no per-type special case.
+///   xform[2] = non-negative node-scoped edge-softening radius in logical
+///     pixels; xform[3] = node-scoped bottom-fade strength, 0..1.
 /// ```
 /// A trailing full vec4 (rather than a lone scalar) is deliberate: WGSL
 /// pads a storage-buffer array's stride up to its element's own alignment
