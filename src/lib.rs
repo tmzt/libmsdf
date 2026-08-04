@@ -26,8 +26,9 @@ pub mod font;
 pub mod gpu;
 
 pub use crate::core::{
-    Anim, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE, DRAW_TYPE_MSDF_TEXT,
-    DRAW_TYPE_OUTLINE, DRAW_TYPE_SLAB, DRAW_TYPE_TEXT, GpuFont, RenderFrame, SdfDrawCmd,
+    Anim, ClipRect, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE,
+    DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_SLAB, DRAW_TYPE_TEXT, GpuFont, RenderFrame,
+    SdfDrawCmd,
 };
 pub use drawlist::{rotate_rect, DrawEffects, DrawList, Elevation, SdfFrame, SdfInstance, SdfKind, SdfRotate};
 pub use font::{

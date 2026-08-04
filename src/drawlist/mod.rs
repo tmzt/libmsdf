@@ -13,9 +13,9 @@
 pub mod stream;
 
 use crate::core::sdf::{
-    BEZIER_SHADOW_BIT, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE,
-    DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_RIBBON_BEGIN, DRAW_TYPE_RIBBON_END,
-    DRAW_TYPE_SLAB, DRAW_TYPE_SLAB_PC, SdfDrawCmd, XFORM_FLAT,
+    BEZIER_SHADOW_BIT, ClipRect, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE,
+    DRAW_TYPE_LINE, DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_SLAB, DRAW_TYPE_SLAB_PC,
+    SdfDrawCmd, XFORM_FLAT,
 };
 use crate::font::atlas::FontAtlas;
 use crate::font::shaper::ShapedRun;
@@ -92,15 +92,6 @@ pub enum SdfKind {
         char_count: u32,
         px_range: f32,
     },
-    /// Begin a rectangular scissor clip: every instance pushed *after* this
-    /// one (until the matching [`SdfKind::ClipEnd`]) is clipped to the rect
-    /// `position`/`size`. Lets a caller confine a sub-scene — e.g. a device
-    /// "screen" — so its content, text included, cannot spill past the rect.
-    /// Lowers to the shader's ribbon-clip pass (no per-instance wire change).
-    /// Clips are a single active region, not a stack — do not nest.
-    ClipBegin,
-    /// End the current [`SdfKind::ClipBegin`] region.
-    ClipEnd,
 }
 
 /// **Whether an instance casts the renderer's drop shadow** — the paint
@@ -340,13 +331,10 @@ pub struct DrawList {
     /// The active (possibly nested) rotation stack, holding 1-based
     /// `transforms` ids: [`DrawList::push_rotate`] composes a new entry onto
     /// `active_transform.last()` (or identity) and pushes its id here;
-    /// [`DrawList::push_rotate_end`] pops it. Mirrors `push_clip`/
-    /// `push_clip_end`'s API shape, but — per the "every instance carries a
-    /// transform" contract — this stack tags instances directly rather than
-    /// emitting Begin/End control commands into the stream the way clip
-    /// does, since clip's "current region" is a single active scissor rect
-    /// the shader can track sequentially, while a rotation must travel with
-    /// the exact instances it applies to.
+    /// [`DrawList::push_rotate_end`] pops it. `push_clip`/`push_clip_end`,
+    /// `begin_effects`/`end_effects` and this are now the same shape: a CPU
+    /// stack resolved at push time, snapshotted onto the instance. Nothing
+    /// inherited defers to the consumer any more.
     active_transform: Vec<u32>,
     /// Parallel to `instances` (same length, same index): the 1-based
     /// `transforms` id each instance was tagged with at push time (`0` =
@@ -370,6 +358,17 @@ pub struct DrawList {
     active_effects: Vec<DrawEffects>,
     /// Effects snapshot parallel to `instances`.
     instance_effects: Vec<DrawEffects>,
+    /// Stack of scissor regions, each entry ALREADY intersected with the one
+    /// below it (see [`DrawList::push_clip`]) — so the top is always the
+    /// answer, with no walk. Resolving here rather than in the shader is what
+    /// lets clips nest at all: the GPU used to hold one "current region"
+    /// register, which made an inner clip's *end* clear the enclosing bound
+    /// instead of returning to it.
+    active_clips: Vec<ClipRect>,
+    /// Clip snapshot parallel to `instances`, exactly as `instance_effects` is
+    /// (and a side channel for the same reason — see `instance_transforms`).
+    /// [`ClipRect::UNBOUNDED`] when nothing was clipping.
+    instance_clips: Vec<ClipRect>,
 }
 
 impl DrawList {
@@ -386,6 +385,8 @@ impl DrawList {
         self.instance_elevation.clear();
         self.active_effects.clear();
         self.instance_effects.clear();
+        self.active_clips.clear();
+        self.instance_clips.clear();
     }
 
     pub fn is_empty(&self) -> bool {
@@ -413,7 +414,51 @@ impl DrawList {
         self.instance_transforms.push(self.active_transform());
         self.instance_elevation.push(Elevation::Default);
         self.instance_effects.push(self.active_effects.last().copied().unwrap_or_default());
+        self.instance_clips.push(self.active_clip());
         self.instances.push(instance);
+    }
+
+    /// The scissor in force right now — what an instance pushed at this moment
+    /// will be bounded by. [`ClipRect::UNBOUNDED`] when no scope is open.
+    pub fn active_clip(&self) -> ClipRect {
+        self.active_clips.last().copied().unwrap_or(ClipRect::UNBOUNDED)
+    }
+
+    /// The scissor instance `index` was pushed under, or `None` if it was
+    /// unbounded (or the index is past the end).
+    ///
+    /// This is the successor to reading `SdfKind::ClipBegin`/`ClipEnd` markers
+    /// out of the stream and replaying them: an instance's bound is a property
+    /// of the instance, so asking it is a lookup rather than a scan, and it
+    /// cannot disagree with what the GPU will do.
+    pub fn instance_clip(&self, index: usize) -> Option<ClipRect> {
+        self.instance_clips
+            .get(index)
+            .copied()
+            .filter(|clip| !clip.is_unbounded())
+    }
+
+    /// Every instance's resolved clip, parallel to [`DrawList::instances`].
+    pub fn instance_clips(&self) -> &[ClipRect] {
+        &self.instance_clips
+    }
+
+    /// The DISTINCT scissor regions this list's ink was drawn under, in order
+    /// of first appearance; unbounded ink contributes nothing.
+    ///
+    /// The answer to "how many regions does this component scissor, and where",
+    /// which used to be read by counting `ClipBegin` markers in the stream. It
+    /// is not the same number: a region re-entered after an inner clip closes
+    /// counted twice as markers and counts once here, which is what was being
+    /// asked all along.
+    pub fn clip_regions(&self) -> Vec<ClipRect> {
+        let mut out: Vec<ClipRect> = Vec::new();
+        for &clip in &self.instance_clips {
+            if !clip.is_unbounded() && !out.contains(&clip) {
+                out.push(clip);
+            }
+        }
+        out
     }
 
     /// Begin a node-scoped effects scope. Descendant instances inherit it.
@@ -516,27 +561,35 @@ impl DrawList {
     }
 
     /// Begin a rectangular scissor clip at `pos`/`size`. Instances pushed
-    /// after this (until [`DrawList::push_clip_end`]) are clipped to the rect.
-    /// See [`SdfKind::ClipBegin`].
+    /// after this (until the matching [`DrawList::push_clip_end`]) are
+    /// clipped to the rect — text included — so a caller can confine a
+    /// sub-scene, e.g. a device "screen" or a scrolling viewport.
+    ///
+    /// **Nestable.** A clip pushed while another is open is the INTERSECTION
+    /// with it, and ending it returns to the enclosing region rather than
+    /// clearing anything. That used not to be true: the scissor was a pair of
+    /// control commands driving one register in the shader, so an inner clip
+    /// replaced the outer one and its end handed the outer bound away to
+    /// everything drawn afterwards (fixed once at the caller in 2fcb8d0, which
+    /// is the bug this encoding makes unrepresentable). Callers therefore do
+    /// NOT need to intersect by hand, and do not need to restate an enclosing
+    /// rect on the way out.
+    ///
+    /// Emits no instance: the resolved rect is snapshotted onto each instance
+    /// pushed under it ([`DrawList::instance_clip`]).
     pub fn push_clip(&mut self, pos: [f32; 2], size: [f32; 2]) {
-        self.push(SdfInstance {
-            kind: SdfKind::ClipBegin,
-            position: pos,
-            size,
-            color: [0.0, 0.0, 0.0, 0.0],
-            anim: 0,
-        });
+        let rect = ClipRect::from_pos_size(pos, size);
+        let resolved = match self.active_clips.last() {
+            Some(&outer) => outer.intersect(rect),
+            None => rect,
+        };
+        self.active_clips.push(resolved);
     }
 
-    /// End the current [`DrawList::push_clip`] region.
+    /// End the innermost [`DrawList::push_clip`] region, reverting to whatever
+    /// region (if any) encloses it.
     pub fn push_clip_end(&mut self) {
-        self.push(SdfInstance {
-            kind: SdfKind::ClipEnd,
-            position: [0.0, 0.0],
-            size: [0.0, 0.0],
-            color: [0.0, 0.0, 0.0, 0.0],
-            anim: 0,
-        });
+        self.active_clips.pop();
     }
 
     /// Push a shaped text run as an MSDF text instance.
@@ -623,6 +676,13 @@ impl DrawList {
              silently keeps applying to every instance drawn afterward this frame",
             self.active_transform.len(),
         );
+        debug_assert!(
+            self.active_clips.is_empty(),
+            "DrawList::lower called with {} unclosed push_clip scope(s) — every \
+             push_clip needs a matching push_clip_end, or the leaked scissor \
+             silently bounds every instance drawn afterward this frame",
+            self.active_clips.len(),
+        );
 
         let mut draws = Vec::with_capacity(self.instances.len());
         let mut param_bank: Vec<[f32; 4]> = Vec::new();
@@ -653,13 +713,19 @@ impl DrawList {
             self.instance_effects.len(),
             "instances and instance_effects are always pushed together in DrawList::push"
         );
+        debug_assert_eq!(
+            self.instances.len(),
+            self.instance_clips.len(),
+            "instances and instance_clips are always pushed together in DrawList::push"
+        );
 
-        for (((inst, &transform), &elevation), &effects) in self
+        for ((((inst, &transform), &elevation), &effects), &clip) in self
             .instances
             .iter()
             .zip(&self.instance_transforms)
             .zip(&self.instance_elevation)
             .zip(&self.instance_effects)
+            .zip(&self.instance_clips)
         {
             let anim = inst.anim as f32;
             let (pos, size, params) = match inst.kind {
@@ -707,18 +773,16 @@ impl DrawList {
                         [DRAW_TYPE_MSDF_TEXT, px_range, X_MARGIN_FRAC, f32::from_bits(packed)],
                     )
                 }
-                // Clip control commands: pos/size carry the ribbon rect;
-                // params.y (scroll slot) = 0 and params.z (dir) = 0 mean a
-                // static, non-scrolling clip in the shader.
-                SdfKind::ClipBegin => {
-                    (inst.position, inst.size, [DRAW_TYPE_RIBBON_BEGIN, 0.0, 0.0, 0.0])
-                }
-                SdfKind::ClipEnd => {
-                    (inst.position, inst.size, [DRAW_TYPE_RIBBON_END, 0.0, 0.0, 0.0])
-                }
             };
             let xform = [transform as f32, elevation.to_wire(), effects.blur_radius.max(0.0), effects.alpha_ombre.clamp(0.0, 1.0)];
-            draws.push(SdfDrawCmd { pos, size, color: inst.color, params, xform });
+            draws.push(SdfDrawCmd {
+                pos,
+                size,
+                color: inst.color,
+                params,
+                xform,
+                clip: clip.to_wire(),
+            });
         }
 
         SdfFrame {
@@ -879,32 +943,103 @@ mod tests {
         assert_eq!(frame.param_bank.len(), 3);
     }
 
-    #[test]
-    fn clip_maps_to_ribbon_control_commands() {
-        let mut list = DrawList::new();
-        list.push_clip([10.0, 20.0], [100.0, 50.0]);
-        list.push(SdfInstance {
+    fn box_at(position: [f32; 2]) -> SdfInstance {
+        SdfInstance {
             kind: SdfKind::Box,
-            position: [12.0, 22.0],
+            position,
             size: [5.0, 5.0],
             color: [1.0; 4],
             anim: 0,
-        });
+        }
+    }
+
+    /// A clip costs no instruction: it rides on the instances it bounds.
+    #[test]
+    fn a_clip_scope_emits_no_command_of_its_own() {
+        let mut list = DrawList::new();
+        list.push_clip([10.0, 20.0], [100.0, 50.0]);
+        list.push(box_at([12.0, 22.0]));
         list.push_clip_end();
 
         let frame = list.lower();
-        assert_eq!(frame.draws.len(), 3);
-        // ClipBegin → ribbon begin, carrying the clip rect in pos/size.
-        assert_eq!(frame.draws[0].params[0], DRAW_TYPE_RIBBON_BEGIN);
-        assert_eq!(frame.draws[0].pos, [10.0, 20.0]);
-        assert_eq!(frame.draws[0].size, [100.0, 50.0]);
-        // No scroll: the scroll slot + direction params are zero.
-        assert_eq!(frame.draws[0].params[1], 0.0);
-        assert_eq!(frame.draws[0].params[2], 0.0);
-        // The clipped shape passes through unchanged.
-        assert_eq!(frame.draws[1].params[0], DRAW_TYPE_BOX);
-        // ClipEnd → ribbon end.
-        assert_eq!(frame.draws[2].params[0], DRAW_TYPE_RIBBON_END);
+        assert_eq!(frame.draws.len(), 1, "one shape drawn, one command emitted");
+        assert_eq!(frame.draws[0].params[0], DRAW_TYPE_BOX);
+        assert_eq!(
+            frame.draws[0].clip,
+            [10.0, 20.0, 110.0, 70.0],
+            "the shape carries the region as [min.x, min.y, max.x, max.y]",
+        );
+    }
+
+    /// An instance drawn under no clip must be bounded by nothing — and
+    /// "nothing" has to be a rect that admits every pixel, NOT the all-zero
+    /// rect a defaulted field would give, which would admit none.
+    #[test]
+    fn an_unclipped_instance_carries_a_bound_that_admits_everything() {
+        let mut list = DrawList::new();
+        list.push(box_at([12.0, 22.0]));
+        let frame = list.lower();
+        assert_eq!(frame.draws[0].clip, SdfDrawCmd::NO_CLIP);
+        assert!(ClipRect::UNBOUNDED.contains([0.0, 0.0]));
+        assert!(ClipRect::UNBOUNDED.contains([-9.9e5, 9.9e5]));
+        assert_eq!(list.instance_clip(0), None, "and it reads back as no clip");
+    }
+
+    /// **Clips nest, and leaving one returns to the one around it.**
+    ///
+    /// This is the invariant the old encoding could not hold: with a single
+    /// scissor register in the shader, the inner clip REPLACED the outer, and
+    /// the inner's end CLEARED the register, so `after` below would have
+    /// painted with no bound at all.
+    #[test]
+    fn an_inner_clip_intersects_the_outer_one_and_ending_it_returns_there() {
+        let mut list = DrawList::new();
+        list.push_clip([0.0, 0.0], [100.0, 100.0]);
+        list.push(box_at([1.0, 1.0])); // 0: outer only
+        list.push_clip([50.0, 50.0], [100.0, 100.0]); // overhangs the outer
+        list.push(box_at([60.0, 60.0])); // 1: intersection
+        list.push_clip_end();
+        list.push(box_at([2.0, 2.0])); // 2: back to the outer
+        list.push_clip_end();
+        list.push(box_at([3.0, 3.0])); // 3: unbounded again
+
+        let outer = ClipRect { min: [0.0, 0.0], max: [100.0, 100.0] };
+        let inner = ClipRect { min: [50.0, 50.0], max: [100.0, 100.0] };
+        assert_eq!(list.instance_clip(0), Some(outer));
+        assert_eq!(
+            list.instance_clip(1),
+            Some(inner),
+            "the inner clip is its own rect INTERSECTED with the outer one, so \
+             the overhang past x/y=100 is cut off",
+        );
+        assert_eq!(
+            list.instance_clip(2),
+            Some(outer),
+            "leaving the inner clip returns to the outer one, it does not clear it",
+        );
+        assert_eq!(list.instance_clip(3), None);
+
+        let frame = list.lower();
+        assert_eq!(frame.draws.len(), 4, "still no control commands");
+        assert_eq!(frame.draws[1].clip, [50.0, 50.0, 100.0, 100.0]);
+        assert_eq!(frame.draws[2].clip, [0.0, 0.0, 100.0, 100.0]);
+    }
+
+    /// Two clips that miss each other leave a real, empty region — the answer
+    /// for a row scrolled fully out of its viewport.
+    #[test]
+    fn disjoint_clips_intersect_to_an_empty_region_not_an_inverted_one() {
+        let mut list = DrawList::new();
+        list.push_clip([0.0, 0.0], [10.0, 10.0]);
+        list.push_clip([50.0, 50.0], [10.0, 10.0]);
+        list.push(box_at([51.0, 51.0]));
+        list.push_clip_end();
+        list.push_clip_end();
+
+        let clip = list.instance_clip(0).expect("clipped");
+        assert!(clip.is_empty(), "no pixel is inside: {clip:?}");
+        assert!(clip.size()[0] >= 0.0 && clip.size()[1] >= 0.0, "and it is not inverted");
+        assert!(!clip.contains([51.0, 51.0]));
     }
 
     #[test]

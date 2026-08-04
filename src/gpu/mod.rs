@@ -81,11 +81,19 @@ struct GpuDrawCmd {
     color: [f32; 4],
     params: [f32; 4],
     xform: [f32; 4],
+    clip: [f32; 4],
 }
 
 impl From<&SdfDrawCmd> for GpuDrawCmd {
     fn from(cmd: &SdfDrawCmd) -> Self {
-        Self { pos: cmd.pos, size: cmd.size, color: cmd.color, params: cmd.params, xform: cmd.xform }
+        Self {
+            pos: cmd.pos,
+            size: cmd.size,
+            color: cmd.color,
+            params: cmd.params,
+            xform: cmd.xform,
+            clip: cmd.clip,
+        }
     }
 }
 

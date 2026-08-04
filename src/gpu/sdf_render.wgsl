@@ -9,8 +9,9 @@
 //
 // Each DrawCmd specifies type via params.x:
 //   0 = Box, 1 = Slab (rounded rect), 2 = Circle, 3 = Line, 4 = Text,
-//   5 = Texture, 6/7 = Ribbon clip begin/end, 8 = MSDF Text, 9 = Outline,
+//   5 = Texture, 8 = MSDF Text, 9 = Outline,
 //   10 = Cubic Bézier stroke, 11 = Slab per-corner
+//   (6/7 are retired — see `clip` below)
 //
 // SdfRotate (xform.x, a separate per-instance field, not a params.x type):
 // an optional rotation-about-a-pivot applied to `effective_pixel` BEFORE
@@ -37,6 +38,18 @@ struct DrawCmd {
     // decode below covers all four shadow-casting types. .z is the node-scoped
     // blur radius and .w is the node-scoped alpha-ombre strength.
     xform: vec4<f32>,
+    // Scissor region for THIS instance: [min.x, min.y, max.x, max.y], already
+    // intersected with every enclosing clip by the CPU (libmsdf's
+    // `DrawList::push_clip`). Unbounded is ±1e30, so no "is there a clip"
+    // branch is needed.
+    //
+    // This used to be a pair of control commands (types 6/7) driving one
+    // `in_ribbon` register threaded through the whole loop, which is why clips
+    // could not nest: an inner clip overwrote the register and its END cleared
+    // it, handing the enclosing bound away to everything drawn afterwards.
+    // Carrying the resolved rect per instance makes both impossible and makes
+    // this loop order-independent.
+    clip: vec4<f32>,
 };
 
 struct GpuUniforms {
@@ -46,6 +59,11 @@ struct GpuUniforms {
     theme: vec4<f32>,
     vec4_bank: array<vec4<f32>, 16>,
     vec3_bank: array<vec4<f32>, 16>,
+    // Unread by this shader since the clip scissor became per-instance: the
+    // ribbon's scroll offset was its only consumer, and nothing in Highbay
+    // ever wrote a non-zero slot (`render_draw_list` passes [0.0; 16]). Kept
+    // because the uniform layout is mirrored byte-for-byte by
+    // `MinimalUniforms` on the Rust side.
     scalar_bank: array<vec4<f32>, 4>,
     int_bank: array<vec4<i32>, 4>,
     zero_page: array<vec4<u32>, 16>,
@@ -234,48 +252,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let count = uniforms.header.x;
 
-    var in_ribbon: bool = false;
-    var ribbon_clip_min: vec2<f32> = vec2<f32>(0.0);
-    var ribbon_clip_max: vec2<f32> = vec2<f32>(0.0);
-    var ribbon_scroll: vec2<f32> = vec2<f32>(0.0);
-
     for (var i: u32 = 0u; i < count; i = i + 1u) {
         let cmd = draw_cmds[i];
         let ty = u32(cmd.params.x);
 
-        if ty == 6u {
-            in_ribbon = true;
-            ribbon_clip_min = cmd.pos;
-            ribbon_clip_max = cmd.pos + cmd.size;
-            let slot = u32(cmd.params.y);
-            let pack = slot / 4u;
-            let comp = slot % 4u;
-            let scroll_val = uniforms.scalar_bank[min(pack, 3u)][min(comp, 3u)];
-            let dir = cmd.params.z;
-            if dir > 0.5 {
-                ribbon_scroll = vec2<f32>(0.0, scroll_val);
-            } else {
-                ribbon_scroll = vec2<f32>(scroll_val, 0.0);
-            }
+        // Per-instance scissor, min-inclusive / max-exclusive, tested in
+        // SCREEN space (before the rotation undo below) — the same frame the
+        // CPU resolved the rect in.
+        if pixel.x < cmd.clip.x || pixel.x >= cmd.clip.z ||
+           pixel.y < cmd.clip.y || pixel.y >= cmd.clip.w {
             continue;
-        }
-        if ty == 7u {
-            in_ribbon = false;
-            ribbon_scroll = vec2<f32>(0.0);
-            continue;
-        }
-
-        if in_ribbon {
-            if pixel.x < ribbon_clip_min.x || pixel.x >= ribbon_clip_max.x ||
-               pixel.y < ribbon_clip_min.y || pixel.y >= ribbon_clip_max.y {
-                continue;
-            }
         }
 
         var effective_pixel = pixel;
-        if in_ribbon {
-            effective_pixel = pixel - ribbon_scroll;
-        }
 
         // SdfRotate: undo the instance's rotation-about-a-pivot BEFORE
         // anything below reads effective_pixel, so every draw type inherits

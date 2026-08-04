@@ -10,8 +10,12 @@ pub const DRAW_TYPE_CIRCLE: f32 = 2.0;
 pub const DRAW_TYPE_LINE: f32 = 3.0;
 pub const DRAW_TYPE_TEXT: f32 = 4.0;
 pub const DRAW_TYPE_TEXTURE: f32 = 5.0;
-pub const DRAW_TYPE_RIBBON_BEGIN: f32 = 6.0;
-pub const DRAW_TYPE_RIBBON_END: f32 = 7.0;
+// 6 and 7 are RETIRED. They were `RIBBON_BEGIN`/`RIBBON_END`, control
+// commands the shader interpreted with a single "current scissor" register.
+// A clip is now resolved on the CPU and carried per instance in
+// [`SdfDrawCmd::clip`], so there is no control command and no register — and
+// therefore no "do not nest" rule either. The numbers stay unused rather than
+// being recycled: an old lowered frame must not decode as a new shape.
 pub const DRAW_TYPE_MSDF_TEXT: f32 = 8.0;
 /// Outline (rounded rect stroke, no fill). params: [9, radius, thickness, 0]
 pub const DRAW_TYPE_OUTLINE: f32 = 9.0;
@@ -94,9 +98,106 @@ impl Anim {
     pub const NONE: Self = Self { freq: 0.0, duty: 1.0, enable_ref: 0, _pad: 0 };
 }
 
+/// The axis-aligned region an instance is allowed to paint into, in the same
+/// logical pixels as [`SdfDrawCmd::pos`].
+///
+/// **A clip is per-instance data, not a control command.** The scissor used to
+/// be a pair of instructions in the stream (`RIBBON_BEGIN`/`RIBBON_END`) that
+/// the shader interpreted with one "currently active region" register, which
+/// forced two things: clips could not nest, and *leaving* an inner clip had to
+/// restate the enclosing rect or the enclosing bound was silently handed away
+/// to everything drawn afterwards. Resolving the stack on the CPU and
+/// snapshotting the answer per instance — the same shape
+/// `DrawList::instance_effects` already had for blur/ombré — removes the
+/// register, the ordering dependency and both failure modes; nesting is just
+/// intersection, and an instance carries its own bound wherever it lands in
+/// the stream. The cost is these four floats on every command.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct ClipRect {
+    /// Inclusive top-left corner.
+    pub min: [f32; 2],
+    /// Exclusive bottom-right corner.
+    pub max: [f32; 2],
+}
+
+/// Half-extent of [`ClipRect::UNBOUNDED`]. Deliberately a large FINITE number
+/// rather than `f32::INFINITY`: this value is uploaded into a storage buffer
+/// and compared in WGSL, and infinities are the kind of thing a downlevel
+/// GLES/WebGL backend is allowed to be creative about. `1e30` is ~2.5e25
+/// screens wide at any sane DPI, so it cannot be reached by real geometry, and
+/// `max - min` still finishes finite.
+pub const CLIP_UNBOUNDED_EXTENT: f32 = 1.0e30;
+
+impl ClipRect {
+    /// The clip an instance pushed outside any [`crate::DrawList::push_clip`]
+    /// scope gets: so wide nothing can fall outside it, so the shader needs no
+    /// "is there a clip" branch at all.
+    pub const UNBOUNDED: Self = Self {
+        min: [-CLIP_UNBOUNDED_EXTENT, -CLIP_UNBOUNDED_EXTENT],
+        max: [CLIP_UNBOUNDED_EXTENT, CLIP_UNBOUNDED_EXTENT],
+    };
+
+    /// The rect at `pos` with `size`, as callers of `push_clip` spell it.
+    /// A negative extent is clamped to zero rather than inverting the rect.
+    pub fn from_pos_size(pos: [f32; 2], size: [f32; 2]) -> Self {
+        Self {
+            min: pos,
+            max: [pos[0] + size[0].max(0.0), pos[1] + size[1].max(0.0)],
+        }
+    }
+
+    /// The overlap of two clips — what nesting one inside another means.
+    ///
+    /// A miss yields an EMPTY rect (zero extent) rather than an inverted one,
+    /// and empty is a real answer: a row scrolled fully out of its viewport
+    /// has no pixels, and this says exactly that.
+    pub fn intersect(self, other: Self) -> Self {
+        let min = [self.min[0].max(other.min[0]), self.min[1].max(other.min[1])];
+        let max = [
+            self.max[0].min(other.max[0]).max(min[0]),
+            self.max[1].min(other.max[1]).max(min[1]),
+        ];
+        Self { min, max }
+    }
+
+    /// Top-left corner, the `pos` half of the `pos`/`size` spelling.
+    pub fn pos(self) -> [f32; 2] {
+        self.min
+    }
+
+    /// Extent, the `size` half of the `pos`/`size` spelling.
+    pub fn size(self) -> [f32; 2] {
+        [self.max[0] - self.min[0], self.max[1] - self.min[1]]
+    }
+
+    /// Whether this is [`ClipRect::UNBOUNDED`] — i.e. no clip was in force.
+    pub fn is_unbounded(self) -> bool {
+        self == Self::UNBOUNDED
+    }
+
+    /// Whether the clip admits no pixels at all.
+    pub fn is_empty(self) -> bool {
+        self.max[0] <= self.min[0] || self.max[1] <= self.min[1]
+    }
+
+    /// Whether `point` is inside — the CPU statement of the shader's reject,
+    /// min-inclusive / max-exclusive.
+    pub fn contains(self, point: [f32; 2]) -> bool {
+        point[0] >= self.min[0]
+            && point[0] < self.max[0]
+            && point[1] >= self.min[1]
+            && point[1] < self.max[1]
+    }
+
+    /// The wire form: `[min.x, min.y, max.x, max.y]`.
+    pub fn to_wire(self) -> [f32; 4] {
+        [self.min[0], self.min[1], self.max[0], self.max[1]]
+    }
+}
+
 /// A single SDF draw command. repr(C) for GPU buffer upload.
 ///
-/// Wire format: 64 bytes (16 × f32).
+/// Wire format: 80 bytes (20 × f32).
 /// ```text
 /// pos:    [f32; 2]   x, y
 /// size:   [f32; 2]   w, h
@@ -118,13 +219,16 @@ impl Anim {
 ///     frame uniformly, with no per-type special case.
 ///   xform[2] = non-negative node-scoped edge-softening radius in logical
 ///     pixels; xform[3] = node-scoped bottom-fade strength, 0..1.
+/// clip:   [f32; 4]   [min.x, min.y, max.x, max.y] — see [`ClipRect`].
+///   The region this instance may paint into, already intersected with every
+///   enclosing clip. [`SdfDrawCmd::NO_CLIP`] when none was in force.
 /// ```
 /// A trailing full vec4 (rather than a lone scalar) is deliberate: WGSL
 /// pads a storage-buffer array's stride up to its element's own alignment
 /// (16, forced by the vec4 members), so a scalar 5th field would leave 12
 /// bytes of stride padding the Rust-side struct wouldn't otherwise have,
 /// silently misaligning every command after the first when uploaded as raw
-/// bytes. A full vec4 keeps both sides at an already-16-byte-aligned 64.
+/// bytes. Full vec4s keep both sides at an already-16-byte-aligned 80.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SdfDrawCmd {
@@ -133,15 +237,27 @@ pub struct SdfDrawCmd {
     pub color: [f32; 4],
     pub params: [f32; 4],
     pub xform: [f32; 4],
+    pub clip: [f32; 4],
 }
 
 impl SdfDrawCmd {
+    /// The `clip` field of an instance under no clip scope — the wire form of
+    /// [`ClipRect::UNBOUNDED`]. NOT `[0.0; 4]`: an all-zero clip is an EMPTY
+    /// rect, which would make the instance invisible.
+    pub const NO_CLIP: [f32; 4] = [
+        -CLIP_UNBOUNDED_EXTENT,
+        -CLIP_UNBOUNDED_EXTENT,
+        CLIP_UNBOUNDED_EXTENT,
+        CLIP_UNBOUNDED_EXTENT,
+    ];
+
     pub const ZERO: Self = Self {
         pos: [0.0; 2],
         size: [0.0; 2],
         color: [0.0; 4],
         params: [0.0; 4],
         xform: [0.0; 4],
+        clip: Self::NO_CLIP,
     };
 
     /// Draw type from params[0].
@@ -446,6 +562,7 @@ mod tests {
             color: [1.0; 4],
             params: [DRAW_TYPE_SLAB_PC, 0.0, 0.0, f32::from_bits(0)],
             xform: [0.0; 4],
+            clip: SdfDrawCmd::NO_CLIP,
         };
         let bank = [[0.0f32, 8.0, 8.0, 0.0]]; // [tl, tr, br, bl]
         // Near the top-left corner (square) → inside.
@@ -472,6 +589,7 @@ mod tests {
             color: [1.0, 0.0, 0.0, 1.0],
             params: [DRAW_TYPE_BOX, 0.0, 0.0, 0.0],
             xform: [0.0; 4],
+            clip: SdfDrawCmd::NO_CLIP,
         };
         let (d, _) = sdf_eval(&cmd, 20.0, 20.0); // center
         assert!(d < 0.0);
@@ -513,6 +631,7 @@ mod tests {
             color: [1.0; 4],
             params: [DRAW_TYPE_BEZIER, 6.0, 0.0, f32::from_bits(0)],
             xform: [0.0; 4],
+            clip: SdfDrawCmd::NO_CLIP,
         };
         let params = [[30.0f32, 0.0, 70.0, 0.0]]; // C1, C2 pull the curve to y≈25..75
         let mid = cubic_point([0.0, 100.0], [30.0, 0.0], [70.0, 0.0], [100.0, 100.0], 0.5);
@@ -537,6 +656,7 @@ mod tests {
             color: [1.0; 4],
             params: [DRAW_TYPE_BOX, 0.0, 0.0, 0.0],
             xform: [1.0, 0.0, 0.0, 0.0], // transform bank id 1 -> param_bank[0..2]
+            clip: SdfDrawCmd::NO_CLIP,
         };
         // Quarter(1) about pivot (20,5): a=0,b=-1,c=1,d=0, tx=25,ty=-15
         // (see drawlist::tests for the derivation of this exact matrix).
@@ -563,6 +683,7 @@ mod tests {
             color: [1.0; 4],
             params: [DRAW_TYPE_BOX, 0.0, 0.0, 0.0],
             xform: [0.0; 4],
+            clip: SdfDrawCmd::NO_CLIP,
         };
         let bank = [[9.0f32, 9.0, 9.0, 9.0], [9.0, 9.0, 9.0, 9.0]];
         let (d, _) = sdf_eval_with_params(&cmd, 20.0, 20.0, &bank);
