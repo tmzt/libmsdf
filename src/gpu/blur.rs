@@ -242,7 +242,7 @@ pub fn render_overlay_texture(
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("overlay_encoder") });
     renderer.render_full_scaled_clear_into(
         &mut encoder, queue, target, width, height, scale,
-        &frame.draws, time_ms, &[0.0; 16], &[0; 16], &[], None,
+        &frame.draws, time_ms, &[0; 16], &[], None,
     );
     queue.submit(std::iter::once(encoder.finish()));
 }

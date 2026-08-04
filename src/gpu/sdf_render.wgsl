@@ -59,12 +59,6 @@ struct GpuUniforms {
     theme: vec4<f32>,
     vec4_bank: array<vec4<f32>, 16>,
     vec3_bank: array<vec4<f32>, 16>,
-    // Unread by this shader since the clip scissor became per-instance: the
-    // ribbon's scroll offset was its only consumer, and nothing in Highbay
-    // ever wrote a non-zero slot (`render_draw_list` passes [0.0; 16]). Kept
-    // because the uniform layout is mirrored byte-for-byte by
-    // `MinimalUniforms` on the Rust side.
-    scalar_bank: array<vec4<f32>, 4>,
     int_bank: array<vec4<i32>, 4>,
     zero_page: array<vec4<u32>, 16>,
     // Font descriptor: [glyph_w, glyph_h, first_cp, last_cp]

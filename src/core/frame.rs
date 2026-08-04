@@ -16,7 +16,6 @@ pub struct RenderFrame {
     pub texture_bank: Vec<GpuTexture>, // texture descriptors
     pub font: GpuFont,
     pub glyph_bitmap: Vec<u32>,        // packed bitmap
-    pub scalar_bank: [f32; 16],
     pub int_bank: [i32; 16],
     pub time_ms: f32,
     pub width: u32,
@@ -35,7 +34,6 @@ impl RenderFrame {
             texture_bank: Vec::new(),
             font: GpuFont::NONE,
             glyph_bitmap: Vec::new(),
-            scalar_bank: [0.0; 16],
             int_bank: [0; 16],
             time_ms: 0.0,
             width,

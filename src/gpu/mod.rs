@@ -44,6 +44,10 @@ struct GpuTextureDesc {
 
 /// Minimal uniforms for the shader — includes inlined header, anim_bank,
 /// and texture_bank to stay within GLES 4 storage buffer limit.
+///
+/// **Mirrors `GpuUniforms` in `sdf_render.wgsl` field for field.** A field
+/// added, removed or reordered on one side without the other silently shifts
+/// every field after it, so the two are edited together or not at all.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct MinimalUniforms {
@@ -53,7 +57,6 @@ struct MinimalUniforms {
     theme: [f32; 4],
     vec4_bank: [[f32; 4]; 16],
     vec3_bank: [[f32; 4]; 16],
-    scalar_bank: [[f32; 4]; 4],
     int_bank: [[i32; 4]; 4],
     zero_page: [[u32; 4]; 16],
     font: [u32; 4],
@@ -401,7 +404,7 @@ impl GpuSdfRenderer {
         draws: &[SdfDrawCmd],
         time_ms: f32,
     ) {
-        self.render_full(device, queue, target, width, height, draws, time_ms, &[0.0; 16], &[0; 16], &[], None);
+        self.render_full(device, queue, target, width, height, draws, time_ms, &[0; 16], &[], None);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -414,12 +417,11 @@ impl GpuSdfRenderer {
         height: u32,
         draws: &[SdfDrawCmd],
         time_ms: f32,
-        scalar_bank: &[f32],
         int_bank: &[i32],
         anim_bank: &[crate::core::Anim],
         font: Option<&crate::core::GpuFont>,
     ) {
-        self.render_full_scaled(device, queue, target, width, height, 1.0, draws, time_ms, scalar_bank, int_bank, anim_bank, font);
+        self.render_full_scaled(device, queue, target, width, height, 1.0, draws, time_ms, int_bank, anim_bank, font);
     }
 
     /// Lower and render a [`DrawList`] in one call: uploads its packed char
@@ -442,7 +444,7 @@ impl GpuSdfRenderer {
         self.upload_params(queue, &frame.param_bank);
         self.render_full_scaled(
             device, queue, target, width, height, scale,
-            &frame.draws, time_ms, &[0.0; 16], &[0; 16], &[], None,
+            &frame.draws, time_ms, &[0; 16], &[], None,
         );
     }
 
@@ -528,14 +530,13 @@ impl GpuSdfRenderer {
         scale: f32,
         draws: &[SdfDrawCmd],
         time_ms: f32,
-        scalar_bank: &[f32],
         int_bank: &[i32],
         anim_bank: &[crate::core::Anim],
         font: Option<&crate::core::GpuFont>,
     ) {
         self.render_full_scaled_with_load(
             device, queue, target, width, height, scale,
-            draws, time_ms, scalar_bank, int_bank, anim_bank, font, &[],
+            draws, time_ms, int_bank, anim_bank, font, &[],
             wgpu::LoadOp::Clear(wgpu::Color::BLACK),
         );
     }
@@ -553,14 +554,13 @@ impl GpuSdfRenderer {
         scale: f32,
         draws: &[SdfDrawCmd],
         time_ms: f32,
-        scalar_bank: &[f32],
         int_bank: &[i32],
         anim_bank: &[crate::core::Anim],
         font: Option<&crate::core::GpuFont>,
     ) {
         self.render_full_scaled_with_load(
             device, queue, target, width, height, scale,
-            draws, time_ms, scalar_bank, int_bank, anim_bank, font, &[],
+            draws, time_ms, int_bank, anim_bank, font, &[],
             wgpu::LoadOp::Load,
         );
     }
@@ -576,7 +576,6 @@ impl GpuSdfRenderer {
         scale: f32,
         draws: &[SdfDrawCmd],
         time_ms: f32,
-        scalar_bank: &[f32],
         int_bank: &[i32],
         anim_bank: &[crate::core::Anim],
         font: Option<&crate::core::GpuFont>,
@@ -591,7 +590,7 @@ impl GpuSdfRenderer {
         });
         self.render_full_scaled_with_load_into(
             &mut encoder, queue, target, width, height, scale,
-            draws, time_ms, scalar_bank, int_bank, anim_bank, font, texture_bank, load,
+            draws, time_ms, int_bank, anim_bank, font, texture_bank, load,
         );
         queue.submit(std::iter::once(encoder.finish()));
     }
@@ -614,14 +613,13 @@ impl GpuSdfRenderer {
         scale: f32,
         draws: &[SdfDrawCmd],
         time_ms: f32,
-        scalar_bank: &[f32],
         int_bank: &[i32],
         anim_bank: &[crate::core::Anim],
         font: Option<&crate::core::GpuFont>,
     ) {
         self.render_full_scaled_with_load_into(
             encoder, queue, target, width, height, scale,
-            draws, time_ms, scalar_bank, int_bank, anim_bank, font, &[],
+            draws, time_ms, int_bank, anim_bank, font, &[],
             wgpu::LoadOp::Load,
         );
     }
@@ -639,14 +637,13 @@ impl GpuSdfRenderer {
         scale: f32,
         draws: &[SdfDrawCmd],
         time_ms: f32,
-        scalar_bank: &[f32],
         int_bank: &[i32],
         anim_bank: &[crate::core::Anim],
         font: Option<&crate::core::GpuFont>,
     ) {
         self.render_full_scaled_with_load_into(
             encoder, queue, target, width, height, scale,
-            draws, time_ms, scalar_bank, int_bank, anim_bank, font, &[],
+            draws, time_ms, int_bank, anim_bank, font, &[],
             wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
         );
     }
@@ -664,7 +661,6 @@ impl GpuSdfRenderer {
         scale: f32,
         draws: &[SdfDrawCmd],
         time_ms: f32,
-        scalar_bank: &[f32],
         int_bank: &[i32],
         anim_bank: &[crate::core::Anim],
         font: Option<&crate::core::GpuFont>,
@@ -683,9 +679,6 @@ impl GpuSdfRenderer {
         uniforms.resolution = [width as f32, height as f32, scale, 0.0];
         uniforms.style_params = [self.lofi[0], self.lofi[1], 0.0, 0.0];
         uniforms.header = [count as u32, 0, 0, 0];
-        for (i, val) in scalar_bank.iter().take(16).enumerate() {
-            uniforms.scalar_bank[i / 4][i % 4] = *val;
-        }
         for (i, val) in int_bank.iter().take(16).enumerate() {
             uniforms.int_bank[i / 4][i % 4] = *val;
         }
@@ -750,7 +743,7 @@ impl GpuSdfRenderer {
             device, queue, target,
             frame.width, frame.height, frame.scale,
             &frame.draws, frame.time_ms,
-            &frame.scalar_bank, &frame.int_bank,
+            &frame.int_bank,
             &frame.anim_bank, Some(&frame.font),
             &frame.texture_bank,
             wgpu::LoadOp::Clear(wgpu::Color::BLACK),
