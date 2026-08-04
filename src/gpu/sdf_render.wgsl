@@ -30,13 +30,13 @@ struct DrawCmd {
     // forward affine lives at param_bank[(xform.x-1)*2] = [a,b,c,d] and
     // param_bank[(xform.x-1)*2+1] = [tx,ty,_,_].
     //
-    // .y is the per-instance FLAT flag (XFORM_FLAT in core::sdf): 0 = this
-    // instance casts the drop shadow filled shapes have always cast, nonzero
-    // = it casts none. It is the paint layer's whole vocabulary for M3
-    // elevation, and it lives here rather than in `params` because `params`
-    // is already full on SLAB/CIRCLE (radius) and SLAB_PC (aux index) — one
-    // decode below covers all four shadow-casting types. .z is the node-scoped
-    // blur radius and .w is the node-scoped alpha-ombre strength.
+    // .y is the per-instance RAISED flag (XFORM_RAISED in core::sdf): 0 (the
+    // default) = flat, this instance casts nothing; nonzero = it casts the
+    // drop shadow. It is the paint layer's whole vocabulary for M3 elevation,
+    // and it lives here rather than in `params` because `params` is already
+    // full on SLAB/CIRCLE (radius) and SLAB_PC (aux index) — one decode below
+    // covers every shadow-casting type, Bezier strokes included. .z is the
+    // node-scoped blur radius and .w is the node-scoped alpha-ombre strength.
     xform: vec4<f32>,
     // Scissor region for THIS instance: [min.x, min.y, max.x, max.y], already
     // intersected with every enclosing clip by the CPU (libmsdf's
@@ -307,11 +307,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
         var d: f32 = 1e6;
         var shadow_d: f32 = 1e6;
-        // Whether shadow_d (above) is meaningful for this command — box/
-        // slab/circle shapes always cast one; a Bézier stroke (case 10u)
-        // only does when the caller opts in via the high bit of its
-        // param_bank slot (see BEZIER_SHADOW_BIT), since most strokes
-        // (nav-graph arcs, icon glyphs) are not meant to be shadowed.
+        // Whether shadow_d (above) is meaningful for this command: box, slab,
+        // circle and Bezier-stroke shapes have a shadow to cast, an outline
+        // and a text run do not. Having one is not the same as casting it —
+        // the elevation gate below decides that, and it decides it once for
+        // every type.
         var shadow_on: bool = false;
 
         switch ty {
@@ -543,19 +543,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             case 10u: { // Cubic Bézier stroke (containment / flow arcs)
                 // pos = P0, size = P3 (absolute coords); params.y =
                 // thickness; params.w = bitcast param_bank index holding
-                // (C1.xy, C2.xy) — high bit (BEZIER_SHADOW_BIT) is a
-                // per-instance opt-in flag for the drop shadow below, set
-                // by dashed-border corner arcs so they read uniformly with
-                // the straight dash boxes; unset (the common case: nav-graph
-                // arcs, icon glyphs) leaves those strokes unshadowed as
-                // before. Degenerate fallback: straight segment.
+                // (C1.xy, C2.xy). Whether the stroke casts a shadow is the
+                // xform.y elevation flag every other type reads, declared by
+                // dashed-border corner arcs so they read uniformly with the
+                // straight dash boxes; nav-graph arcs and icon glyphs say
+                // nothing and stay unshadowed. It is decoded here rather than
+                // at the gate below only because the bbox reject needs it.
+                // Degenerate fallback: straight segment.
                 let p0 = cmd.pos;
                 let p3 = cmd.size;
                 var c1 = p0;
                 var c2 = p3;
-                let raw_idx = bitcast<u32>(cmd.params.w);
-                let wants_shadow = (raw_idx & 0x80000000u) != 0u;
-                let pidx = raw_idx & 0x7FFFFFFFu;
+                let wants_shadow = cmd.xform.y >= 0.5;
+                let pidx = bitcast<u32>(cmd.params.w);
                 if pidx < arrayLength(&param_bank) {
                     let ctrl = param_bank[pidx];
                     c1 = ctrl.xy;
@@ -582,19 +582,25 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             }
         }
 
-        // Elevation, per instance: a FLAT shape (xform.y == XFORM_FLAT) sits
-        // ON the surface behind it and casts nothing. Applied here rather
-        // than in each `case` so it reads as one rule over every caster —
-        // and so a shape that opted a Bézier stroke IN above can be turned
-        // off by the same declaration that turns a box off. `xform.y` is 0
-        // for every instance that says nothing, which is what keeps the
-        // renderer's historical unconditional shadow the default.
-        if cmd.xform.y >= 0.5 {
+        // Elevation, per instance: a shape casts the drop shadow only when it
+        // DECLARES that it is raised (xform.y == XFORM_RAISED). `xform.y` is 0
+        // for every instance that says nothing, so saying nothing is flat.
+        //
+        // It used to be the reverse — every filled shape cast one and the flag
+        // suppressed it — which was inherited behaviour rather than a design:
+        // authored TSX only ever used `elevation` to turn it OFF, and because
+        // the shadow is derived from the SHAPE and not from the instance's
+        // alpha, a fully transparent filled box still dimmed what was behind
+        // it.
+        //
+        // Applied here rather than in each `case` so it reads as one rule over
+        // every caster, filled shapes and Bezier strokes alike.
+        if cmd.xform.y < 0.5 {
             shadow_on = false;
         }
 
-        // Shadow (skip for outline/text, and for bezier strokes that don't
-        // opt in — see shadow_on above)
+        // Shadow (skip for outline/text, and for anything that did not declare
+        // itself raised — see shadow_on above)
         if shadow_on {
             let shadow_alpha = 0.15 * (1.0 - smoothstep(-1.0, 4.0, shadow_d));
             let shadow_color = vec4<f32>(0.0, 0.0, 0.0, shadow_alpha);

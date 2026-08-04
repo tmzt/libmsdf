@@ -21,24 +21,27 @@ pub const DRAW_TYPE_MSDF_TEXT: f32 = 8.0;
 pub const DRAW_TYPE_OUTLINE: f32 = 9.0;
 /// Cubic Bézier stroke (nav-graph arcs). pos = P0, size = P3 (absolute),
 /// params: [10, thickness, anim_idx, param_bank index → (C1.xy, C2.xy)].
-/// The param_bank index's high bit is [`BEZIER_SHADOW_BIT`], a per-instance
-/// opt-in for the drop shadow the shader casts under Box/Slab/Circle/SlabPC
-/// (see `sdf_render.wgsl`'s `shadow_on`) — most strokes (nav arcs, icon
-/// glyphs) leave it unset and render unshadowed as before.
+/// Whether the stroke casts a drop shadow is [`XFORM_RAISED`], the same slot
+/// every other type reads it from.
 pub const DRAW_TYPE_BEZIER: f32 = 10.0;
-/// High bit of the Bézier param_bank index (params.w, bitcast) that opts a
-/// stroke instance into the shader's drop shadow. Mirrored in
-/// `sdf_render.wgsl`'s case 10u decode — keep the two in sync.
-pub const BEZIER_SHADOW_BIT: u32 = 0x8000_0000;
 /// Rounded box with per-corner radii (e.g. the M3 modal nav drawer: square
 /// against the screen edge, rounded on the trailing side). Like SLAB but the
 /// four corner radii live in the aux param bank as [tl, tr, br, bl] (screen
 /// space, +x right / +y down). params: [11, 0, anim_idx, param_bank index].
 pub const DRAW_TYPE_SLAB_PC: f32 = 11.0;
 
-/// `xform[1]`, the per-instance **flat** flag: `0.0` (the default) leaves the
-/// instance casting the drop shadow every filled shape has always cast, and
-/// this value suppresses it.
+/// `xform[1]`, the per-instance **raised** flag: `0.0` (the default) is flat
+/// and casts nothing; this value makes the instance cast the renderer's drop
+/// shadow.
+///
+/// **A shadow is declared, never inherited.** It used to be the other way
+/// round — every filled shape cast one and `XFORM_FLAT` opted out — which was
+/// a default nothing had chosen: all fifteen `elevation` declarations in
+/// authored TSX were `elevation={0}`, i.e. authors only ever fighting it. It
+/// also could not be right, because the shader derives the shadow from the
+/// SHAPE and not from the instance's alpha, so a fully transparent filled box
+/// still dimmed what was behind it (the drawer scrim declared 0.4 and landed
+/// at an effective 0.49).
 ///
 /// It lives in `xform` rather than in `params` because `params` is already full
 /// on two of the four shadow-casting types (`params[1]` is the radius for SLAB
@@ -47,11 +50,11 @@ pub const DRAW_TYPE_SLAB_PC: f32 = 11.0;
 /// rather than four per-type ones. Mirrored in `sdf_render.wgsl`'s shadow block
 /// — keep the two in sync.
 ///
-/// The Bézier stroke's own shadow opt-IN ([`BEZIER_SHADOW_BIT`]) is the mirror
-/// image of this and stays where it is: strokes default to *no* shadow, filled
-/// shapes to having one, and neither default is changed by adding the other's
-/// knob.
-pub const XFORM_FLAT: f32 = 1.0;
+/// Bézier strokes read this same slot. They used to carry their own opt-in
+/// (a high bit on the param_bank index) because their default differed from
+/// the filled shapes'; once both default to no shadow the two flags said the
+/// identical thing, so there is one.
+pub const XFORM_RAISED: f32 = 1.0;
 
 /// Maximum draw commands per frame.
 pub const MAX_DRAW_CMDS: usize = 4096;
@@ -207,9 +210,9 @@ impl ClipRect {
 ///   params[1] = radius (Slab, Circle) / thickness (Outline, Bézier)
 ///   params[2] = anim_bank index (0 = no animation, 1+ = AnimBank[idx-1])
 ///   params[3] = slot (Text: string ref; Bézier: param_bank index, bitcast)
-/// xform:  [f32; 4]   [xform_idx, flat, blur_radius, alpha_ombre]
-///   xform[1] = [`XFORM_FLAT`] to suppress this instance's drop shadow, 0.0
-///     to cast it (the default for every filled shape).
+/// xform:  [f32; 4]   [xform_idx, raised, blur_radius, alpha_ombre]
+///   xform[1] = [`XFORM_RAISED`] to cast this instance's drop shadow, 0.0
+///     (the default for every instance) to stay flat.
 ///   xform[0] = SdfRotate transform bank index (0 = none/identity, 1+ =
 ///     `param_bank[(idx-1)*2]` = [a,b,c,d], `param_bank[(idx-1)*2+1]` =
 ///     [tx,ty,_,_] — the forward affine `x'=a*x+b*y+tx`, `y'=c*x+d*y+ty`.

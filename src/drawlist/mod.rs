@@ -13,9 +13,9 @@
 pub mod stream;
 
 use crate::core::sdf::{
-    BEZIER_SHADOW_BIT, ClipRect, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE,
+    ClipRect, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE,
     DRAW_TYPE_LINE, DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_SLAB, DRAW_TYPE_SLAB_PC,
-    SdfDrawCmd, XFORM_FLAT,
+    SdfDrawCmd, XFORM_RAISED,
 };
 use crate::font::atlas::FontAtlas;
 use crate::font::shaper::ShapedRun;
@@ -73,16 +73,14 @@ pub enum SdfKind {
     /// param slot in the wire format — outlines don't animate.
     Outline { radius: f32, thickness: f32 },
     /// Cubic Bézier stroke from `position` to `end` (absolute coords) with
-    /// control points `c1`, `c2` — nav-graph containment/flow arcs.
-    /// `shadow` opts this instance into the same drop shadow Box/RoundedBox/
-    /// Circle/RoundedBoxPerCorner cast (see [`DrawList::push_bezier_shadowed`]);
-    /// plain [`DrawList::push_bezier`] leaves it off, matching prior behavior.
+    /// control points `c1`, `c2` — nav-graph containment/flow arcs. Whether
+    /// it casts a drop shadow is an [`Elevation`] like every other kind's
+    /// ([`DrawList::push_bezier_shadowed`]), not a property of the kind.
     BezierStroke {
         c1: [f32; 2],
         c2: [f32; 2],
         end: [f32; 2],
         thickness: f32,
-        shadow: bool,
     },
     /// A shaped MSDF text run referencing `char_count` packed entries at
     /// `char_start` in the list's char buffer. Produced by
@@ -95,37 +93,43 @@ pub enum SdfKind {
 }
 
 /// **Whether an instance casts the renderer's drop shadow** — the paint
-/// layer's whole vocabulary for elevation, and the answer to what used to be
-/// an unconditional rule.
+/// layer's whole vocabulary for elevation.
 ///
-/// Every filled shape (Box / RoundedBox / RoundedBoxPerCorner / Circle) casts
-/// a soft offset shadow, and until this existed nothing could opt out. Two
-/// things followed, both load-bearing: paint order between *non-overlapping*
-/// neighbours a few pixels apart was visible, and **a surface spanning two
-/// abutting bands could not be split into one node per band**, because each
-/// band would shadow the one below and put a dark seam between them.
+/// **A shadow is declared, never inherited.** Every filled shape used to cast
+/// one unconditionally, an inherited behaviour rather than a designed one, and
+/// [`Elevation::Flat`] existed only to fight it. Three things say it was the
+/// wrong default. Paint order between *non-overlapping* neighbours a few
+/// pixels apart became visible. A surface spanning two abutting bands could
+/// not be split into one node per band, because each band shadowed the one
+/// below and drew a dark seam across it. And the shadow is derived from the
+/// SHAPE rather than from the instance's alpha, so a fully transparent filled
+/// box still dimmed what was behind it — which is how the drawer scrim landed
+/// at an effective 0.49 while declaring 0.4. Every one of the fifteen
+/// `elevation` declarations in authored TSX was `elevation={0}`: not one
+/// author ever asked for the shadow, and all of them opted out of it.
+///
+/// So [`Elevation::Flat`] is now the default, and a caster says so.
 ///
 /// **What this type is NOT.** It is not an M3 elevation scale. This layer owns
 /// one shadow and knows whether to cast it; *which* elevation level a surface
 /// is at, and therefore whether it should, is a design-system question that
-/// belongs above the renderer — see `libteststand`'s `elevation` node prop,
-/// which maps a declared M3 level onto this. Growing a per-level shadow spec
-/// (offset/reach/alpha as a function of dp) is the honest next step and is
-/// deliberately not taken here: it would change every existing frame, and it
-/// is not what unblocked the split.
-///
-/// [`Elevation::Default`] is what an instance pushed through
-/// [`DrawList::push`] gets, so nothing that does not ask changes.
+/// belongs above the renderer — see `libteststand`'s and `libhbui`'s
+/// `elevation` node prop, which map a declared M3 level onto this. Growing a
+/// per-level shadow spec (offset/reach/alpha as a function of dp) is the
+/// honest next step and is deliberately not taken here.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub enum Elevation {
-    /// Cast the shadow — the behaviour every filled shape has always had, and
-    /// what [`DrawList::push`] tags an instance with.
-    #[default]
-    Default,
     /// **Flat**: the shape sits directly on whatever is behind it and casts
     /// nothing. M3 elevation level 0 — a `surface` app bar at rest, a status
-    /// strip, any band abutting another band of the same surface.
+    /// strip, any band abutting another band of the same surface — and what
+    /// [`DrawList::push`] tags an instance with, so a caller that says nothing
+    /// casts nothing.
+    #[default]
     Flat,
+    /// **Raised**: cast the soft offset drop shadow. The one thing a caller
+    /// declares to get one, through [`DrawList::push_fill`] or
+    /// [`DrawList::push_bezier_shadowed`].
+    Raised,
 }
 
 /// Visual effects inherited by every instance emitted in a node scope.
@@ -139,11 +143,11 @@ pub struct DrawEffects {
 
 impl Elevation {
     /// This elevation as the wire format's `xform[1]` (see
-    /// [`crate::core::sdf::XFORM_FLAT`]).
+    /// [`crate::core::sdf::XFORM_RAISED`]).
     fn to_wire(self) -> f32 {
         match self {
-            Elevation::Default => 0.0,
-            Elevation::Flat => XFORM_FLAT,
+            Elevation::Flat => 0.0,
+            Elevation::Raised => XFORM_RAISED,
         }
     }
 }
@@ -350,8 +354,8 @@ pub struct DrawList {
     /// Parallel to `instances` in exactly the way `instance_transforms` is,
     /// and a side channel for exactly the same reason (see its doc): the
     /// [`Elevation`] each instance was pushed at. [`DrawList::push`] tags
-    /// [`Elevation::Default`]; [`DrawList::push_fill`] is the door for
-    /// anything else.
+    /// [`Elevation::Flat`]; [`DrawList::push_fill`] is the door for anything
+    /// else.
     instance_elevation: Vec<Elevation>,
     /// Stack of node-scoped visual effects. Every pushed instance snapshots
     /// the current top, so descendants inherit without special push methods.
@@ -412,7 +416,7 @@ impl DrawList {
     /// caller has to know about the rotate stack.
     pub fn push(&mut self, instance: SdfInstance) {
         self.instance_transforms.push(self.active_transform());
-        self.instance_elevation.push(Elevation::Default);
+        self.instance_elevation.push(Elevation::Flat);
         self.instance_effects.push(self.active_effects.last().copied().unwrap_or_default());
         self.instance_clips.push(self.active_clip());
         self.instances.push(instance);
@@ -472,14 +476,13 @@ impl DrawList {
     }
 
     /// [`DrawList::push`], at an explicit [`Elevation`] — the one way to say
-    /// that a filled shape casts **no** drop shadow.
+    /// that a filled shape casts a drop shadow.
     ///
     /// Named for the *fill* because that is the whole of what it affects: the
-    /// four filled shape kinds are the only unconditional casters, an
-    /// `Outline` and an MSDF run never cast one, and a Bézier stroke has its
-    /// own opt-IN ([`DrawList::push_bezier_shadowed`]). Passing a non-filled
-    /// kind here is harmless and inert rather than an error — the shader
-    /// simply has no shadow to suppress.
+    /// four filled shape kinds and the Bézier stroke are the only shapes with
+    /// a shadow to cast, and an `Outline` or an MSDF run never has one.
+    /// Passing a kind that cannot cast is harmless and inert rather than an
+    /// error — the shader simply has no shadow to raise.
     ///
     /// It routes through [`DrawList::push`] rather than beside it, so that
     /// method stays the single point at which an instance enters the list —
@@ -529,7 +532,7 @@ impl DrawList {
         color: [f32; 4],
     ) {
         self.push(SdfInstance {
-            kind: SdfKind::BezierStroke { c1, c2, end: p3, thickness, shadow: false },
+            kind: SdfKind::BezierStroke { c1, c2, end: p3, thickness },
             position: p0,
             size: [0.0, 0.0],
             color,
@@ -537,11 +540,11 @@ impl DrawList {
         });
     }
 
-    /// Same as [`DrawList::push_bezier`], but the stroke casts the same
-    /// offset drop shadow as filled shapes (Box/RoundedBox/Circle). For
-    /// strokes that stand in for a shadowed shape's outline — e.g. the
-    /// rounded-corner arcs of a dashed border whose straight runs are drawn
-    /// as shadowed boxes — so the shadow reads continuously across both.
+    /// Same as [`DrawList::push_bezier`], but the stroke is
+    /// [`Elevation::Raised`] and casts the offset drop shadow. For strokes
+    /// that stand in for a raised shape's outline — e.g. the rounded-corner
+    /// arcs of a dashed border whose straight runs are drawn as raised boxes
+    /// — so the shadow reads continuously across both.
     pub fn push_bezier_shadowed(
         &mut self,
         p0: [f32; 2],
@@ -551,13 +554,16 @@ impl DrawList {
         thickness: f32,
         color: [f32; 4],
     ) {
-        self.push(SdfInstance {
-            kind: SdfKind::BezierStroke { c1, c2, end: p3, thickness, shadow: true },
-            position: p0,
-            size: [0.0, 0.0],
-            color,
-            anim: 0,
-        });
+        self.push_fill(
+            SdfInstance {
+                kind: SdfKind::BezierStroke { c1, c2, end: p3, thickness },
+                position: p0,
+                size: [0.0, 0.0],
+                color,
+                anim: 0,
+            },
+            Elevation::Raised,
+        );
     }
 
     /// Begin a rectangular scissor clip at `pos`/`size`. Instances pushed
@@ -754,15 +760,13 @@ impl DrawList {
                     // quirk inherited from upstream) — anim unsupported.
                     [DRAW_TYPE_OUTLINE, radius, thickness, 0.0],
                 ),
-                SdfKind::BezierStroke { c1, c2, end, thickness, shadow } => {
+                SdfKind::BezierStroke { c1, c2, end, thickness } => {
                     let idx = param_bank.len() as u32;
-                    debug_assert!(idx & BEZIER_SHADOW_BIT == 0, "param_bank overflowed the Bézier shadow flag bit");
                     param_bank.push([c1[0], c1[1], c2[0], c2[1]]);
-                    let slot = if shadow { idx | BEZIER_SHADOW_BIT } else { idx };
                     (
                         inst.position,
                         end,
-                        [DRAW_TYPE_BEZIER, thickness, anim, f32::from_bits(slot)],
+                        [DRAW_TYPE_BEZIER, thickness, anim, f32::from_bits(idx)],
                     )
                 }
                 SdfKind::MsdfText { char_start, char_count, px_range } => {
@@ -858,15 +862,15 @@ mod tests {
         assert_eq!(frame.param_bank[idx], [0.0, 16.0, 16.0, 0.0]);
     }
 
-    /// **An instance can say it is flat, and one that says nothing is not.**
+    /// **An instance casts a shadow only if it says so, and saying nothing is
+    /// flat.**
     ///
     /// The default is asserted first and asserted on `push` itself, because
-    /// the whole safety of adding this knob is that every existing caller —
-    /// which is every caller — keeps lowering to exactly the bytes it did
-    /// before. The flag rides `xform[1]`, so it is also asserted not to
+    /// that is the whole of the rule: a caller that never heard of [`Elevation`]
+    /// gets no shadow. The flag rides `xform[1]`, so it is also asserted not to
     /// disturb `xform[0]`, which the rotate stack owns.
     #[test]
-    fn an_instance_can_be_pushed_flat_and_the_default_is_unchanged() {
+    fn an_instance_casts_a_shadow_only_when_it_declares_one() {
         let boxy = |y: f32| SdfInstance {
             kind: SdfKind::Box,
             position: [0.0, y],
@@ -878,12 +882,13 @@ mod tests {
         let mut list = DrawList::new();
         list.push(boxy(0.0));
         list.push_fill(boxy(10.0), Elevation::Flat);
-        list.push_fill(boxy(20.0), Elevation::Default);
+        list.push_fill(boxy(20.0), Elevation::Raised);
         let frame = list.lower();
 
-        assert_eq!(frame.draws[0].xform, [0.0, 0.0, 0.0, 0.0], "push says nothing");
-        assert_eq!(frame.draws[1].xform, [0.0, XFORM_FLAT, 0.0, 0.0], "flat is on the wire");
-        assert_eq!(frame.draws[2].xform, [0.0, 0.0, 0.0, 0.0], "an explicit default is the default");
+        assert_eq!(frame.draws[0].xform, [0.0, 0.0, 0.0, 0.0], "push says nothing, so it is flat");
+        assert_eq!(frame.draws[1].xform, [0.0, 0.0, 0.0, 0.0], "an explicit flat is the default");
+        assert_eq!(frame.draws[2].xform, [0.0, XFORM_RAISED, 0.0, 0.0], "raised is on the wire");
+        assert_eq!(Elevation::default(), Elevation::Flat, "and the default IS flat");
         // Nothing but xform[1] moved: the three commands are otherwise the
         // same shape, and the rotate slot is untouched.
         for d in &frame.draws {
@@ -895,11 +900,33 @@ mod tests {
         // own slot it must not collide with.
         let mut list = DrawList::new();
         list.push_rotate(SdfRotate::Quarter(1), [5.0, 5.0]);
-        list.push_fill(boxy(0.0), Elevation::Flat);
+        list.push_fill(boxy(0.0), Elevation::Raised);
         list.push_rotate_end();
         let frame = list.lower();
         assert_eq!(frame.draws[0].xform[0], 1.0, "the rotate id still lands in xform[0]");
-        assert_eq!(frame.draws[0].xform[1], XFORM_FLAT);
+        assert_eq!(frame.draws[0].xform[1], XFORM_RAISED);
+    }
+
+    /// A Bezier stroke reads the SAME `xform[1]` slot as every filled shape.
+    ///
+    /// It used to carry its own opt-in as the high bit of the param_bank index
+    /// in `params[3]`, because strokes defaulted to no shadow while filled
+    /// shapes defaulted to having one. Now that both default to none the two
+    /// flags say one thing, so there is one flag — and the index is a whole
+    /// u32 again, which this asserts by leaving the top bit free.
+    #[test]
+    fn a_bezier_declares_its_shadow_in_the_elevation_slot_like_everything_else() {
+        let mut list = DrawList::new();
+        list.push_bezier([0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0], 2.0, [1.0; 4]);
+        list.push_bezier_shadowed([0.0, 9.0], [1.0, 9.0], [2.0, 9.0], [3.0, 9.0], 2.0, [1.0; 4]);
+        let frame = list.lower();
+
+        assert_eq!(frame.draws[0].xform[1], 0.0, "a plain stroke casts nothing");
+        assert_eq!(frame.draws[1].xform[1], XFORM_RAISED, "a shadowed one declares it");
+        // The param_bank index is unflagged in both: dense, and 0/1 rather
+        // than 1 | 0x8000_0000.
+        assert_eq!(frame.draws[0].params[3].to_bits(), 0);
+        assert_eq!(frame.draws[1].params[3].to_bits(), 1);
     }
 
     /// `clear` resets the elevation channel with everything else — a reused
