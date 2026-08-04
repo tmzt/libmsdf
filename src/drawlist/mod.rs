@@ -447,6 +447,44 @@ impl DrawList {
         &self.instance_clips
     }
 
+    /// Move every instance from `start` onward by `(dx, dy)` — **ink and
+    /// scissor together**.
+    ///
+    /// For a host that renders a sub-scene in its own local coordinates and
+    /// then places the result: draw into the list, then translate the range
+    /// that appeared.
+    ///
+    /// **Why this is a method and not a loop at the call site.** An instance's
+    /// bound is now per-instance data ([`DrawList::push_clip`]) rather than a
+    /// pair of control commands in the stream. Under the old encoding a caller
+    /// could translate a range by walking `instances` and adding to each
+    /// `position`, and the clip came along because the markers WERE instances
+    /// with positions of their own. Under this one that same loop moves the ink
+    /// out from under its own scissor and the range disappears — silently, with
+    /// a correct draw list, a successful draw call and no ink. That is not a
+    /// hypothetical: it is what blanked the IDE's hi-fi pane, where 154 fully
+    /// opaque instances were scissored to a rect 674px to their left.
+    ///
+    /// So the two are moved by ONE operation that cannot be half-applied.
+    pub fn translate_from(&mut self, start: usize, dx: f32, dy: f32) {
+        if start >= self.instances.len() {
+            return;
+        }
+        for instance in &mut self.instances[start..] {
+            instance.position[0] += dx;
+            instance.position[1] += dy;
+        }
+        for clip in &mut self.instance_clips[start..] {
+            if clip.is_unbounded() {
+                continue;
+            }
+            clip.min[0] += dx;
+            clip.min[1] += dy;
+            clip.max[0] += dx;
+            clip.max[1] += dy;
+        }
+    }
+
     /// The DISTINCT scissor regions this list's ink was drawn under, in order
     /// of first appearance; unbounded ink contributes nothing.
     ///
@@ -1261,5 +1299,75 @@ mod tests {
         let frame = list.lower();
         assert_eq!(frame.draws[0].xform, [0.0, 0.0, 4.0, 0.5]);
         assert_eq!(frame.draws[1].xform, [0.0, 0.0, 0.0, 0.0]);
+    }
+    /// **`translate_from` moves the scissor with the ink.**
+    ///
+    /// The regression it exists to make unrepresentable: translating a
+    /// sub-scene by walking `instances` and adding to `position` leaves each
+    /// instance's clip at the sub-scene's own origin, so the ink lands outside
+    /// its own bound and vanishes. Nothing downstream reports it - the list is
+    /// well formed and the draw call succeeds - so the assertion has to be
+    /// here, on the clip, and not on "did it draw".
+    #[test]
+    fn translating_a_range_moves_each_instances_clip_with_it() {
+        let boxy = |x: f32| SdfInstance {
+            kind: SdfKind::Box,
+            position: [x, 0.0],
+            size: [10.0, 10.0],
+            color: [1.0; 4],
+            anim: 0,
+        };
+
+        let mut list = DrawList::new();
+        // An UNCLIPPED instance before the range, which must not move at all.
+        list.push(boxy(0.0));
+        let start = list.instances.len();
+        list.push_clip([0.0, 0.0], [100.0, 50.0]);
+        list.push(boxy(5.0));
+        list.push_clip_end();
+        // ...and a clipless one inside the range: it moves, its bound stays
+        // unbounded rather than becoming a rect centred on nothing.
+        list.push(boxy(7.0));
+
+        list.translate_from(start, 674.0, 114.0);
+
+        assert_eq!(list.instances[0].position, [0.0, 0.0], "before the range, untouched");
+        assert!(list.instance_clip(0).is_none(), "and still unbounded");
+
+        assert_eq!(list.instances[start].position, [679.0, 114.0], "ink moved");
+        let clip = list.instance_clip(start).expect("it was clipped");
+        assert_eq!(clip.min, [674.0, 114.0], "and its scissor moved WITH it");
+        assert_eq!(clip.max, [774.0, 164.0]);
+        // The instance is inside its own bound after the move - the whole
+        // point, and the thing that was false before.
+        let i = list.instances[start];
+        assert!(
+            i.position[0] >= clip.min[0] && i.position[1] >= clip.min[1]
+                && i.position[0] + i.size[0] <= clip.max[0],
+            "the ink must still be inside its scissor: {:?} in {clip:?}", i.position
+        );
+
+        assert_eq!(list.instances[start + 1].position, [681.0, 114.0]);
+        assert!(
+            list.instance_clip(start + 1).is_none(),
+            "an unbounded clip stays unbounded - translating 1e30 would overflow it into nonsense"
+        );
+    }
+
+    /// Translating past the end is a no-op, not a panic: a host that drew
+    /// nothing (an empty sub-scene) still calls this with `start ==  len`.
+    #[test]
+    fn translating_an_empty_range_is_a_no_op() {
+        let mut list = DrawList::new();
+        list.push(SdfInstance {
+            kind: SdfKind::Box,
+            position: [1.0, 2.0],
+            size: [3.0, 4.0],
+            color: [1.0; 4],
+            anim: 0,
+        });
+        let start = list.instances.len();
+        list.translate_from(start, 50.0, 50.0);
+        assert_eq!(list.instances[0].position, [1.0, 2.0]);
     }
 }
