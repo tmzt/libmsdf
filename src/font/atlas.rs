@@ -442,6 +442,49 @@ impl FontAtlasBuilder {
             }
         }
     }
+
+    /// **Queue exactly what a bundled face ships**, so the bake and
+    /// [`crate::font::TEXT_RANGES`] cannot disagree about coverage.
+    ///
+    /// Stated as ranges the face is asked about, never as a list of glyphs:
+    /// a face that defines nothing in [`crate::font::PRIVATE_USE`] (plain
+    /// Roboto) queues nothing for it, and one that does (the merged icon face)
+    /// picks its icons up without this ever learning an icon set.
+    ///
+    /// **The order is append-only, and that is load-bearing.** Cells are packed
+    /// in queue order, so a glyph's atlas coordinates and its glyph-table index
+    /// are both fixed by how many glyphs were queued before it. Appending a new
+    /// range leaves every existing cell exactly where it was and simply makes
+    /// the atlas taller — a re-bake is then a strict superset of the last one,
+    /// and a rendered frame that moves is a real finding rather than repacking
+    /// noise. Inserting in the middle would renumber everything after it.
+    /// Hence Latin-1 sits after the Private Use Area here even though it reads
+    /// backwards: ASCII and the icons were baked first.
+    pub fn add_shipped_coverage(&mut self) {
+        // cmap lookups for printable ASCII...
+        debug_assert_eq!(
+            crate::font::TEXT_RANGES[0],
+            ('\u{0020}', '\u{007E}'),
+            "the first declared range is the one `add_ascii` covers, and the tail \
+             below is queued on that basis - reordering TEXT_RANGES here would \
+             silently drop a range or bake one twice"
+        );
+        self.add_ascii();
+        // ...unioned with what the SHAPER emits for it, which is a superset.
+        self.add_shaped_ascii();
+        // Our own glyphs.
+        let (pua_lo, pua_hi) = crate::font::PRIVATE_USE;
+        self.add_codepoint_range(pua_lo, pua_hi);
+        // Latin-1 Supplement (appended; see above).
+        for &(lo, hi) in &crate::font::TEXT_RANGES[1..] {
+            self.add_codepoint_range(lo, hi);
+        }
+        // **The placeholder.** Queued explicitly because no codepoint maps to
+        // it: `cmap` cannot name glyph 0, so no `add_codepoint_range` will ever
+        // reach it, and without a cell every uncovered character is back to
+        // drawing nothing. Last, so it never shifts a cell that already exists.
+        self.add_glyph(0);
+    }
 }
 
 /// One baked glyph cell: RGB MSDF pixels (`gs × gs × 3`, top-down rows) and

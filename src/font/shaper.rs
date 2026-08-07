@@ -40,6 +40,21 @@ impl ShapedRun {
     pub fn to_px(&self, units: i32, font_size: f32) -> f32 {
         units as f32 * font_size / self.units_per_em as f32
     }
+
+    /// **How many characters of this run the face could not draw**, and will
+    /// therefore render as the placeholder box.
+    ///
+    /// The non-aborting successor to the `.notdef` panic
+    /// [`TextShaper::shape`] used to carry. A run that contains one of these
+    /// is not an error — it is what a user typed, or what a server sent — so
+    /// this reports rather than decides, and every caller is free to ignore it.
+    /// What it is for is the case the panic was actually right about: a test or
+    /// a lint asserting that a string the REPO authored stays inside
+    /// [`crate::font::TEXT_RANGES`], without that assertion also being able to
+    /// fire on a stranger's name.
+    pub fn notdef_count(&self) -> usize {
+        self.glyphs.iter().filter(|g| g.glyph_id == 0).count()
+    }
 }
 
 /// Text shaper backed by rustybuzz.
@@ -116,6 +131,33 @@ impl TextShaper {
         let mut total_advance = 0i32;
 
         for (info, pos) in infos.iter().zip(positions.iter()) {
+            // **A control character is dropped, not drawn.**
+            //
+            // It shapes to `.notdef` like anything else the face cannot draw,
+            // and `.notdef` is now a visible box - but the box means "this face
+            // has no glyph for a character that has one", and a `'\n'` has no
+            // glyph in ANY face. Drawing one would put a box in the middle of
+            // every multi-line string that reaches a run: tool output, a chat
+            // transcript, a pasted paragraph. Dropping it is what every text
+            // engine does with C0, and it is the same set the editor's typed
+            // input already filters on (`char::is_control`).
+            //
+            // Dropped rather than zero-advanced so nothing downstream has to
+            // special-case an invisible glyph. Safe because glyphs are mapped
+            // back to text by `cluster` (a byte offset), never by position -
+            // `libhbui::draw`'s caret bounds and `place`'s breaker both.
+            //
+            // This does NOT make a hard break work: the run simply loses it, so
+            // two paragraphs run together on one line. Wrapping a `'\n'` still
+            // needs the draw side to shape per paragraph.
+            if info.glyph_id == 0
+                && text
+                    .get(info.cluster as usize..)
+                    .and_then(|s| s.chars().next())
+                    .is_some_and(char::is_control)
+            {
+                continue;
+            }
             glyphs.push(ShapedGlyph {
                 glyph_id: info.glyph_id as u16,
                 x_advance: pos.x_advance,
@@ -126,37 +168,29 @@ impl TextShaper {
             total_advance += pos.x_advance;
         }
 
-        // **A codepoint this face cannot draw renders as NOTHING, silently.**
-        // The baked face is an ASCII subset, so an em-dash, a curly quote or an
-        // ellipsis shapes to `.notdef` (glyph 0), which the atlas has no cell
-        // for - the text simply loses a character, with no warning anywhere.
+        // **A codepoint this face cannot draw shapes to glyph 0, and glyph 0 is
+        // a BOX** ([`crate::font::ROBOTO_REGULAR_ASCII`]). Nothing is checked
+        // here, and nothing needs to be.
         //
-        // That has shipped three times: two module-error messages formatted
-        // with curly quotes, and a truncation marker that was U+2026, so a
-        // clipped string lost the very mark that said it was clipped. All three
-        // were found by eye, long after the fact, and the reviewer's ASCII grep
-        // could not see any of them because it only inspects strings added in
-        // the diff under review.
+        // There used to be a debug-only `panic!` on exactly this condition. It
+        // was written for AUTHORED text, where a curly quote in a label is a
+        // bug in the label, and at the time it was the only thing standing
+        // between an em-dash and an invisible gap. The premise - that
+        // everything drawn is authored source - was false: the signed-in user's
+        // display name, chat transcript rows, raw tool output, synced data
+        // cells and the editor buffer all reach this function, and a user
+        // called `José` was enough to abort a pane. Shipping with assertions
+        // off did not fix that, it only traded the crash back for the gap.
         //
-        // Debug-only: this is the text hot path, and a release build must not
-        // pay for it. Checked here rather than at `push_shaped_text` because by
-        // then the run is glyph ids and the offending character is gone.
+        // Both failures had the same root, which was that a missing glyph drew
+        // NOTHING. It draws a box now, so the honest answer is available to
+        // every caller without either a panic or a scrubbing pass: authored
+        // text that steps outside coverage shows a box in the review frames,
+        // and runtime text that does shows a box to the user, which is what a
+        // user of any other application would see.
         //
-        // Deliberately `.notdef`-based rather than an `is_ascii()` assertion:
-        // it asks what this face can actually draw, so widening the atlas
-        // relaxes the check automatically instead of leaving a stale rule.
-        #[cfg(debug_assertions)]
-        if let Some(bad) = glyphs.iter().find(|g| g.glyph_id == 0) {
-            let ch = text[bad.cluster as usize..].chars().next().unwrap_or('\u{fffd}');
-            panic!(
-                "text contains a character this face cannot draw, so it would render as an \
-                 INVISIBLE GAP: {ch:?} (U+{:04X}) at byte {} of {text:?}.\n\
-                 The baked atlas is an ASCII subset. Use the ASCII equivalent -- '...' not an \
-                 ellipsis, \"quotes\" not curly ones, '-' not an em-dash. Comments and test \
-                 names are unaffected; anything DRAWN is not.",
-                ch as u32, bad.cluster
-            );
-        }
+        // A caller that wants the fact rather than the pixels asks
+        // [`ShapedRun::notdef_count`].
 
         ShapedRun {
             glyphs,
@@ -170,16 +204,23 @@ impl TextShaper {
         self.units_per_em
     }
 
-    /// **Can this face draw `ch`?** A cmap lookup, and the non-panicking form
-    /// of the `.notdef` guard in [`TextShaper::shape`].
+    /// **Can this face draw `ch`?** A cmap lookup — asked BEFORE shaping, by a
+    /// caller for whom the placeholder box is the wrong answer.
     ///
-    /// The guard is right to panic for *authored text*: a curly quote in a
-    /// label is a bug in the label, and losing it silently is the failure mode
-    /// it exists to stop. But a caller that resolves a NAME to a codepoint -
-    /// an icon - has a legitimate reason to ask first and report a miss as a
-    /// missing asset instead of aborting the frame. Asking here is how it does
-    /// that without reaching for its own font parser, and without the answer
-    /// coming from a hard-coded list that can drift from the face.
+    /// That caller is the icon path (see
+    /// [`crate::font::msymbols_codepoint`]). Text wants the box: a character
+    /// the face has no glyph for is the user's, and a box says so while
+    /// leaving the rest of the string readable. An icon does not: a name in
+    /// the coverage manifest that the live face turns out not to carry is a
+    /// missing ASSET, which Rule 28 says to report, and a box drawn in its
+    /// place would disguise the gap as a rendering quirk. Asking here is how
+    /// that caller distinguishes the two without reaching for its own font
+    /// parser, and without the answer coming from a hard-coded list that can
+    /// drift from the face.
+    ///
+    /// **Glyph 0 gaining an outline did not change this.** The `!= 0` test is
+    /// about the cmap, which cannot name glyph 0 at all; a codepoint the face
+    /// does not map answers `false` exactly as before.
     pub fn covers(&self, ch: char) -> bool {
         ttf_parser::Face::parse(&self.face_data, 0)
             .ok()
@@ -296,37 +337,51 @@ mod tests {
     }
 }
 
+/// What used to be `notdef_guard_control`: the same three strings, asserting
+/// the opposite outcome now that an uncovered character draws a box instead of
+/// aborting a debug build.
+///
+/// Coverage and the box are checked against the REAL BAKED ATLAS in
+/// `tests/coverage.rs`; these only pin the shaper's half.
 #[cfg(test)]
-mod notdef_guard_control {
+mod uncovered_text_shapes_to_the_placeholder {
     use super::TextShaper;
 
     fn shaper() -> TextShaper {
-        let data = std::fs::read(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/fonts/Roboto-Regular-ascii.ttf"
-        ))
-        .expect("the baked ASCII face");
-        TextShaper::new(data).expect("face parses")
+        TextShaper::new(crate::font::ROBOTO_REGULAR_ASCII.to_vec()).expect("face parses")
     }
 
-    /// The guard must FIRE. A check nobody has watched fail is not known to
-    /// work -- three invisible-glyph bugs shipped past a grep that was being
-    /// run correctly.
+    /// The strings that used to abort a debug build. A user's name is the case
+    /// that mattered - a curly quote is a bug in a label, but `José` is a
+    /// person, and neither one may take the frame down.
     #[test]
-    #[should_panic(expected = "INVISIBLE GAP")]
-    fn a_curly_quote_is_refused() {
-        let _ = shaper().shape("Script \u{201c}Chat\u{201d}");
+    fn a_curly_quote_and_an_ellipsis_and_a_name_all_shape() {
+        for text in ["Script \u{201c}Chat\u{201d}", "clipped\u{2026}", "Jos\u{e9}"] {
+            let run = shaper().shape(text);
+            assert_eq!(
+                run.glyphs.len(),
+                text.chars().count(),
+                "every character keeps a glyph and an advance in {text:?}"
+            );
+        }
     }
 
+    /// ...and the count is right, which is what tells the two apart: the curly
+    /// quotes are outside coverage and get the box, the accented `e` is INSIDE
+    /// it now and must not.
     #[test]
-    #[should_panic(expected = "INVISIBLE GAP")]
-    fn an_ellipsis_is_refused() {
-        let _ = shaper().shape("clipped\u{2026}");
+    fn only_the_uncovered_characters_become_the_box() {
+        assert_eq!(shaper().shape("Script \u{201c}Chat\u{201d}").notdef_count(), 2);
+        assert_eq!(shaper().shape("clipped\u{2026}").notdef_count(), 1);
+        assert_eq!(shaper().shape("Jos\u{e9} M\u{fc}ller").notdef_count(), 0);
     }
 
-    /// ...and must not fire on the ASCII the app actually draws.
+    /// Vacuity pin: a run of plain ASCII has no placeholders at all, so the
+    /// counts above are measuring something.
     #[test]
     fn plain_ascii_shapes_fine() {
-        assert!(!shaper().shape("Script 'Chat': clipped...").glyphs.is_empty());
+        let run = shaper().shape("Script 'Chat': clipped...");
+        assert!(!run.glyphs.is_empty());
+        assert_eq!(run.notdef_count(), 0);
     }
 }

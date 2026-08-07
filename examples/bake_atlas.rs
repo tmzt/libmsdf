@@ -13,9 +13,12 @@
 //! [`libmsdf::FontAtlas::min_antialiased_font_size`] (48px cells at 6.0 →
 //! 6.15px, covering the ZUI's 8px zoomed-out graph labels).
 //!
-//! Every bake also picks up whatever the face defines in the **Private Use
-//! Area**, which is where an icon font puts its glyphs. That is how
-//! `libhbui`'s atlas gets its Material Symbols cells:
+//! What gets baked is [`libmsdf::FontAtlasBuilder::add_shipped_coverage`] and
+//! nothing else — the text ranges, whatever the face defines in the **Private
+//! Use Area** (which is where an icon font puts its glyphs), and glyph 0's
+//! placeholder box. This tool therefore never learns an icon set or a
+//! codepoint list; changing coverage is a change to that one method. That is
+//! how `libhbui`'s atlas gets its Material Symbols cells:
 //!
 //! ```text
 //! cargo run -p libmsdf --features cpu-bake --example bake_atlas -- \
@@ -24,8 +27,12 @@
 //! ```
 //!
 //! Plain Roboto defines no PUA glyph, so that step queues nothing for it and
-//! re-baking `Roboto-Regular-ascii.ttf` still reproduces the shipped
-//! `src/assets/roboto-ascii-48.atlas` byte for byte.
+//! the two bakes differ only by the nine icon cells.
+//!
+//! The queue is append-only, so a re-bake after a coverage widening is a
+//! strict SUPERSET of the previous one: every cell that existed keeps its
+//! atlas coordinates and its glyph-table index, and the texture just gets
+//! taller. A rendered frame that moves after a re-bake is a real finding.
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
@@ -45,17 +52,7 @@ fn main() {
     let px_range: f64 = args.get(4).map(|s| s.parse().expect("px_range")).unwrap_or(6.0);
 
     let mut builder = libmsdf::FontAtlasBuilder::new(font_data, glyph_size, px_range);
-    builder.add_ascii();
-    // Union with everything the SHAPER can emit for printable ASCII — GSUB
-    // digit remaps and, crucially, the fi/fl/ffi/ffl ligatures, which only
-    // appear for ADJACENT characters and would otherwise draw blank.
-    builder.add_shaped_ascii();
-    // Whatever the face defines in the Private Use Area, which is where an
-    // icon font puts its glyphs — Material Symbols' `menu` is U+E5D2. Stated
-    // as "this face's PUA coverage" rather than a list of names so the bake
-    // tool never has to learn an icon set: a face that defines no PUA glyph
-    // (plain Roboto) queues nothing and bakes byte-identically to before.
-    builder.add_codepoint_range('\u{E000}', '\u{F8FF}');
+    builder.add_shipped_coverage();
     let atlas = builder.build().expect("atlas bake failed");
     let bytes = atlas.to_bytes();
     std::fs::write(&out_path, &bytes).expect("write atlas");

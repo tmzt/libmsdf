@@ -642,7 +642,9 @@ impl DrawList {
     /// box (`font_size * LINE_BOX_RATIO` tall). Glyph advances come from
     /// the shaper (kerning included), encoded as deltas against the atlas's
     /// standard advances exactly like the extracted mtd1 lowering. Glyphs
-    /// missing from the atlas fall back to table index 0.
+    /// missing from the atlas fall back to the atlas's glyph 0 — the
+    /// placeholder box — and only to table index 0 when the atlas has no
+    /// glyph 0 either.
     ///
     /// Keep `font_size` at or above the atlas's
     /// [`FontAtlas::min_antialiased_font_size`] for `px_range`: that is where
@@ -687,7 +689,26 @@ impl DrawList {
 
         for g in &run.glyphs {
             let advance_px = g.x_advance as f32 * scale;
-            let (table_idx, std_advance_norm) = match atlas.glyph_table_index(g.glyph_id) {
+            // A glyph with no atlas cell falls back to the atlas's own glyph 0,
+            // which a shipped bake draws as the placeholder box
+            // ([`crate::font::ROBOTO_REGULAR_ASCII`]).
+            //
+            // The shaper already sends an UNCOVERED CODEPOINT here as glyph 0,
+            // so that case is the first arm and needs nothing. This second arm
+            // is the other way to lose a glyph: one the face carries but the
+            // bake did not queue. That used to land on table index 0 - not a
+            // fallback, just whatever cell happened to be packed first, which
+            // for every shipped atlas is the space - so it drew blank, the same
+            // invisible gap by a different route. Both routes now end at the
+            // same visible box.
+            //
+            // An atlas with no glyph 0 (`FontAtlas::empty`, a partial bake)
+            // keeps the old index-0 behaviour: there is nothing better to point
+            // at, and inventing one would hide that the atlas is empty.
+            let cell = atlas
+                .glyph_table_index(g.glyph_id)
+                .or_else(|| atlas.glyph_table_index(0));
+            let (table_idx, std_advance_norm) = match cell {
                 Some(idx) => (idx as u32, atlas.glyphs[idx].advance_x),
                 None => (0, 0.5),
             };
