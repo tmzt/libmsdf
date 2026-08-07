@@ -48,16 +48,53 @@ pub const TEXT_RANGES: &[(char, char)] = &[('\u{0020}', '\u{007E}'), ('\u{00A0}'
 ///
 /// The Unicode Basic Multilingual Plane's Private Use Area. Every glyph this
 /// repo owns rather than borrows — the [`MSYMBOLS_ICONS`] set at Material
-/// Symbols' own codepoints, and the [`MARKERS`] block we draw ourselves — sits
-/// inside it, and Unicode guarantees no standard character ever will. So the
-/// two halves of a bundled face cannot collide by construction rather than by
-/// review: [`FontAtlasBuilder::add_shipped_coverage`] queues this range as
-/// *whatever the face defines here*, never as a list of names, and a
-/// `debug_assert` in [`msymbols_codepoint`]'s test pins the icons inside it.
+/// Symbols' own codepoints, and the [`HIGHBAY_ICONS_BLOCK`] and [`MARKERS`]
+/// blocks we draw ourselves — sits inside it, and Unicode guarantees no
+/// standard character ever will. So the two halves of a bundled face cannot
+/// collide by construction rather than by review:
+/// [`FontAtlasBuilder::add_shipped_coverage`] queues this range as *whatever
+/// the face defines here*, never as a list of names, and a `debug_assert` in
+/// [`msymbols_codepoint`]'s test pins the icons inside it.
 ///
 /// Widening [`TEXT_RANGES`] toward it is the one thing that could break that,
 /// which is why they are stated together, one screen apart.
 pub const PRIVATE_USE: (char, char) = ('\u{E000}', '\u{F8FF}');
+
+/// **The top 256 codepoints of [`PRIVATE_USE`] are OURS**, and the boundary is
+/// one comparison: `cp >= U+F800`.
+///
+/// Everything above this line is drawn in `fonts/` by a script in this repo;
+/// everything below is borrowed at some vendor's codepoints (the nine
+/// [`MSYMBOLS_ICONS`] top out at `U+F0D3`, more than two thousand codepoints
+/// clear). `owned_blocks_are_the_top_of_the_carveout` checks it rather than
+/// leaving it to memory.
+///
+/// The 256 split in two, because *edge marker* and *UI icon* are different
+/// kinds of thing and the namespace should say so rather than a comment:
+///
+/// * [`MARKERS`], the last sixteen — geometry the RENDERER reaches for.
+/// * [`HIGHBAY_ICONS_BLOCK`], the 240 below them — names an APP asks for.
+pub const OWNED_BLOCKS: (char, char) = ('\u{F800}', '\u{F8FF}');
+
+/// **The block our own UI ICONS are allocated from** — names this repo owns,
+/// as opposed to the Material Symbols names it borrows.
+///
+/// `U+F800..=U+F8EF`: the bottom 240 of [`OWNED_BLOCKS`], directly below
+/// [`MARKERS`]. Codepoints are handed out *upward* from `U+F800` for the same
+/// reason markers run upward — [`FontAtlasBuilder::add_shipped_coverage`] scans
+/// the Private Use Area in codepoint order, so a name added above every
+/// existing one leaves every existing icon's cell exactly where it was.
+///
+/// It is 15x the size of [`MARKERS`] because the two grow at completely
+/// different rates: the marker set is an arrowhead and whatever cardinality
+/// adornments a diagram needs, and it is done in single digits, whereas an
+/// application's icon vocabulary is the one that actually accumulates. Sized
+/// once, generously, so the block never has to move — moving it downward later
+/// is the one change that would renumber cells that already shipped.
+///
+/// What is IN it is [`HIGHBAY_ICONS`], which is a separate statement: this is
+/// the address space, that is the manifest.
+pub const HIGHBAY_ICONS_BLOCK: (char, char) = ('\u{F800}', '\u{F8EF}');
 
 /// **The block inside [`PRIVATE_USE`] we DRAW, rather than borrow** — edge
 /// markers for diagram arcs: the arrowhead, and whatever cardinality
@@ -74,6 +111,9 @@ pub const PRIVATE_USE: (char, char) = ('\u{E000}', '\u{F8FF}');
 ///   range in codepoint order and the bake queue is append-only: a marker added
 ///   above every existing one leaves every existing cell exactly where it was.
 ///   Allocating downward would renumber the block on every addition.
+///
+/// [`HIGHBAY_ICONS_BLOCK`] sits immediately below, so the two owned blocks are
+/// contiguous and a marker still sorts last of everything in the face.
 ///
 /// The outlines themselves are authored in `fonts/marker.py`, which is where
 /// the geometry is decided; `marker_contract_holds` asserts what Rust relies on
@@ -92,13 +132,13 @@ pub const MARKERS: (char, char) = ('\u{F8F0}', '\u{F8FF}');
 pub const MARKER_ARROW: char = '\u{F8F0}';
 
 /// Bundled Roboto Regular, subset to [`TEXT_RANGES`] — printable ASCII plus
-/// Latin-1 Supplement — with the [`MARKERS`] block added.
+/// Latin-1 Supplement — with both [`OWNED_BLOCKS`] added.
 ///
-/// The markers are here as well as in [`ROBOTO_ASCII_MSYMBOLS`] on purpose: a
-/// marker is geometry the renderer draws with rather than an icon a developer
-/// names, so it belongs to whichever face is loaded, and the two bundled faces
-/// still differ only by the Material Symbols half. They are authored in
-/// `fonts/marker.py`.
+/// The markers and our own icons are here as well as in
+/// [`ROBOTO_ASCII_MSYMBOLS`] on purpose: they are glyphs this repo DREW, so
+/// they belong to whichever face is loaded, and the two bundled faces still
+/// differ only by the borrowed Material Symbols half. They are authored in
+/// `fonts/marker.py` and `fonts/icon.py`.
 ///
 /// Roboto is © The Roboto Project Authors, licensed Apache-2.0 — see
 /// `fonts/LICENSE-Roboto.txt`. Used as the deterministic test fixture and
@@ -161,19 +201,26 @@ pub const ROBOTO_REGULAR_ASCII: &[u8] = include_bytes!("../../fonts/Roboto-Regul
 /// home U+E9B2   search U+EF7A      library_books U+E02F        settings U+E8B8
 /// ```
 ///
-/// This face also carries the [`MARKERS`] block, as the plain one does — see
-/// [`ROBOTO_REGULAR_ASCII`] for why that is not an icon question.
+/// This face also carries both [`OWNED_BLOCKS`], as the plain one does — see
+/// [`ROBOTO_REGULAR_ASCII`]. So one of the two icon sets, [`HIGHBAY_ICONS`],
+/// is in the *plain* face as well: a glyph this repo drew belongs to whichever
+/// face is loaded, and only the borrowed half is what makes this one merged.
 ///
 /// Material Symbols is © Google, licensed Apache-2.0 — see
 /// `fonts/LICENSE-MaterialSymbols.txt`.
 pub const ROBOTO_ASCII_MSYMBOLS: &[u8] =
     include_bytes!("../../fonts/Roboto-Regular-ascii-msymbols.ttf");
 
-/// The icon half of [`ROBOTO_ASCII_MSYMBOLS`]: every declared name, and the
-/// codepoint it is drawn at.
+/// The BORROWED icon half of [`ROBOTO_ASCII_MSYMBOLS`]: every declared
+/// Material Symbols name, and the codepoint Material draws it at.
 ///
-/// **This is the coverage manifest, and there is exactly one of it.** It lives
-/// beside the bytes because it is a fact about the bake, not about any
+/// The icons this repo drew itself are [`HIGHBAY_ICONS`], a separate manifest
+/// behind a separate resolver — see [`highbay_codepoint`] for why the two are
+/// never merged.
+///
+/// **This is the coverage manifest for the borrowed set, and there is exactly
+/// one of it.** It lives beside the bytes because it is a fact about the bake,
+/// not about any
 /// renderer: a second copy in a consumer is a copy that can disagree with the
 /// font about which names exist. A caller resolves a name here and shapes the
 /// codepoint; a name that is absent has no glyph, and that is a missing-asset
@@ -227,4 +274,65 @@ pub fn msymbols_codepoint(name: &str) -> Option<char> {
         .binary_search_by_key(&name, |&(n, _)| n)
         .ok()
         .map(|i| MSYMBOLS_ICONS[i].1)
+}
+
+/// **The icons this repo DREW, and the codepoints it drew them at** — the
+/// manifest for [`HIGHBAY_ICONS_BLOCK`], exactly as [`MSYMBOLS_ICONS`] is the
+/// manifest for the borrowed set.
+///
+/// ```text
+/// graph U+F800   props U+F801   table U+F802
+/// ```
+///
+/// These exist because the vocabulary Material publishes does not contain
+/// them. `table` has no close Material match and `props` — a property sheet's
+/// label/value rows — has none at all, so the alternatives were to pick a
+/// Material name that means something else and let the codebase learn a lie,
+/// or to draw our own and say so. This is saying so: they carry no Material
+/// name, they sit two thousand codepoints clear of Material's, and
+/// [`msymbols_codepoint`] answers `None` for every one of them.
+///
+/// The outlines are authored in `fonts/icon.py`, which is where the geometry
+/// is decided and where `table` and `props` record which proportions they take
+/// from `highbay_ui`'s `draw_table_glyph`/`draw_props_glyph`.
+///
+/// Sorted by name so [`highbay_codepoint`] can binary-search it. The
+/// codepoints happen to sort the same way, because the block is allocated
+/// upward and this was the first batch; nothing may rely on that.
+pub const HIGHBAY_ICONS: &[(&str, char)] = &[
+    ("graph", '\u{F800}'),
+    ("props", '\u{F801}'),
+    ("table", '\u{F802}'),
+];
+
+/// The codepoint the bundled faces draw the repo's own icon `name` at, or
+/// `None` when there is no such icon.
+///
+/// # This is a SECOND resolver on purpose, and it must stay one
+///
+/// It would be a two-line change to fold [`MSYMBOLS_ICONS`] and
+/// [`HIGHBAY_ICONS`] into one table behind one `icon_codepoint(name)`, and it
+/// would cost the only thing this separation buys: at the call site, whether a
+/// name is a vocabulary **Material publishes** or one **we drew**. That
+/// distinction is the whole reason these glyphs exist rather than a
+/// near-enough Material icon wearing the wrong name, and a merged resolver
+/// erases it at exactly the moment someone would need it — when they go
+/// looking for `table` in Material's catalogue and find a different mark.
+///
+/// A fallback between the two would be worse than a merge. `msymbols_codepoint`
+/// returning `None` means *Material has no such icon*, which is a fact about a
+/// published catalogue; falling through to our block would turn a name we
+/// happened to draw into an answer to a question about theirs, and drawing
+/// theirs for a name of ours would be the same error mirrored. Both directions
+/// are asserted against in `a_name_never_crosses_between_the_two_vocabularies`.
+///
+/// Everything else here matches [`msymbols_codepoint`], including the part
+/// that matters most: `None` is the missing-asset answer, the caller reports it
+/// (`DrawFinding::MissingIcon`; Rule 28), and a caller that turns it into a
+/// fallback shape has defeated the reason this is fallible.
+pub fn highbay_codepoint(name: &str) -> Option<char> {
+    HIGHBAY_ICONS
+        .binary_search_by_key(&name, |&(n, _)| n)
+        .ok()
+        .map(|i| HIGHBAY_ICONS[i].1)
 }

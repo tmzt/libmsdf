@@ -26,9 +26,10 @@
 //!     crates/libhbui/assets/roboto-msymbols-48.atlas 48 6.0
 //! ```
 //!
-//! Both bundled faces carry the marker block ([`libmsdf::MARKERS`] — geometry
-//! this repo DRAWS with, as opposed to the Material Symbols it borrows), so the
-//! two bakes differ only by the nine icon cells.
+//! Both bundled faces carry the blocks this repo DRAWS
+//! ([`libmsdf::OWNED_BLOCKS`] — the edge markers and our own UI icons, as
+//! opposed to the Material Symbols it borrows), so the two bakes differ only
+//! by the nine borrowed cells.
 //!
 //! The queue is append-only, so a re-bake after a coverage widening is a
 //! strict SUPERSET of the previous one: every cell that existed keeps its
