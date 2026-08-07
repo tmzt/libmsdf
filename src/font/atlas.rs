@@ -446,10 +446,13 @@ impl FontAtlasBuilder {
     /// **Queue exactly what a bundled face ships**, so the bake and
     /// [`crate::font::TEXT_RANGES`] cannot disagree about coverage.
     ///
-    /// Stated as ranges the face is asked about, never as a list of glyphs:
-    /// a face that defines nothing in [`crate::font::PRIVATE_USE`] (plain
-    /// Roboto) queues nothing for it, and one that does (the merged icon face)
-    /// picks its icons up without this ever learning an icon set.
+    /// Stated as ranges the face is asked about, never as a list of glyphs.
+    /// [`crate::font::PRIVATE_USE`] is asked for as one span, so the merged
+    /// face's icons and both faces' [`crate::font::MARKERS`] come along without
+    /// this ever learning an icon set or a marker set, and a face that defines
+    /// nothing there queues nothing. **Adding a glyph is therefore an edit to
+    /// the FONT, not to this method** — which is the whole reason coverage has
+    /// one home.
     ///
     /// **The order is append-only, and that is load-bearing.** Cells are packed
     /// in queue order, so a glyph's atlas coordinates and its glyph-table index
@@ -460,6 +463,16 @@ impl FontAtlasBuilder {
     /// noise. Inserting in the middle would renumber everything after it.
     /// Hence Latin-1 sits after the Private Use Area here even though it reads
     /// backwards: ASCII and the icons were baked first.
+    ///
+    /// **A new PUA glyph is the one case that is only half append-only**, and
+    /// it is worth knowing before it surprises someone. The PUA is scanned
+    /// here, so a glyph added to it lands *before* Latin-1 in the queue and
+    /// shifts those 96 cells plus glyph 0 one slot along. Their CONTENT is
+    /// unchanged and nothing looks a cell up by coordinate, so a frame only
+    /// moves if it draws a Latin-1 character — and then only in the last ulp of
+    /// `sdf_render.wgsl`'s `(atlas_gx + acx + 0.5) / atlas_dim.x`. Allocating
+    /// [`crate::font::MARKERS`] upward from the top of the PUA is what keeps
+    /// the icon cells themselves from moving.
     pub fn add_shipped_coverage(&mut self) {
         // cmap lookups for printable ASCII...
         debug_assert_eq!(

@@ -186,9 +186,12 @@ pub struct SdfInstance {
 ///
 /// [`SdfRotate::Radians`] is the escape hatch for genuinely arbitrary
 /// angles; it is never exact and callers needing a right angle should use
-/// `Quarter` instead. Today's only caller — the Add-form tabs — are exactly
-/// 90 degrees, so they use `Quarter`; `Radians` exists to be correct, not to
-/// be fast, and has no caller yet.
+/// `Quarter` instead. The Add-form tabs are exactly 90 degrees, so they use
+/// `Quarter`. [`DrawList::push_marker`] is the caller `Radians` was written
+/// for — an arrowhead sits at a Bézier's tangent, which is an angle no
+/// integer turn count can express — and the rule above is not a reason to
+/// "fix" it: what is banned is reaching for trig AT a right angle, not
+/// `Radians` itself.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum SdfRotate {
     /// An exact multiple of 90 degrees, `(dx, dy) -> (-dy, dx)` per turn
@@ -735,6 +738,102 @@ impl DrawList {
         });
 
         total_advance
+    }
+
+    /// **Draw an edge marker — an arrowhead, a cardinality adornment — with
+    /// its point pinned to `anchor` and its axis along `angle_rad`**, and
+    /// return the axis-aligned bound of what was drawn.
+    ///
+    /// `run` is the marker glyph shaped by the caller, exactly as an icon is
+    /// ([`crate::font::MARKER_ARROW`] through the same shaper that draws the
+    /// text). Which glyph it is, is the *only* thing that distinguishes an
+    /// arrowhead from a fork, a bar or a circle — so the second marker at the
+    /// other end of an arc is this call with a different codepoint, not a
+    /// second method. `size` is the marker's extent along the edge, in logical
+    /// pixels, measured from `anchor` backwards.
+    ///
+    /// # What "anchored" means, and why nothing here restates the geometry
+    ///
+    /// A marker glyph is authored (`fonts/marker.py`) with its ink spanning
+    /// `x in [0, advance]` and symmetric about the baseline, so its point is
+    /// the advance-width point ON the baseline. This method therefore places
+    /// the pen `size` back from `anchor` and lifts the line box by the cell's
+    /// own `baseline_row` — both read off the baked
+    /// [`GlyphEntry`](crate::font::GlyphEntry), neither written down again in
+    /// Rust. Scale comes from the same place:
+    /// `font_size = size / advance_x` makes the caller's `size` mean the
+    /// advance, whatever the glyph's proportions turn out to be. Redraw the
+    /// arrow at a different length in the font and this follows it.
+    ///
+    /// Then [`SdfRotate::Radians`] about `anchor`. A pivot is invariant under
+    /// its own rotation, so the point stays exactly on `anchor` at every
+    /// angle — which is the property a marker on a curve needs, and the reason
+    /// the anchor is the pivot rather than the instance's centre.
+    ///
+    /// **`Radians` is correct here and is not a lint to fix.** [`SdfRotate`]'s
+    /// doc bans trig at RIGHT angles, because `cos(PI/2)` is not `0.0` and a
+    /// nearly-axis-aligned rect resamples soft. A curve's tangent is a
+    /// genuinely arbitrary angle; there is no exact matrix to reach for, and
+    /// [`SdfRotate::Quarter`] cannot express one.
+    ///
+    /// # The returned rect IS the drawn geometry
+    ///
+    /// It is [`rotate_rect`] applied to the instance this call just pushed, at
+    /// the same rotation and the same pivot — read back off the list rather
+    /// than recomputed, so a hit region derived from it cannot drift from the
+    /// ink (CLAUDE.md item 5). Note it bounds the glyph's LINE BOX, which is
+    /// taller than the marker's ink the way a line box is taller than a
+    /// letter; it is a bound on what was drawn, not the marker's silhouette.
+    ///
+    /// `None`, drawing nothing, when the marker has no glyph in the face
+    /// (`run` shaped to `.notdef`), no cell in the bake, or a degenerate size.
+    /// A marker is geometry the renderer reached for by codepoint, not text a
+    /// user typed, so the placeholder box would be a substitution that hides a
+    /// missing asset — the same reasoning as
+    /// [`crate::font::msymbols_codepoint`]'s `None`.
+    pub fn push_marker(
+        &mut self,
+        run: &ShapedRun,
+        atlas: &FontAtlas,
+        anchor: [f32; 2],
+        angle_rad: f32,
+        size: f32,
+        px_range: f32,
+        color: [f32; 4],
+    ) -> Option<([f32; 2], [f32; 2])> {
+        debug_assert_eq!(
+            run.glyphs.len(),
+            1,
+            "a marker is ONE glyph; this run has {} and every one of them would \
+             be laid out, widening the instance and pushing the marker off its \
+             anchor",
+            run.glyphs.len(),
+        );
+        let glyph = run.glyphs.first()?;
+        if glyph.glyph_id == 0 {
+            return None;
+        }
+        let entry = atlas.get_glyph(glyph.glyph_id)?;
+        let cell_px = entry.atlas_h as f32;
+        if !(size > 0.0) || !(entry.advance_x > 0.0) || cell_px <= 0.0 {
+            return None;
+        }
+
+        let font_size = size / entry.advance_x;
+        let line_h = font_size * LINE_BOX_RATIO;
+        // `sdf_render.wgsl` case 8u maps the cell onto the line box with
+        // `scale = atlas_gh / line_h` and reads `acy = (py - line_y) * scale`,
+        // so the baseline lands at `line_y + baseline_row / scale`. This is
+        // that, solved for `line_y`.
+        let pos = [anchor[0] - size, anchor[1] - entry.baseline_row * line_h / cell_px];
+
+        let rotation = SdfRotate::Radians(angle_rad);
+        self.push_rotate(rotation, anchor);
+        self.push_shaped_text(run, atlas, pos, font_size, px_range, color);
+        self.push_rotate_end();
+
+        let inst = self.instances.last()?;
+        Some(rotate_rect(inst.position, inst.size, rotation, anchor))
     }
 
     /// Lower to the GPU wire format: one `SdfDrawCmd` per instance, plus
@@ -1397,5 +1496,170 @@ mod tests {
         let start = list.instances.len();
         list.translate_from(start, 50.0, 50.0);
         assert_eq!(list.instances[0].position, [1.0, 2.0]);
+    }
+
+    // ── edge markers ─────────────────────────────────────────────────────
+
+    /// A one-cell atlas carrying the numbers the real 48px/6.0 bake produces
+    /// for `MARKER_ARROW`, so these tests exercise the arithmetic without a
+    /// megabyte of pixels. `tests/marker.rs` asserts the same numbers come out
+    /// of the shipped bytes, which is what keeps this stand-in honest.
+    fn marker_atlas() -> (FontAtlas, crate::font::ShapedRun) {
+        let mut atlas = FontAtlas::empty(400, 1300, 3);
+        atlas.insert_entry(crate::font::GlyphEntry {
+            glyph_id: 7,
+            atlas_x: 251,
+            atlas_y: 651,
+            atlas_w: 48,
+            atlas_h: 48,
+            advance_x: 0.625,
+            baseline_row: 33.45,
+            px_per_em: 36.923077,
+            x_margin: 12.461538,
+        });
+        let run = crate::font::ShapedRun {
+            glyphs: vec![crate::font::ShapedGlyph {
+                glyph_id: 7,
+                x_advance: 1280,
+                x_offset: 0,
+                y_offset: 0,
+                cluster: 0,
+            }],
+            total_advance: 1280,
+            units_per_em: 2048,
+        };
+        (atlas, run)
+    }
+
+    /// **The marker's point lands on the anchor**, in the frame the shader
+    /// reads — which is the whole claim `push_marker` makes.
+    ///
+    /// Written as the shader's own mapping (`sdf_render.wgsl` case 8u: the
+    /// glyph origin is the pen, the baseline is `baseline_row` down the cell,
+    /// and the cell spans the line box) rather than as the method's arithmetic
+    /// read back, so the two derivations have to agree rather than one echoing
+    /// the other.
+    #[test]
+    fn a_markers_point_lands_on_its_anchor() {
+        let (atlas, run) = marker_atlas();
+        let entry = *atlas.get_glyph(7).unwrap();
+        for &size in &[6.0f32, 14.0, 48.0] {
+            let anchor = [321.0f32, 207.0];
+            let mut list = DrawList::new();
+            list.push_marker(&run, &atlas, anchor, 0.0, size, 6.0, [1.0; 4]).unwrap();
+            let inst = list.instances[0];
+
+            // Undo `push_shaped_text`'s left-margin shift to recover the pen.
+            let line_h = inst.size[1];
+            let pen_x = inst.position[0] + X_MARGIN_FRAC * line_h;
+            let baseline_y = inst.position[1] + entry.baseline_row * line_h / entry.atlas_h as f32;
+            // The glyph's ink runs x in [0, advance] font units from the pen,
+            // and `advance` is what `size` was scaled to mean.
+            assert!((pen_x + size - anchor[0]).abs() < 1e-3, "size {size}: point x off");
+            assert!((baseline_y - anchor[1]).abs() < 1e-3, "size {size}: point y off");
+            // ...and the ink is inside the rect the shader will shade.
+            assert!(inst.position[0] <= pen_x, "size {size}: ink starts left of the instance");
+            assert!(
+                inst.position[0] + inst.size[0] >= anchor[0],
+                "size {size}: the point is outside the instance rect"
+            );
+        }
+    }
+
+    /// **Hit and draw come from ONE formula** (CLAUDE.md item 5): the rect
+    /// `push_marker` returns is [`rotate_rect`] over the instance it pushed, at
+    /// the rotation it pushed it under. Recomputed here from the list's own
+    /// instance, so a future `push_marker` that estimated its bound instead of
+    /// reading it back would fail.
+    #[test]
+    fn the_returned_rect_is_rotate_rect_over_the_instance_that_was_drawn() {
+        let (atlas, run) = marker_atlas();
+        let anchor = [140.0f32, 90.0];
+        for &angle in &[0.0f32, 0.37, 1.9, -2.6, 3.14159, 6.0] {
+            let mut list = DrawList::new();
+            let got = list.push_marker(&run, &atlas, anchor, angle, 20.0, 6.0, [1.0; 4]).unwrap();
+            let inst = list.instances[0];
+            let want = rotate_rect(inst.position, inst.size, SdfRotate::Radians(angle), anchor);
+            assert_eq!(got, want, "angle {angle}");
+            // The pivot is invariant under its own rotation, so the anchor is
+            // inside the bound at every angle — including the ones where the
+            // AABB is loosest.
+            assert!(got.0[0] <= anchor[0] && anchor[0] <= got.0[0] + got.1[0], "angle {angle}");
+            assert!(got.0[1] <= anchor[1] && anchor[1] <= got.0[1] + got.1[1], "angle {angle}");
+        }
+        // Vacuity pin: the bound really does move with the angle, so the
+        // equality above is not holding because everything is the same rect.
+        let mut a = DrawList::new();
+        let mut b = DrawList::new();
+        let r0 = a.push_marker(&run, &atlas, anchor, 0.0, 20.0, 6.0, [1.0; 4]).unwrap();
+        let r1 = b.push_marker(&run, &atlas, anchor, 1.0, 20.0, 6.0, [1.0; 4]).unwrap();
+        assert_ne!(r0, r1);
+    }
+
+    /// **The transform stack is empty at end of frame**, which is the failure
+    /// `lower`'s debug assertion is written against: a `push_marker` that
+    /// forgot its `push_rotate_end` would silently rotate everything drawn
+    /// after it.
+    #[test]
+    fn a_marker_leaves_the_transform_stack_as_it_found_it() {
+        let (atlas, run) = marker_atlas();
+        let mut list = DrawList::new();
+        list.push_marker(&run, &atlas, [10.0, 10.0], 0.8, 16.0, 6.0, [1.0; 4]).unwrap();
+        list.push_marker(&run, &atlas, [40.0, 10.0], -0.8, 16.0, 6.0, [1.0; 4]).unwrap();
+        // The instance drawn AFTER the markers carries no transform...
+        list.push(box_at([0.0, 0.0]));
+        let frame = list.lower(); // ...and this does not trip its own assertion.
+        assert_eq!(frame.draws[0].xform[0], 1.0, "first marker under its own scope");
+        assert_eq!(frame.draws[1].xform[0], 2.0, "second marker under its own scope");
+        assert_eq!(frame.draws[2].xform[0], 0.0, "the rotate scope did not leak past the marker");
+
+        // Nested inside someone else's rotation, the marker composes onto it
+        // and still restores exactly one level.
+        let mut list = DrawList::new();
+        list.push_rotate(SdfRotate::Quarter(1), [0.0, 0.0]);
+        list.push_marker(&run, &atlas, [10.0, 10.0], 0.5, 16.0, 6.0, [1.0; 4]).unwrap();
+        list.push(box_at([0.0, 0.0]));
+        list.push_rotate_end();
+        let frame = list.lower();
+        assert_eq!(frame.draws[1].xform[0], 1.0, "back to the enclosing scope, not to none");
+    }
+
+    /// A marker the face or the bake does not carry draws NOTHING and says so.
+    /// The placeholder box would be a substitution: this glyph was reached for
+    /// by codepoint, not typed by a user.
+    #[test]
+    fn a_missing_marker_draws_nothing_rather_than_a_box() {
+        let (atlas, run) = marker_atlas();
+        let one = |glyph_id, x_advance| crate::font::ShapedRun {
+            glyphs: vec![crate::font::ShapedGlyph {
+                glyph_id,
+                x_advance,
+                x_offset: 0,
+                y_offset: 0,
+                cluster: 0,
+            }],
+            total_advance: x_advance,
+            units_per_em: 2048,
+        };
+        for (label, r, size) in [
+            ("the face has no such glyph", one(0, 1280), 16.0),
+            ("the bake has no cell for it", one(9, 1280), 16.0),
+            ("degenerate size", run.clone(), 0.0),
+        ] {
+            let mut list = DrawList::new();
+            assert_eq!(list.push_marker(&r, &atlas, [0.0, 0.0], 0.0, size, 6.0, [1.0; 4]), None, "{label}");
+            assert!(list.is_empty(), "{label}: something was drawn anyway");
+            let _ = list.lower(); // and no rotate scope was left open
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "a marker is ONE glyph")]
+    fn a_multi_glyph_run_is_not_a_marker() {
+        let (atlas, run) = marker_atlas();
+        let mut two = run.clone();
+        two.glyphs.push(run.glyphs[0]);
+        let mut list = DrawList::new();
+        let _ = list.push_marker(&two, &atlas, [0.0, 0.0], 0.0, 16.0, 6.0, [1.0; 4]);
     }
 }

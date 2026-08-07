@@ -26,8 +26,9 @@
 //!     crates/libhbui/assets/roboto-msymbols-48.atlas 48 6.0
 //! ```
 //!
-//! Plain Roboto defines no PUA glyph, so that step queues nothing for it and
-//! the two bakes differ only by the nine icon cells.
+//! Both bundled faces carry the marker block ([`libmsdf::MARKERS`] — geometry
+//! this repo DRAWS with, as opposed to the Material Symbols it borrows), so the
+//! two bakes differ only by the nine icon cells.
 //!
 //! The queue is append-only, so a re-bake after a coverage widening is a
 //! strict SUPERSET of the previous one: every cell that existed keeps its

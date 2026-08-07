@@ -32,8 +32,9 @@ pub use crate::core::{
 };
 pub use drawlist::{rotate_rect, DrawEffects, DrawList, Elevation, SdfFrame, SdfInstance, SdfKind, SdfRotate};
 pub use font::{
-    AtlasManager, AtlasRegion, FontAtlas, FontAtlasBuilder, GlyphEntry, MSYMBOLS_ICONS,
-    ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII, ShapedRun, TextShaper, msymbols_codepoint,
+    AtlasManager, AtlasRegion, FontAtlas, FontAtlasBuilder, GlyphEntry, MARKERS, MARKER_ARROW,
+    MSYMBOLS_ICONS, ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII, ShapedRun, TextShaper,
+    msymbols_codepoint,
 };
 pub use gpu::{blur_params, BlurPass, GpuSdfRenderer, MsdfCompute};
 

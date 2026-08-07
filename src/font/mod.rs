@@ -47,20 +47,58 @@ pub const TEXT_RANGES: &[(char, char)] = &[('\u{0020}', '\u{007E}'), ('\u{00A0}'
 /// grow without a codepoint audit.
 ///
 /// The Unicode Basic Multilingual Plane's Private Use Area. Every glyph this
-/// repo owns rather than borrows — today that is the [`MSYMBOLS_ICONS`] set,
-/// at Material Symbols' own codepoints — sits inside it, and Unicode
-/// guarantees no standard character ever will. So the two halves of a bundled
-/// face cannot collide by construction rather than by review:
-/// [`FontAtlasBuilder::add_shipped_coverage`] queues this range as *whatever
-/// the face defines here*, never as a list of names, and a `debug_assert` in
-/// [`msymbols_codepoint`]'s test pins the icons inside it.
+/// repo owns rather than borrows — the [`MSYMBOLS_ICONS`] set at Material
+/// Symbols' own codepoints, and the [`MARKERS`] block we draw ourselves — sits
+/// inside it, and Unicode guarantees no standard character ever will. So the
+/// two halves of a bundled face cannot collide by construction rather than by
+/// review: [`FontAtlasBuilder::add_shipped_coverage`] queues this range as
+/// *whatever the face defines here*, never as a list of names, and a
+/// `debug_assert` in [`msymbols_codepoint`]'s test pins the icons inside it.
 ///
 /// Widening [`TEXT_RANGES`] toward it is the one thing that could break that,
 /// which is why they are stated together, one screen apart.
 pub const PRIVATE_USE: (char, char) = ('\u{E000}', '\u{F8FF}');
 
+/// **The block inside [`PRIVATE_USE`] we DRAW, rather than borrow** — edge
+/// markers for diagram arcs: the arrowhead, and whatever cardinality
+/// adornments follow it.
+///
+/// Sixteen slots at the very TOP of the Private Use Area, allocated *upward*
+/// from [`MARKER_ARROW`]. Both halves of that matter:
+///
+/// * **At the top**, because Material Symbols' codepoints are the vendor's and
+///   run far below here (the bundled nine top out at `U+F0D3`), so a borrowed
+///   icon and a drawn marker can never land on the same codepoint — checked by
+///   `icons_sort_below_the_marker_block`, not by remembering.
+/// * **Upward**, because [`FontAtlasBuilder::add_shipped_coverage`] scans this
+///   range in codepoint order and the bake queue is append-only: a marker added
+///   above every existing one leaves every existing cell exactly where it was.
+///   Allocating downward would renumber the block on every addition.
+///
+/// The outlines themselves are authored in `fonts/marker.py`, which is where
+/// the geometry is decided; `marker_contract_holds` asserts what Rust relies on
+/// against the shipped bytes.
+pub const MARKERS: (char, char) = ('\u{F8F0}', '\u{F8FF}');
+
+/// **The arrowhead**: a filled triangle, tip forward at `+x`, half a
+/// [`MARKERS`] block's worth of room above it for what comes next.
+///
+/// Drawn through [`crate::DrawList::push_marker`], which anchors it by its
+/// advance-width point and rotates it to a curve's tangent. It is not an icon
+/// and is deliberately not in [`MSYMBOLS_ICONS`]: an icon is a *name a
+/// developer types* and a missing one is a missing asset to report
+/// ([`msymbols_codepoint`]), whereas this is geometry the renderer reaches for
+/// itself.
+pub const MARKER_ARROW: char = '\u{F8F0}';
+
 /// Bundled Roboto Regular, subset to [`TEXT_RANGES`] — printable ASCII plus
-/// Latin-1 Supplement.
+/// Latin-1 Supplement — with the [`MARKERS`] block added.
+///
+/// The markers are here as well as in [`ROBOTO_ASCII_MSYMBOLS`] on purpose: a
+/// marker is geometry the renderer draws with rather than an icon a developer
+/// names, so it belongs to whichever face is loaded, and the two bundled faces
+/// still differ only by the Material Symbols half. They are authored in
+/// `fonts/marker.py`.
 ///
 /// Roboto is © The Roboto Project Authors, licensed Apache-2.0 — see
 /// `fonts/LICENSE-Roboto.txt`. Used as the deterministic test fixture and
@@ -122,6 +160,9 @@ pub const ROBOTO_REGULAR_ASCII: &[u8] = include_bytes!("../../fonts/Roboto-Regul
 /// menu U+E5D2   more_vert U+E5D4   send U+E163   chat U+E0C9   person U+F0D3
 /// home U+E9B2   search U+EF7A      library_books U+E02F        settings U+E8B8
 /// ```
+///
+/// This face also carries the [`MARKERS`] block, as the plain one does — see
+/// [`ROBOTO_REGULAR_ASCII`] for why that is not an icon question.
 ///
 /// Material Symbols is © Google, licensed Apache-2.0 — see
 /// `fonts/LICENSE-MaterialSymbols.txt`.
