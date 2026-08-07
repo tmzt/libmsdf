@@ -651,8 +651,15 @@ impl DrawList {
     /// to pass through it — the ZUI's nav graph and hi-fi phone both scale
     /// their type), so this is guidance, not a hard error. What IS asserted, in
     /// debug builds, is the point where the field has less than HALF a pixel of
-    /// range left and antialiasing is simply gone: a fixed style down there is
-    /// a bug, not a zoom level.
+    /// range left and antialiasing is simply gone
+    /// ([`FontAtlas::antialiases_at`]): a fixed style down there is a bug, not
+    /// a zoom level.
+    ///
+    /// A caller whose type is scaled off a region can ask
+    /// [`FontAtlas::antialiases_at`] itself, before it composes anything, and
+    /// decline a surface too small to carry its own type — which is the honest
+    /// answer to a degenerate region, and the reason the assertion is phrased
+    /// through that one method rather than repeating its arithmetic.
     ///
     /// Returns the width of the run in pixels.
     pub fn push_shaped_text(
@@ -665,7 +672,7 @@ impl DrawList {
         color: [f32; 4],
     ) -> f32 {
         debug_assert!(
-            font_size + 1e-3 >= 0.5 * atlas.min_antialiased_font_size(px_range),
+            atlas.antialiases_at(font_size, px_range),
             "font size {font_size} leaves this atlas under half a pixel of \
              distance range (antialiasing floor {:.2}px for {}px cells at \
              px_range {px_range}) — glyph hairlines are gone at that size; \

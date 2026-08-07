@@ -201,6 +201,29 @@ impl FontAtlas {
         cell / (crate::drawlist::LINE_BOX_RATIO * px_range)
     }
 
+    /// **Whether a run at `font_size` still has ink in it** — at or above HALF
+    /// of [`FontAtlas::min_antialiased_font_size`], where the baked field still
+    /// covers half a pixel of alpha ramp.
+    ///
+    /// This is the exact question
+    /// [`DrawList::push_shaped_text`](crate::DrawList::push_shaped_text)
+    /// debug-asserts on, and that assertion is written in terms of this method
+    /// so there is ONE expression rather than two that must agree. A caller
+    /// that scales its type off a region — a device preview, a zooming pane —
+    /// can therefore ask *before* composing whether the surface it is about to
+    /// draw on can carry its own type, instead of finding out one run at a time
+    /// after every size has already collapsed.
+    ///
+    /// Between this bound and the full [`FontAtlas::min_antialiased_font_size`]
+    /// antialiasing degrades but the glyph is still there, which is why a
+    /// zooming view is expected to pass through that range. Below THIS bound
+    /// there is nothing left to draw.
+    pub fn antialiases_at(&self, font_size: f32, px_range: f32) -> bool {
+        // The 1e-3 slack keeps a size computed as exactly the bound (through a
+        // scale factor, so with rounding) on the passing side of it.
+        font_size + 1e-3 >= 0.5 * self.min_antialiased_font_size(px_range)
+    }
+
     /// Register a glyph entry (dynamic append path). Replaces any existing
     /// entry for the same glyph id and returns the table index.
     pub fn insert_entry(&mut self, entry: GlyphEntry) -> usize {
