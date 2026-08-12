@@ -92,6 +92,41 @@ pub enum SdfKind {
     },
 }
 
+impl SdfKind {
+    /// Move every point this kind carries in ABSOLUTE space by `(dx, dy)`.
+    ///
+    /// Almost every kind carries none: `position` and `size` describe the
+    /// whole shape, so an instance moves by moving `position` and the kind has
+    /// nothing to say. [`SdfKind::BezierStroke`] is the exception — `c1`, `c2`
+    /// and `end` are absolute points beside `position`, not offsets from it —
+    /// and being the only exception is exactly why it was missed
+    /// ([`DrawList::translate_from`]).
+    ///
+    /// **The match is exhaustive on purpose.** A wildcard arm would make the
+    /// next kind that carries geometry outside `position` translate silently
+    /// wrong, which is the failure this method exists to close; written this
+    /// way it does not compile until someone answers for it.
+    fn translate(&mut self, dx: f32, dy: f32) {
+        match self {
+            SdfKind::BezierStroke { c1, c2, end, thickness: _ } => {
+                for point in [c1, c2, end] {
+                    point[0] += dx;
+                    point[1] += dy;
+                }
+            }
+            // `position`/`size` (and, for the slabs, radii that are lengths
+            // rather than points) are the whole geometry.
+            SdfKind::Box
+            | SdfKind::RoundedBox { .. }
+            | SdfKind::RoundedBoxPerCorner { .. }
+            | SdfKind::Circle
+            | SdfKind::Line
+            | SdfKind::Outline { .. }
+            | SdfKind::MsdfText { .. } => {}
+        }
+    }
+}
+
 /// **Whether an instance casts the renderer's drop shadow** — the paint
 /// layer's whole vocabulary for elevation.
 ///
@@ -450,8 +485,8 @@ impl DrawList {
         &self.instance_clips
     }
 
-    /// Move every instance from `start` onward by `(dx, dy)` — **ink and
-    /// scissor together**.
+    /// Move every instance from `start` onward by `(dx, dy)` — **ink, the
+    /// geometry an instance carries outside `position`, and scissor together**.
     ///
     /// For a host that renders a sub-scene in its own local coordinates and
     /// then places the result: draw into the list, then translate the range
@@ -468,7 +503,22 @@ impl DrawList {
     /// hypothetical: it is what blanked the IDE's hi-fi pane, where 154 fully
     /// opaque instances were scissored to a rect 674px to their left.
     ///
-    /// So the two are moved by ONE operation that cannot be half-applied.
+    /// **And `position` is not the whole of an instance's geometry.**
+    /// [`SdfKind::BezierStroke`] keeps three of its four points — `c1`, `c2`,
+    /// `end` — inside the kind, in the SAME absolute space `position` is in.
+    /// Moving `position` alone leaves those three where they were, so a 6px
+    /// corner arc in a sub-scene placed 674px to the right becomes a 674px
+    /// cubic reaching back to the sub-scene's own origin: a long slanted
+    /// streak running far outside whatever shape it belonged to. That is the
+    /// defect this method carried for as long as it has existed, and it was
+    /// invisible because the ONE caller ([`highbay_ui`]'s hi-fi phone pane)
+    /// previewed apps that happened to emit no curves — the first dashed
+    /// border with a rounded corner inside that pane put four streaks per box
+    /// on the screen and was misread as a curve-flattening bug.
+    ///
+    /// So every point moves by ONE operation that cannot be half-applied, and
+    /// [`SdfKind::translate`]'s match is exhaustive so a new kind carrying
+    /// absolute geometry has to answer for itself here.
     pub fn translate_from(&mut self, start: usize, dx: f32, dy: f32) {
         if start >= self.instances.len() {
             return;
@@ -476,6 +526,7 @@ impl DrawList {
         for instance in &mut self.instances[start..] {
             instance.position[0] += dx;
             instance.position[1] += dy;
+            instance.kind.translate(dx, dy);
         }
         for clip in &mut self.instance_clips[start..] {
             if clip.is_unbounded() {
@@ -485,6 +536,50 @@ impl DrawList {
             clip.min[1] += dy;
             clip.max[0] += dx;
             clip.max[1] += dy;
+        }
+        self.translate_transforms_from(start, dx, dy);
+    }
+
+    /// The third thing a translated instance's geometry lives in: the rotation
+    /// transform it was drawn under ([`DrawList::push_rotate`]).
+    ///
+    /// An instance's `position` is in the PRE-rotation space its transform maps
+    /// to the screen (`screen = M * v + t`), so adding `d` to `v` moves it on
+    /// screen by `M * d` — sideways, for a quarter turn — about a pivot that
+    /// stayed at the sub-scene's origin. Both are corrected by the one
+    /// adjustment `t' = t + d - M * d`, which makes the composed map
+    /// `M * v + t + d`: the same picture, moved by exactly `d`.
+    ///
+    /// A transform is SHARED (it is a bank entry, indexed 1-based by
+    /// `instance_transforms`), and instances before `start` may be under the
+    /// same one, so the moved copy is appended rather than edited in place and
+    /// only the translated range is repointed at it. One copy per distinct
+    /// transform in the range, not one per instance.
+    ///
+    /// No shipped app authors `rotate` yet, so this moves nothing today; it is
+    /// here because a caller placing a sub-scene has no way to know whether the
+    /// sub-scene rotated anything, and a translate that is correct only for
+    /// unrotated ink is the same half-application as the one above.
+    fn translate_transforms_from(&mut self, start: usize, dx: f32, dy: f32) {
+        let mut moved: Vec<(u32, u32)> = Vec::new();
+        for index in start..self.instance_transforms.len() {
+            let id = self.instance_transforms[index];
+            if id == 0 {
+                continue;
+            }
+            let to = match moved.iter().find(|&&(from, _)| from == id) {
+                Some(&(_, to)) => to,
+                None => {
+                    let mut copy = self.transforms[(id - 1) as usize];
+                    copy.tx += dx - (copy.a * dx + copy.b * dy);
+                    copy.ty += dy - (copy.c * dx + copy.d * dy);
+                    self.transforms.push(copy);
+                    let to = self.transforms.len() as u32;
+                    moved.push((id, to));
+                    to
+                }
+            };
+            self.instance_transforms[index] = to;
         }
     }
 
@@ -1478,6 +1573,109 @@ mod tests {
         assert!(
             list.instance_clip(start + 1).is_none(),
             "an unbounded clip stays unbounded - translating 1e30 would overflow it into nonsense"
+        );
+    }
+
+    /// **`translate_from` moves a stroke's control points with its origin.**
+    ///
+    /// A `BezierStroke` is the one kind whose geometry is not all in
+    /// `position`: `c1`, `c2` and `end` are absolute points beside it. Moving
+    /// `position` alone left them at the sub-scene's own origin, turning a 6px
+    /// dashed corner in the IDE's hi-fi pane into a 674px cubic reaching back
+    /// across the window - four slanted streaks per box.
+    ///
+    /// Asserted on the LOWERED frame as well as the instance, because `lower`
+    /// is where `c1`/`c2` go into the param bank and `end` becomes the `size`
+    /// slot: a translate that fixed only the instance's own copy would still
+    /// hand the shader the old points.
+    #[test]
+    fn translating_a_range_moves_a_strokes_control_points_with_it() {
+        let mut list = DrawList::new();
+        let start = list.instances.len();
+        list.push_bezier([10.0, 20.0], [12.0, 20.0], [16.0, 24.0], [16.0, 26.0], 1.0, [1.0; 4]);
+
+        list.translate_from(start, 674.0, 114.0);
+
+        let SdfKind::BezierStroke { c1, c2, end, .. } = list.instances[start].kind else {
+            panic!("the stroke is still a stroke");
+        };
+        assert_eq!(list.instances[start].position, [684.0, 134.0], "P0 moved");
+        assert_eq!(c1, [686.0, 134.0], "C1 moved with it");
+        assert_eq!(c2, [690.0, 138.0], "C2 moved with it");
+        assert_eq!(end, [690.0, 140.0], "P3 moved with it");
+
+        // The curve's own extent is unchanged - a translate moves a shape, it
+        // does not stretch one. This is the property the streak violated: the
+        // stroke spanned 674px after a move that should have kept it at 6.
+        let span = |points: [[f32; 2]; 4]| {
+            let xs = points.map(|p| p[0]);
+            let ys = points.map(|p| p[1]);
+            [
+                xs.iter().copied().fold(f32::MIN, f32::max) - xs.iter().copied().fold(f32::MAX, f32::min),
+                ys.iter().copied().fold(f32::MIN, f32::max) - ys.iter().copied().fold(f32::MAX, f32::min),
+            ]
+        };
+        assert_eq!(
+            span([list.instances[start].position, c1, c2, end]),
+            [6.0, 6.0],
+            "a translated stroke is the same size it was"
+        );
+
+        let frame = list.lower();
+        assert_eq!(frame.draws[0].pos, [684.0, 134.0], "P0 as lowered");
+        assert_eq!(frame.draws[0].size, [690.0, 140.0], "P3 rides the size slot");
+        let idx = frame.draws[0].params[3].to_bits() as usize;
+        assert_eq!(frame.param_bank[idx], [686.0, 134.0, 690.0, 138.0], "C1/C2 as lowered");
+    }
+
+    /// **A rotated instance in a translated range moves by `d`, not by `M*d`.**
+    ///
+    /// `position` is in the pre-rotation space the instance's transform maps to
+    /// the screen, so adding `d` there and leaving the transform alone moves
+    /// the ink sideways (`M*d`) about a pivot still standing at the sub-scene's
+    /// origin. The corrected transform has to put the SCREEN point exactly `d`
+    /// from where it was, which is what this asserts - through
+    /// `RotationTransform::apply`, the same forward map the shader inverts.
+    ///
+    /// Also asserts the copy: an instance BEFORE the range under the same
+    /// transform must be unaffected, since a transform is a shared bank entry.
+    #[test]
+    fn translating_a_range_moves_a_rotated_instances_pivot_with_it() {
+        let boxy = |x: f32| SdfInstance {
+            kind: SdfKind::Box,
+            position: [x, 40.0],
+            size: [10.0, 10.0],
+            color: [1.0; 4],
+            anim: 0,
+        };
+        let mut list = DrawList::new();
+        list.push_rotate(SdfRotate::Quarter(1), [50.0, 50.0]);
+        list.push(boxy(20.0));
+        let start = list.instances.len();
+        list.push(boxy(20.0));
+        list.push_rotate_end();
+
+        let before = {
+            let id = list.instance_transforms[start];
+            list.transforms[(id - 1) as usize].apply(list.instances[start].position)
+        };
+        list.translate_from(start, 674.0, 114.0);
+        let after = {
+            let id = list.instance_transforms[start];
+            list.transforms[(id - 1) as usize].apply(list.instances[start].position)
+        };
+        assert_eq!(
+            [after[0] - before[0], after[1] - before[1]],
+            [674.0, 114.0],
+            "on screen, a rotated instance moves by exactly the translation"
+        );
+
+        let outside = list.instance_transforms[start - 1];
+        assert_ne!(outside, list.instance_transforms[start], "the range got its own copy");
+        assert_eq!(
+            list.transforms[(outside - 1) as usize].apply(list.instances[start - 1].position),
+            before,
+            "the instance before the range, under the same transform, did not move"
         );
     }
 
