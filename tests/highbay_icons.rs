@@ -390,7 +390,7 @@ fn every_highbay_icon_shapes_and_is_baked_with_ink() {
         // **One optical size and one optical height.** The live box is 16 x 15
         // Material grid units — 24.6 x 23.1 texels at 48px cells — and Props,
         // the narrowest, keeps the same relation to it that
-        // `draw_props_glyph` has to `draw_table_glyph`. What makes them a SET
+        // Props has to Table in the retired toolbar originals. What makes them a SET
         // rather than three marks drawn nearby is that none is much smaller
         // than the box and all three share a centre.
         assert!(
@@ -423,7 +423,8 @@ fn every_highbay_icon_shapes_and_is_baked_with_ink() {
 
 /// **Table is a bordered grid of THREE columns under a HEAVIER header rule.**
 ///
-/// Every clause is a decision from `draw_table_glyph`: the border, the three
+/// Every clause is a decision carried over from the retired `draw_table_glyph`
+/// (`fonts/icon.py` is the design now): the border, the three
 /// columns, and the rule that is deliberately thicker than the frame so the
 /// top row reads as a header. The weight comparison is the one that needs
 /// coverage rather than thresholded ink — 3.3 texels and 2.3 texels both light
@@ -487,7 +488,7 @@ fn the_baked_table_cell_is_a_bordered_grid_with_a_header() {
 
 /// **Props is three rows, and every row is a LABEL and a VALUE.**
 ///
-/// The split is the design, and `draw_props_glyph` says why: three equal bars
+/// The split is the design, and `fonts/icon.py`'s `props` says why: three equal bars
 /// is the hamburger mark, and at 28px a viewer reads the silhouette rather
 /// than the intent. So this asserts two runs per row with the leading one
 /// SHORTER — the exact shape that stops being true if someone "simplifies" the

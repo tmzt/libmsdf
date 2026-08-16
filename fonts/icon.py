@@ -32,12 +32,17 @@ two is which manifest owns the name.
 
 # Where the outlines come from
 
-Table and Props are ports of `crates/highbay_ui/src/zui/toolbar.rs`'s
-`draw_table_glyph` / `draw_props_glyph` (Tim, 2026-07-28), which are the
-authored designs and carry the reasoning; the proportions here are theirs,
-measured off those functions and rescaled onto the icon grid. Graph is new,
-drawn to complete the trio. See each entry below for what was preserved and
-the one place a proportion was corrected.
+Table and Props were ported from `draw_table_glyph` / `draw_props_glyph` in
+`crates/highbay_ui/src/zui/toolbar.rs` (Tim, 2026-07-28) - the authored designs,
+whose proportions were measured off those functions and rescaled onto the icon
+grid. **Those functions are gone** (2026-08-16: the toolbar draws these as
+glyphs now, so keeping a second hand-drawn copy was the drift the port existed
+to end), which makes THIS FILE the authored design. The per-glyph docstrings
+below record what each preserved and the one place a proportion was corrected;
+read them as the source rather than as a summary of something else.
+
+Graph is new, drawn to complete the trio. Screen is newer still, drawn when the
+Screens pane needed a mark that could not be confused with a rename pencil.
 
 # The design contract, and it is declared HERE
 
@@ -234,7 +239,8 @@ R, T = CX + HALF_W, CY + HALF_H  # 1707, 1664
 def table():
     """**Table**: a bordered grid with a heavier rule under the header row.
 
-    A port of `draw_table_glyph`. Everything is preserved except the outline:
+    Ported from the retired `draw_table_glyph` (see the module docstring).
+    Everything was preserved except the outline:
     the pixel version STROKES a box and then draws the rules ACROSS it, which
     in a font would be overlapping contours. The same mark is expressed here
     as one rounded outer contour with the six CELLS cut out of it, so the
@@ -274,7 +280,7 @@ def table():
 def props():
     """**Props**: three property-sheet rows, each a LABEL and a VALUE.
 
-    A port of `draw_props_glyph`, proportions unchanged (half-width 6.5,
+    Ported from the retired `draw_props_glyph`, proportions unchanged (half-width 6.5,
     stroke 1.6, rows 5.0 apart, a 3.0 label and a 3.0 gap - all in the
     original's pixels, rescaled by the same factor the Table is). The split
     row is the whole design and the reason it is not three plain bars: three

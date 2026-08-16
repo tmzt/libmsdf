@@ -315,7 +315,7 @@ pub fn msymbols_codepoint(name: &str) -> Option<char> {
 ///
 /// The outlines are authored in `fonts/icon.py`, which is where the geometry
 /// is decided and where `table` and `props` record which proportions they take
-/// from `highbay_ui`'s `draw_table_glyph`/`draw_props_glyph`.
+/// from `highbay_ui`'s since-retired `draw_table_glyph`/`draw_props_glyph`.
 ///
 /// Sorted by name so [`highbay_codepoint`] can binary-search it. The
 /// codepoints no longer sort the same way — `screen` was added after `table`
