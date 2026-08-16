@@ -1,11 +1,11 @@
 #!/usr/bin/env -S uv run --quiet --with fonttools python3
 """Add the repo's own UI ICON glyphs to a baked Highbay face.
 
-**This, `marker.py` and `widen.py` are how `fonts/*.ttf` are made, and all
-three are additive by construction.** Existing glyphs are never re-derived:
-this appends new outlines after every glyph already there, so no glyph id
-moves and `GDEF`/`GPOS`/`GSUB` (kerning, the fi/fl/ffi/ffl ligatures) are
-carried through untouched.
+**This, `marker.py`, `msymbols.py` and `widen.py` are how `fonts/*.ttf` are
+made, and all four are additive by construction.** Existing glyphs are never
+re-derived: this appends new outlines after every glyph already there, so no
+glyph id moves and `GDEF`/`GPOS`/`GSUB` (kerning, the fi/fl/ffi/ffl ligatures)
+are carried through untouched.
 
     ./icon.py <base.ttf> <out.ttf>
 
@@ -13,6 +13,12 @@ Run for BOTH faces (see `../src/font/mod.rs` for what each one is). These are
 not Material Symbols and must never pretend to be: they carry no Material
 name, they sit nowhere near Material's codepoints, and `msymbols_codepoint`
 answers `None` for every one of them. They are OURS, in `HIGHBAY_ICONS`.
+
+**Re-runnable, because the set grows.** A name already in the face is skipped
+(its outline is the one that shipped, and re-deriving it is exactly what the
+additive premise forbids); only names the face does not carry are appended. So
+adding an icon is an edit to `ICONS` below plus one run per face, not a
+rebuild of everything.
 
 # Why a glyph rather than an `SdfKind`
 
@@ -88,6 +94,7 @@ UPEM = 2048
 # comparison. Allocating UPWARD from the base keeps the bake queue's ordering
 # append-only for this block, as it does for the markers.
 ICON_BASE = 0xF800
+ICON_LIMIT = 0xF8EF
 
 # Ink centre. Half an em above the baseline, matching the Material set.
 CX = CY = UPEM // 2
@@ -325,13 +332,47 @@ def graph():
     return out
 
 
-# name -> (glyph name, advance, contour builder). Codepoints are allocated
-# UPWARD from `ICON_BASE` in this order, which is alphabetical so the manifest
-# in `../src/font/mod.rs` reads monotone in both columns.
+def screen():
+    """**Screen**: an empty rounded frame - one screen of the app being built.
+
+    Tim, 2026-08-16: "to contrast this on the screens pane, use a box for the
+    screen." It is the Screens pane's half of the design/code toggle, and its
+    whole job is to be UNMISTAKABLE for the rename pencil that used to sit
+    there - a closed area against a diagonal stroke, which is as far apart as
+    two 28px marks get.
+
+    Drawn rather than borrowed, for the reason `props` and `table` are: nothing
+    Material publishes MEANS "a screen". `crop_square` means crop-to-square,
+    `check_box_outline_blank` means an unticked checkbox and `rectangle` means
+    a rectangle; taking any of them would put a name in the codebase that says
+    something the mark does not. See `../src/font/mod.rs`'s `highbay_codepoint`.
+
+    It is the Table's outer frame with nothing inside it - same live box, same
+    corner radius, same 1.4px frame stroke - so a viewer reads Table as "this
+    screen, with rows in it" rather than as an unrelated mark. The two never
+    appear together (Table is the Data pane's, this is the Screens pane's).
+    """
+    frame, radius = px(1.4), px(1.5)
+    return [
+        rounded_rect(L, B, R, T, radius, cw=True),
+        rounded_rect(L + frame, B + frame, R - frame, T - frame, radius - frame, cw=False),
+    ]
+
+
+# name -> (codepoint, contour builder), sorted by NAME so it reads as a list and
+# so the manifest in `../src/font/mod.rs` can binary-search the same order.
+#
+# **Codepoints are DECLARED here, never derived from a position in this list.**
+# They used to be `ICON_BASE + index`, which is only correct while the list is
+# never inserted into: adding `screen` alphabetically would have renumbered
+# `table` from U+F802 to U+F803 - silently, in a face that had already shipped,
+# for every caller that had already resolved it. Written down, a new icon takes
+# the next free codepoint above every existing one and nothing moves.
 ICONS = [
-    ("graph", graph),
-    ("props", props),
-    ("table", table),
+    ("graph", 0xF800, graph),
+    ("props", 0xF801, props),
+    ("screen", 0xF803, screen),
+    ("table", 0xF802, table),
 ]
 
 
@@ -373,12 +414,26 @@ def main():
     if not cmaps:
         sys.exit("face has no unicode cmap subtable")
 
+    # Append-only: a new icon must sit ABOVE every one already in the face, so
+    # the bake queue (which scans the Private Use Area in codepoint order)
+    # never has a cell inserted before an existing one. Checked rather than
+    # remembered, because the cost of getting it wrong is every icon cell in
+    # every shipped atlas moving.
+    settled = [cp for _, cp, _ in ICONS if f"uni{cp:04X}" in have]
+    ceiling = max(settled, default=ICON_BASE - 1)
+
     added = []
-    for i, (label, builder) in enumerate(ICONS):
-        cp = ICON_BASE + i
+    for label, cp, builder in ICONS:
         name = f"uni{cp:04X}"
         if name in have:
-            sys.exit(f"{name} is already in the face - this script is additive, not idempotent")
+            continue  # already shipped in this face; never re-derived
+        if not ICON_BASE <= cp <= ICON_LIMIT:
+            sys.exit(f"{label}: U+{cp:04X} is outside the icon block")
+        if cp <= ceiling:
+            sys.exit(
+                f"{label}: U+{cp:04X} sits below U+{ceiling:04X}, which the face already "
+                f"carries - allocate upward or every icon cell above it moves in the atlas"
+            )
         contours = builder()
 
         # Outer contours CW, counters CCW - and every glyph must start with an

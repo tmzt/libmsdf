@@ -19,7 +19,10 @@ pub mod outline;
 pub mod packer;
 pub mod shaper;
 
-pub use atlas::{FontAtlas, FontAtlasBuilder, GlyphProjection, glyph_projection};
+pub use atlas::{
+    ATLAS_COLS, ATLAS_ROWS, FontAtlas, FontAtlasBuilder, GlyphProjection, atlas_capacity,
+    glyph_projection,
+};
 pub use glyph_table::GlyphEntry;
 pub use manager::{AtlasManager, AtlasRegion};
 pub use outline::{Edge, EdgeKind, GlyphOutline, extract_outline};
@@ -199,7 +202,11 @@ pub const ROBOTO_REGULAR_ASCII: &[u8] = include_bytes!("../../fonts/Roboto-Regul
 /// ```text
 /// menu U+E5D2   more_vert U+E5D4   send U+E163   chat U+E0C9   person U+F0D3
 /// home U+E9B2   search U+EF7A      library_books U+E02F        settings U+E8B8
+/// code U+E86F   edit U+F097        undo U+E166   redo U+E15A
 /// ```
+///
+/// The merge is `fonts/msymbols.py`, which is additive and verifies every
+/// already-merged icon against the upstream build before appending a new one.
 ///
 /// This face also carries both [`OWNED_BLOCKS`], as the plain one does — see
 /// [`ROBOTO_REGULAR_ASCII`]. So one of the two icon sets, [`HIGHBAY_ICONS`],
@@ -228,16 +235,27 @@ pub const ROBOTO_ASCII_MSYMBOLS: &[u8] =
 ///
 /// Sorted by name so [`msymbols_codepoint`] can binary-search it, and so the
 /// list reads as a list.
+///
+/// **The codepoint is the one Material's own `.codepoints` manifest declares**,
+/// not the lowest or the highest alias the face happens to answer to: several
+/// names carry legacy Material Icons aliases as well, and `edit` answers to
+/// five, of which `U+F097` is the published one. Taking the declared value is
+/// what keeps this a statement about a catalogue rather than about whichever
+/// alias a scan picked.
 pub const MSYMBOLS_ICONS: &[(&str, char)] = &[
     ("chat", '\u{E0C9}'),
+    ("code", '\u{E86F}'),
+    ("edit", '\u{F097}'),
     ("home", '\u{E9B2}'),
     ("library_books", '\u{E02F}'),
     ("menu", '\u{E5D2}'),
     ("more_vert", '\u{E5D4}'),
     ("person", '\u{F0D3}'),
+    ("redo", '\u{E15A}'),
     ("search", '\u{EF7A}'),
     ("send", '\u{E163}'),
     ("settings", '\u{E8B8}'),
+    ("undo", '\u{E166}'),
 ];
 
 /// The codepoint [`ROBOTO_ASCII_MSYMBOLS`] draws `name` at, or `None` when the
@@ -281,14 +299,17 @@ pub fn msymbols_codepoint(name: &str) -> Option<char> {
 /// manifest for the borrowed set.
 ///
 /// ```text
-/// graph U+F800   props U+F801   table U+F802
+/// graph U+F800   props U+F801   table U+F802   screen U+F803
 /// ```
 ///
 /// These exist because the vocabulary Material publishes does not contain
-/// them. `table` has no close Material match and `props` — a property sheet's
-/// label/value rows — has none at all, so the alternatives were to pick a
-/// Material name that means something else and let the codebase learn a lie,
-/// or to draw our own and say so. This is saying so: they carry no Material
+/// them. `table` has no close Material match, `props` — a property sheet's
+/// label/value rows — has none at all, and `screen` (one screen of the app
+/// being built) has only near-misses whose NAMES mean other things:
+/// `crop_square` means crop-to-square, `check_box_outline_blank` means an
+/// unticked checkbox, `rectangle` means a rectangle. So the alternatives were
+/// to pick a Material name that means something else and let the codebase
+/// learn a lie, or to draw our own and say so. This is saying so: they carry no Material
 /// name, they sit two thousand codepoints clear of Material's, and
 /// [`msymbols_codepoint`] answers `None` for every one of them.
 ///
@@ -297,11 +318,14 @@ pub fn msymbols_codepoint(name: &str) -> Option<char> {
 /// from `highbay_ui`'s `draw_table_glyph`/`draw_props_glyph`.
 ///
 /// Sorted by name so [`highbay_codepoint`] can binary-search it. The
-/// codepoints happen to sort the same way, because the block is allocated
-/// upward and this was the first batch; nothing may rely on that.
+/// codepoints no longer sort the same way — `screen` was added after `table`
+/// and therefore ABOVE it, because the block is allocated upward and an
+/// alphabetically-placed codepoint would have renumbered a glyph that had
+/// already shipped.
 pub const HIGHBAY_ICONS: &[(&str, char)] = &[
     ("graph", '\u{F800}'),
     ("props", '\u{F801}'),
+    ("screen", '\u{F803}'),
     ("table", '\u{F802}'),
 ];
 

@@ -323,6 +323,74 @@ pub fn default_cell_metrics(face: &ttf_parser::Face, glyph_size: u32) -> (f32, f
     )
 }
 
+// ── The pinned atlas grid ───────────────────────────────────────────────
+
+/// Columns of glyph cells. Fixed, for predictable shelf alignment — and
+/// because a texture whose WIDTH changed would move every glyph's `u` in
+/// `sdf_render.wgsl`, exactly as a changing height moves every `v`.
+pub const ATLAS_COLS: u32 = 8;
+
+/// **Rows of glyph cells the atlas is baked to, whether or not they are used**
+/// — so the texture's dimensions are a CONSTANT and a re-bake cannot move a
+/// glyph that did not change.
+///
+/// # Why the height is pinned rather than fitted
+///
+/// The shader samples a cell at `(atlas_gy + acy + 0.5) / atlas_dim.y`
+/// (`sdf_render.wgsl`). Fitting the texture to its contents makes that
+/// denominator a function of the glyph COUNT, so adding one glyph anywhere
+/// perturbs the sample coordinate of *every* glyph in *every* frame — an
+/// unaccountable last-ulp diff across the whole fixture suite, in panes the
+/// change never touched. Reserving the rows up front costs some blank texels
+/// and buys the property [`FontAtlasBuilder::add_shipped_coverage`] wants: a
+/// re-bake is a strict superset of the last one, and **a rendered frame that
+/// moves is a real finding**.
+///
+/// (Cells still shift within the grid if a glyph is queued BEFORE an existing
+/// one — see `add_shipped_coverage`, which is append-only for exactly that
+/// reason. Pinning the height fixes the global denominator; the queue order
+/// fixes the local numbering. Both are needed and they are different things.)
+///
+/// # Why 40, and what the budget is
+///
+/// 40 rows x [`ATLAS_COLS`] = **320 cells**. At the shipped 48px cell that is
+/// `8 * 50 = 400` x `40 * 50 = 2000` px, inside the **2048** floor that
+/// `wgpu::Limits::downlevel_defaults()` and `downlevel_webgl2_defaults()` set
+/// for `max_texture_dimension_2d` (WebGPU's own default is 8192 and desktop /
+/// Android Vulkan is typically 4096+; this repo pins no limits, so 2048 is the
+/// conservative assumption). 40 rows is therefore the LARGEST pin that fits the
+/// weakest target — which is the point of paying the one-time cost: there is no
+/// second churn available under that ceiling.
+///
+/// What is queued today (`add_shipped_coverage`, merged face, 2026-08-16):
+///
+/// ```text
+///   95  printable ASCII                        U+0020..U+007E
+///   96  Latin-1 Supplement                     U+00A0..U+00FF
+///   14  the shaped-ASCII superset beyond cmap  (ligatures, GSUB forms)
+///   18  SYMBOLS: 13 borrowed + 4 drawn + 1 marker
+///    1  glyph 0, the placeholder box
+///  ---
+///  224  of 320   (96 free; the plain face is 211, being 4 borrowed short)
+/// ```
+///
+/// The text side is closed — those ranges are declared in
+/// [`crate::font::TEXT_RANGES`] and are not going to grow again. Only the
+/// SYMBOL side grows, and Tim's estimate (2026-08-16) is **~16 symbol glyphs
+/// total** across icons and markers; we are at 18. So the 96 free cells are
+/// roughly five times the entire intended symbol budget, and a wave that needs
+/// to raise this number should first ask why the symbol set quintupled.
+///
+/// Raising it past 40 rows is not a packing decision — at 48px cells it puts
+/// the texture over 2048 and becomes a question about which GPUs we support.
+pub const ATLAS_ROWS: u32 = 40;
+
+/// Glyph cells one baked atlas holds: [`ATLAS_ROWS`] x [`ATLAS_COLS`].
+/// [`FontAtlasBuilder::build`] fails rather than silently growing past it.
+pub const fn atlas_capacity() -> usize {
+    (ATLAS_ROWS * ATLAS_COLS) as usize
+}
+
 // ── Builder (CPU baking — native-only) ──────────────────────────────────
 
 /// Builder for constructing MSDF font atlases.
@@ -466,13 +534,28 @@ impl FontAtlasBuilder {
     ///
     /// **A new PUA glyph is the one case that is only half append-only**, and
     /// it is worth knowing before it surprises someone. The PUA is scanned
-    /// here, so a glyph added to it lands *before* Latin-1 in the queue and
-    /// shifts those 96 cells plus glyph 0 one slot along. Their CONTENT is
-    /// unchanged and nothing looks a cell up by coordinate, so a frame only
-    /// moves if it draws a Latin-1 character — and then only in the last ulp of
-    /// `sdf_render.wgsl`'s `(atlas_gx + acx + 0.5) / atlas_dim.x`. Allocating
-    /// [`crate::font::MARKERS`] upward from the top of the PUA is what keeps
-    /// the icon cells themselves from moving.
+    /// here **in codepoint order**, so a glyph added to it lands *before*
+    /// Latin-1 in the queue and shifts those 96 cells plus glyph 0 one slot
+    /// along — and, if its codepoint falls in the middle of the block, shifts
+    /// every PUA cell above it too. Their CONTENT is unchanged and nothing
+    /// looks a cell up by coordinate, so a frame only moves if it draws one of
+    /// the shifted glyphs — and then only in the last ulp of
+    /// `sdf_render.wgsl`'s `(atlas_gx + acx + 0.5) / atlas_dim.x`. ASCII is
+    /// queued first and never moves, which is why most frames are unaffected.
+    ///
+    /// Allocating [`crate::font::MARKERS`] and
+    /// [`crate::font::HIGHBAY_ICONS_BLOCK`] upward is what keeps the glyphs we
+    /// DRAW from moving. It cannot help a BORROWED one: a Material icon sits
+    /// at Material's codepoint, so `code` (`U+E86F`) lands between `more_vert`
+    /// and `settings` whatever we would prefer. The lasting fix is to queue
+    /// this range in GLYPH-ID order rather than codepoint order — every script
+    /// in `fonts/` appends, so glyph ids are already allocated append-only —
+    /// which would make any additive font edit a true append here as well,
+    /// without this method learning an icon list. Not done; a change of bake
+    /// order renumbers every PUA cell once, which is its own wave.
+    ///
+    /// The atlas's DIMENSIONS are not affected by any of this: they are pinned
+    /// ([`ATLAS_ROWS`]), so the divisor in that expression is a constant.
     pub fn add_shipped_coverage(&mut self) {
         // cmap lookups for printable ASCII...
         debug_assert_eq!(
@@ -614,9 +697,7 @@ impl FontAtlasBuilder {
         let padded = gs + 2; // 1px padding on each side
         let channels = 3u32;
 
-        // 8 columns for predictable shelf alignment.
-        let cols = 8u32;
-        let atlas_w = cols * padded;
+        let atlas_w = ATLAS_COLS * padded;
         let mut packer = ShelfPacker::new(atlas_w);
 
         let baseline_frac = {
@@ -637,7 +718,18 @@ impl FontAtlasBuilder {
             placed.push(Placed { cell, atlas_x: x + 1, atlas_y: y + 1 });
         }
 
-        let atlas_h = packer.used_height().max(1);
+        if placed.len() > atlas_capacity() {
+            return Err(format!(
+                "{} glyphs queued, but the atlas is pinned at {} cells ({ATLAS_ROWS} rows x \
+                 {ATLAS_COLS} columns) - see ATLAS_ROWS before raising it",
+                placed.len(),
+                atlas_capacity()
+            ));
+        }
+        // **Pinned, not fitted** — see [`ATLAS_ROWS`]. `used_height` is still the
+        // floor for a degenerate bake with a huge cell, which cannot happen at
+        // the shipped 48px but is not worth being wrong about.
+        let atlas_h = packer.used_height().max(ATLAS_ROWS * padded).max(1);
         let mut pixel_data = vec![0u8; (atlas_w * atlas_h * channels) as usize];
         let mut glyphs = Vec::with_capacity(placed.len());
         let mut glyph_index = std::collections::HashMap::new();

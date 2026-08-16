@@ -15,7 +15,7 @@ use libmsdf::font::{
     FontAtlas, MSYMBOLS_ICONS, PRIVATE_USE, ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII,
     TEXT_RANGES, TextShaper, msymbols_codepoint,
 };
-use libmsdf::{DrawList, SdfKind};
+use libmsdf::{ATLAS_COLS, ATLAS_ROWS, DrawList, SdfKind, atlas_capacity};
 
 const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
 const PX_RANGE: f32 = 6.0;
@@ -340,4 +340,50 @@ fn dropping_a_control_character_does_not_disturb_clusters() {
     let run = shaper().shape("ab\ncd");
     let clusters: Vec<u32> = run.glyphs.iter().map(|g| g.cluster).collect();
     assert_eq!(clusters, vec![0, 1, 3, 4]);
+}
+
+// ── the reserved grid ───────────────────────────────────────────────────
+
+/// **The shipped atlas is the pinned size, with the headroom that was
+/// reserved** — a fact about the BYTES, which is the only place the
+/// reservation can be checked (`ATLAS_ROWS` is a number in a source file until
+/// something bakes against it).
+///
+/// It fails in both directions on purpose. Too small means a re-bake fitted
+/// the texture to its contents again, and every `v` in every frame moved with
+/// it. Too full means the next glyph will not fit, which is a decision about
+/// which GPUs we support (`ATLAS_ROWS`' own doc) rather than something to
+/// discover from a bake error.
+#[test]
+fn the_shipped_atlas_is_pinned_and_has_the_reserved_headroom() {
+    let a = atlas();
+    let padded = 48 + 2;
+    assert_eq!(
+        (a.width, a.height),
+        (ATLAS_COLS * padded, ATLAS_ROWS * padded),
+        "the shipped atlas is not the pinned grid - was it baked before ATLAS_ROWS existed?"
+    );
+    // Vacuity pin: the pin is doing work, i.e. the contents really are smaller
+    // than the reservation. If these were equal the assert above would pass for
+    // the wrong reason.
+    let rows_used = a.glyphs.len().div_ceil(ATLAS_COLS as usize);
+    assert!(
+        rows_used < ATLAS_ROWS as usize,
+        "{} glyphs fill all {ATLAS_ROWS} reserved rows - nothing is pinned any more",
+        a.glyphs.len()
+    );
+    assert!(
+        a.glyphs.len() <= atlas_capacity(),
+        "{} glyphs, capacity {}",
+        a.glyphs.len(),
+        atlas_capacity()
+    );
+    // The budget as written down in `ATLAS_ROWS`: ~200 text cells and a symbol
+    // set Tim sized at ~16. A bake that has drifted far from that is the
+    // moment to re-read the reasoning, not to raise the number.
+    assert!(
+        a.glyphs.len() < 260,
+        "{} glyphs is well past the recorded budget - see ATLAS_ROWS",
+        a.glyphs.len()
+    );
 }
