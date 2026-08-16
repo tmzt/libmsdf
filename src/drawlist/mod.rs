@@ -931,6 +931,84 @@ impl DrawList {
         Some(rotate_rect(inst.position, inst.size, rotation, anchor))
     }
 
+    /// **Draw ONE icon glyph, centred in a rect, sized so `em` is its em box**
+    /// — and return the pen origin it was drawn from.
+    ///
+    /// The sibling of [`Self::push_marker`]: both take a glyph the caller
+    /// resolved by codepoint and place it from the BAKED CELL's own metrics
+    /// rather than from numbers restated in Rust. They differ only in what
+    /// "placed" means — a marker is pinned by its point to a curve, an icon is
+    /// centred in a box.
+    ///
+    /// # Why the arithmetic is what it is
+    ///
+    /// Three facts, all libmsdf's own, and nothing else:
+    ///
+    /// 1. **The cell maps onto the line box.** `sdf_render.wgsl` sets
+    ///    `scale = cell_px / line_h` with `line_h = em *`[`LINE_BOX_RATIO`], so
+    ///    cell row `r` lands at `pos.y + r * line_h / cell_px` and the baseline
+    ///    is [`GlyphEntry::baseline_row`](crate::font::GlyphEntry) through that
+    ///    same map.
+    /// 2. **The pen origin is the ink's left edge** — the shader samples at
+    ///    `acx = (x - pen_x) * scale + x_margin`.
+    /// 3. **The bake centres ink in its cell**, which is what lets the ink
+    ///    WIDTH be recovered from a cell that does not record one: the margin
+    ///    left on one side is the margin left on the other, so
+    ///    `ink = cell_px - 2 * x_margin`.
+    ///
+    /// The one thing that is a property of the ICON SET rather than of the
+    /// bake: both shipped vocabularies draw an icon centred on a square design
+    /// grid that is its em box (Material's own convention, and the contract
+    /// `fonts/icon.py` asserts for the marks this repo drew). So centring the
+    /// ink in `rect` centres the icon in it, and `em` sizes the design grid —
+    /// the same contract a designer gets from a 24dp icon box.
+    ///
+    /// # `None` is the missing-asset answer
+    ///
+    /// Nothing is drawn when the run shaped to `.notdef` (the face has no such
+    /// glyph), the bake queued no cell for it, or the size is degenerate. An
+    /// icon is a NAME a developer wrote, so the placeholder box would be a
+    /// substitution that makes a typo look like a rendering quirk — see
+    /// [`crate::font::msymbols_codepoint`], which says it at length.
+    pub fn push_icon(
+        &mut self,
+        run: &ShapedRun,
+        atlas: &FontAtlas,
+        rect_pos: [f32; 2],
+        rect_size: [f32; 2],
+        em: f32,
+        px_range: f32,
+        color: [f32; 4],
+    ) -> Option<[f32; 2]> {
+        debug_assert_eq!(
+            run.glyphs.len(),
+            1,
+            "an icon is ONE glyph; this run has {} and every one of them would \
+             be laid out, widening the instance and pushing the icon off centre",
+            run.glyphs.len(),
+        );
+        let glyph = run.glyphs.first()?;
+        if glyph.glyph_id == 0 {
+            return None;
+        }
+        let entry = atlas.get_glyph(glyph.glyph_id)?;
+        let cell_px = entry.atlas_h as f32;
+        if !(em > 0.0) || cell_px <= 0.0 {
+            return None;
+        }
+        let line_h = em * LINE_BOX_RATIO;
+        let ink_w = (cell_px - 2.0 * entry.x_margin) * line_h / cell_px;
+        // The em box spans `em` upward from the baseline, so centring it in the
+        // rect puts the baseline half an em below the rect's middle.
+        let baseline_y = rect_pos[1] + rect_size[1] * 0.5 + em * 0.5;
+        let pos = [
+            rect_pos[0] + (rect_size[0] - ink_w) * 0.5,
+            baseline_y - entry.baseline_row * line_h / cell_px,
+        ];
+        self.push_shaped_text(run, atlas, pos, em, px_range, color);
+        Some(pos)
+    }
+
     /// Lower to the GPU wire format: one `SdfDrawCmd` per instance, plus
     /// the packed char buffer and the aux param bank (Bézier controls, and
     /// the `SdfRotate` transform bank — see below).

@@ -301,6 +301,69 @@ fn highbay_icon_contract_holds() {
     }
 }
 
+/// **The icon PRIMITIVE puts the mark where the caller's box is** —
+/// [`DrawList::push_icon`], which is what every icon call site outside a
+/// widget tree goes through (the ZUI's toolbar, the selector's inline rename
+/// affordance).
+///
+/// Read off the emitted instance rather than recomputed, because "centred" is
+/// the whole contract: a hit region derived from the caller's rect and ink
+/// drawn from a second formula is exactly the drift CLAUDE.md item 5 is about.
+/// The tolerance is a texel of the 48px cell mapped down to this em, not a
+/// fudge — the cell's own `x_margin` is quantized.
+#[test]
+fn push_icon_centres_the_mark_in_its_box_and_reports_a_miss() {
+    let (shaper, atlas) = (shaper(), atlas());
+    let rect_pos = [100.0f32, 40.0];
+    let rect_size = [40.0f32, 40.0];
+    const EM: f32 = 22.0;
+
+    for &(name, ch) in HIGHBAY_ICONS {
+        let run = shaper.shape(ch.encode_utf8(&mut [0u8; 4]));
+        let mut list = libmsdf::DrawList::new();
+        let pen = list
+            .push_icon(&run, &atlas, rect_pos, rect_size, EM, PX_RANGE, [1.0; 4])
+            .unwrap_or_else(|| panic!("{name:?} drew nothing"));
+        assert_eq!(list.instances.len(), 1, "{name:?} is one instance");
+        let inst = &list.instances[0];
+        assert!(
+            matches!(inst.kind, libmsdf::SdfKind::MsdfText { char_count: 1, .. }),
+            "{name:?} is one glyph on the text path",
+        );
+
+        // The INK is centred horizontally: the pen is the ink's left edge and
+        // the cell's margins are symmetric, so pen + ink_w/2 is the mark's own
+        // middle.
+        let e = atlas.get_glyph(run.glyphs[0].glyph_id).unwrap();
+        let ink_w = (e.atlas_h as f32 - 2.0 * e.x_margin) * EM * LINE_BOX_RATIO / e.atlas_h as f32;
+        let ink_mid = pen[0] + ink_w * 0.5;
+        assert!(
+            (ink_mid - (rect_pos[0] + rect_size[0] * 0.5)).abs() < 0.5,
+            "{name:?} ink centre {ink_mid} is not the box's {}",
+            rect_pos[0] + rect_size[0] * 0.5,
+        );
+        // ...and vertically, via the baseline the cell declares: an em box
+        // centred in the rect puts the baseline half an em below its middle.
+        let baseline = pen[1] + e.baseline_row * EM * LINE_BOX_RATIO / e.atlas_h as f32;
+        assert!(
+            (baseline - (rect_pos[1] + rect_size[1] * 0.5 + EM * 0.5)).abs() < 0.01,
+            "{name:?} baseline {baseline} is not half an em below the box's middle",
+        );
+    }
+
+    // A name the face cannot draw shapes to `.notdef`, and `push_icon` reports
+    // the miss rather than drawing the placeholder box — an icon is a
+    // developer's asset, not a user's text.
+    let mut list = libmsdf::DrawList::new();
+    let missing = shaper.shape("\u{F8EF}"); // inside our block, nothing drawn there
+    assert_eq!(missing.notdef_count(), 1, "vacuity: that codepoint IS uncovered");
+    assert_eq!(
+        list.push_icon(&missing, &atlas, rect_pos, rect_size, EM, PX_RANGE, [1.0; 4]),
+        None,
+    );
+    assert!(list.instances.is_empty(), "a missing icon draws nothing at all");
+}
+
 /// Each icon shapes, is baked, and its cell has INK — the three separate ways
 /// a glyph goes missing, asked together the way `coverage.rs` asks them of
 /// text. Both faces, and they must agree about the advance.
