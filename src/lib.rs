@@ -24,6 +24,7 @@ pub mod core;
 pub mod drawlist;
 pub mod font;
 pub mod gpu;
+pub mod pane;
 
 pub use crate::core::{
     Anim, ClipRect, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE,
@@ -31,6 +32,7 @@ pub use crate::core::{
     SdfDrawCmd,
 };
 pub use drawlist::{rotate_rect, DrawEffects, DrawList, Elevation, SdfFrame, SdfInstance, SdfKind, SdfRotate};
+pub use pane::{PaneGate, PaneMark};
 pub use font::{
     ATLAS_COLS, ATLAS_ROWS, AtlasManager, AtlasRegion, FontAtlas, FontAtlasBuilder, GlyphEntry,
     HIGHBAY_ICONS, atlas_capacity,
