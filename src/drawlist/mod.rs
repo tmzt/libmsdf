@@ -540,6 +540,64 @@ impl DrawList {
         self.translate_transforms_from(start, dx, dy);
     }
 
+    /// **Splice a separately-built list onto the end of this one**, keeping
+    /// every tag each instance was pushed under.
+    ///
+    /// For a host that builds one PANE at a time - into its own list, so the
+    /// result can be kept and re-used on a frame where that pane did not move -
+    /// and then composes the panes in z-order. Appending is what makes the
+    /// re-use possible at all: [`DrawList::push`] re-tags with whatever stacks
+    /// are open RIGHT NOW, so replaying kept instances through it would put
+    /// them under the wrong clip, the wrong effects and the wrong rotation.
+    /// This copies the tags the source recorded instead.
+    ///
+    /// **Two of those tags are INDICES into banks and are rebased here.** A
+    /// text instance names its glyphs as `char_start` into the source's char
+    /// buffer, and a rotated instance names its matrix as a 1-based id into the
+    /// source's transform bank; both banks are concatenated onto this list's,
+    /// so both references move by the length this list already had. Everything
+    /// else an instance carries - its position, its resolved scissor, its
+    /// effects, its elevation - is ABSOLUTE and copies unchanged. That split is
+    /// the whole of why this is a method: a caller cannot see the two banks,
+    /// and a caller that copied `instances` alone would draw the first pane's
+    /// glyphs under the second pane's text.
+    ///
+    /// **The destination must have no scope open.** An appended instance
+    /// carries its own clip/effect/rotation and does NOT inherit the
+    /// destination's, so appending inside an open [`DrawList::push_clip`] would
+    /// silently escape it. Composing panes at top level is the intended use and
+    /// has none open; the assertion says so rather than leaving it to a reader.
+    pub fn append(&mut self, other: &DrawList) {
+        debug_assert!(
+            self.active_clips.is_empty()
+                && self.active_effects.is_empty()
+                && self.active_transform.is_empty(),
+            "append into a list with a clip/effect/rotate scope still open: the \
+             appended instances carry their OWN tags and would escape it",
+        );
+        let char_base = self.chars.len() as u32;
+        let transform_base = self.transforms.len() as u32;
+        self.chars.extend_from_slice(&other.chars);
+        self.transforms.extend_from_slice(&other.transforms);
+        self.instances.reserve(other.instances.len());
+        for instance in &other.instances {
+            let mut instance = *instance;
+            if let SdfKind::MsdfText { char_start, .. } = &mut instance.kind {
+                *char_start += char_base;
+            }
+            self.instances.push(instance);
+        }
+        self.instance_transforms.extend(
+            other
+                .instance_transforms
+                .iter()
+                .map(|&id| if id == 0 { 0 } else { id + transform_base }),
+        );
+        self.instance_elevation.extend_from_slice(&other.instance_elevation);
+        self.instance_effects.extend_from_slice(&other.instance_effects);
+        self.instance_clips.extend_from_slice(&other.instance_clips);
+    }
+
     /// The third thing a translated instance's geometry lives in: the rotation
     /// transform it was drawn under ([`DrawList::push_rotate`]).
     ///
@@ -1441,6 +1499,137 @@ mod tests {
         for c in frame.char_buffer {
             assert!(((c >> 16) as usize) < atlas.glyphs.len());
         }
+    }
+
+    // ── append ───────────────────────────────────────────────────────────
+
+    /// The shape a pane composer relies on: a list built on its own, then
+    /// spliced, must lower to the SAME frame as one drawn straight through.
+    ///
+    /// Text is what makes this a real assertion rather than a `Vec` extend.
+    /// A run names its glyphs by INDEX into the list's char buffer, so a
+    /// second pane's text spliced without rebasing draws the FIRST pane's
+    /// glyphs - a frame with the right number of instances in the right
+    /// places and the wrong letters in them, which no count and no geometry
+    /// check can see.
+    #[test]
+    fn a_spliced_pane_lowers_to_what_drawing_it_in_place_would_have() {
+        let (shaper, atlas) = text_fixture();
+        let mut direct = DrawList::new();
+        draw_two_panes(&mut direct, &shaper, &atlas);
+
+        let mut composed = DrawList::new();
+        let mut first = DrawList::new();
+        pane_one(&mut first, &shaper, &atlas);
+        let mut second = DrawList::new();
+        pane_two(&mut second, &shaper, &atlas);
+        composed.append(&first);
+        composed.append(&second);
+
+        assert_eq!(composed.instances, direct.instances);
+        assert_eq!(composed.chars(), direct.chars());
+        assert_eq!(composed.instance_clips, direct.instance_clips);
+        assert_eq!(composed.instance_effects, direct.instance_effects);
+        assert_eq!(composed.instance_elevation, direct.instance_elevation);
+        let a = composed.lower();
+        let b = direct.lower();
+        assert_eq!(a.char_buffer, b.char_buffer);
+        assert_eq!(a.param_bank, b.param_bank);
+        assert_eq!(a.draws.len(), b.draws.len());
+        for (x, y) in a.draws.iter().zip(&b.draws) {
+            assert_eq!(x.params, y.params, "a spliced draw disagrees with the direct one");
+            assert_eq!(x.pos, y.pos);
+            assert_eq!(x.size, y.size);
+            assert_eq!(x.xform, y.xform);
+        }
+    }
+
+    /// The rotation bank is the second index an instance carries, and a pane
+    /// that rotated anything is the only way to see it: the spliced instance
+    /// must point at the matrix ITS pane pushed, not at whatever entry sits at
+    /// the same slot in the composed bank.
+    #[test]
+    fn a_spliced_rotation_still_names_its_own_matrix() {
+        let mut first = DrawList::new();
+        first.push_rotate(SdfRotate::Quarter(1), [10.0, 10.0]);
+        first.push(boxy(0.0));
+        first.push_rotate_end();
+
+        let mut second = DrawList::new();
+        second.push_rotate(SdfRotate::Quarter(2), [20.0, 20.0]);
+        second.push(boxy(1.0));
+        second.push_rotate_end();
+
+        let mut composed = DrawList::new();
+        composed.append(&first);
+        composed.append(&second);
+
+        assert_eq!(composed.instance_transforms, vec![1, 2]);
+        assert_eq!(composed.transforms.len(), 2);
+        assert_eq!(composed.transforms[0], first.transforms[0]);
+        assert_eq!(composed.transforms[1], second.transforms[0]);
+    }
+
+    /// An untagged instance stays untagged. `0` means "no transform", not
+    /// "bank entry zero", so rebasing it would point the second pane's
+    /// unrotated ink at the first pane's matrix.
+    #[test]
+    fn an_untagged_instance_is_not_rebased_into_a_transform() {
+        let mut first = DrawList::new();
+        first.push_rotate(SdfRotate::Quarter(1), [10.0, 10.0]);
+        first.push(boxy(0.0));
+        first.push_rotate_end();
+        let mut second = DrawList::new();
+        second.push(boxy(1.0));
+
+        let mut composed = DrawList::new();
+        composed.append(&first);
+        composed.append(&second);
+        assert_eq!(composed.instance_transforms, vec![1, 0]);
+    }
+
+    fn boxy(x: f32) -> SdfInstance {
+        SdfInstance {
+            kind: SdfKind::Box,
+            position: [x, 0.0],
+            size: [4.0, 4.0],
+            color: [1.0; 4],
+            anim: 0,
+        }
+    }
+
+    fn text_fixture() -> (crate::font::TextShaper, FontAtlas) {
+        let shaper = crate::font::TextShaper::new(crate::font::ROBOTO_REGULAR_ASCII.to_vec())
+            .expect("fixture parses");
+        let mut atlas = FontAtlas::empty(64, 64, 3);
+        for ch in ['H', 'i', 'o', 'k'] {
+            let gid = shaper.glyph_id_for_char(ch).unwrap();
+            atlas.insert_entry(crate::font::GlyphEntry {
+                glyph_id: gid,
+                atlas_x: 1, atlas_y: 1, atlas_w: 48, atlas_h: 48,
+                advance_x: 0.5, baseline_row: 36.0, px_per_em: 36.9, x_margin: 7.2,
+            });
+        }
+        (shaper, atlas)
+    }
+
+    fn pane_one(list: &mut DrawList, shaper: &crate::font::TextShaper, atlas: &FontAtlas) {
+        list.push_clip([0.0, 0.0], [100.0, 100.0]);
+        list.push(boxy(0.0));
+        list.push_shaped_text(&shaper.shape("Hi"), atlas, [10.0, 10.0], 16.0, 4.0, [1.0; 4]);
+        list.push_clip_end();
+    }
+
+    fn pane_two(list: &mut DrawList, shaper: &crate::font::TextShaper, atlas: &FontAtlas) {
+        list.begin_effects(DrawEffects { blur_radius: 2.0, alpha_ombre: 0.0 });
+        list.push_fill(boxy(200.0), Elevation::Raised);
+        list.push_shaped_text(&shaper.shape("ok"), atlas, [210.0, 10.0], 16.0, 4.0, [1.0; 4]);
+        list.end_effects();
+    }
+
+    fn draw_two_panes(list: &mut DrawList, shaper: &crate::font::TextShaper, atlas: &FontAtlas) {
+        pane_one(list, shaper, atlas);
+        pane_two(list, shaper, atlas);
     }
 
     // ── SdfRotate ────────────────────────────────────────────────────────
