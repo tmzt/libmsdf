@@ -567,7 +567,24 @@ impl DrawList {
     /// destination's, so appending inside an open [`DrawList::push_clip`] would
     /// silently escape it. Composing panes at top level is the intended use and
     /// has none open; the assertion says so rather than leaving it to a reader.
-    pub fn append(&mut self, other: &DrawList) {
+    ///
+    /// # Why `append_from` and not `append`
+    ///
+    /// **So the drawing gates can SEE it.** This is one of the ways ink enters
+    /// a list, and the three source-level composition-boundary checks
+    /// (`libhbui/tests/drawing_allowlist.rs` and its two siblings) work by
+    /// matching the API's own spelling in a module's source. `.append(` is
+    /// `Vec::append` far more often than it is this - `libhbui`'s
+    /// `charter::retire_pipelines` writes one in production code - so a needle
+    /// spelled that way would fail a correct function and the only fixes
+    /// available would be renaming it to dodge the check or widening an
+    /// allowlist that is only ever supposed to shrink. `append_from` collides
+    /// with nothing, so the gates can watch it outright.
+    ///
+    /// [`DrawList::push_fill`] is named for the same reason and says so: the
+    /// API picks names the check can read, rather than asking the check to
+    /// guess. `_from` follows [`DrawList::translate_from`].
+    pub fn append_from(&mut self, other: &DrawList) {
         debug_assert!(
             self.active_clips.is_empty()
                 && self.active_effects.is_empty()
@@ -1523,8 +1540,8 @@ mod tests {
         pane_one(&mut first, &shaper, &atlas);
         let mut second = DrawList::new();
         pane_two(&mut second, &shaper, &atlas);
-        composed.append(&first);
-        composed.append(&second);
+        composed.append_from(&first);
+        composed.append_from(&second);
 
         assert_eq!(composed.instances, direct.instances);
         assert_eq!(composed.chars(), direct.chars());
@@ -1561,8 +1578,8 @@ mod tests {
         second.push_rotate_end();
 
         let mut composed = DrawList::new();
-        composed.append(&first);
-        composed.append(&second);
+        composed.append_from(&first);
+        composed.append_from(&second);
 
         assert_eq!(composed.instance_transforms, vec![1, 2]);
         assert_eq!(composed.transforms.len(), 2);
@@ -1583,8 +1600,8 @@ mod tests {
         second.push(boxy(1.0));
 
         let mut composed = DrawList::new();
-        composed.append(&first);
-        composed.append(&second);
+        composed.append_from(&first);
+        composed.append_from(&second);
         assert_eq!(composed.instance_transforms, vec![1, 0]);
     }
 

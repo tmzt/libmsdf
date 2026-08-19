@@ -41,18 +41,29 @@
 //!
 //! # Why this lives in libmsdf
 //!
-//! Because [`DrawList::append`] does, and this is the only reason that method
+//! Because [`DrawList::append_from`] does, and this is the only reason that method
 //! exists: keeping one pane's ink and splicing it is a draw-list operation, and
 //! the rebasing it needs is private to the list. It is also the layer at which a
 //! pane is only a RANGE OF INSTANCES - this module knows nothing about panes,
 //! phones or apps, which is what lets a second surface use it unchanged.
 //!
-//! It is not here to dodge `libhbui`'s drawing allowlist, and that gate's
-//! finding is recorded rather than worked around: its needle `DrawList::new(`
-//! stands for "this module emits instances", and a module that CONSTRUCTS a
-//! list for somebody else to fill falsifies that proxy. The airtight half of the
-//! rule is the push family; [`DrawList::append`] cannot originate an instance,
-//! only relocate one that some module the gate already reads pushed.
+//! # What the drawing gates see of this
+//!
+//! Both halves of it, by name. This module is not here to dodge them, and the
+//! finding the first version DID leave behind is closed rather than recorded:
+//! the splice was called `append`, which no gate watched and none could watch
+//! (`.append(` is `Vec::append` in production code), and [`PaneGate::draw`]
+//! reaches it for a caller who need never name a draw list at all. Both are
+//! watched now - [`DrawList::append_from`] was renamed so a needle can match it
+//! unambiguously, and `PaneGate` is itself a needle, since a module cannot hold
+//! or drive a gate without naming the type.
+//!
+//! Being watched is not the same as being forbidden. Neither can ORIGINATE an
+//! instance: the splice only relocates ink some module the gate already reads
+//! pushed, and the gate's `build` closure fills a list of its own. What the
+//! needles buy is that a module doing either has to be a module the rule
+//! ALLOWS to - the composing shell, not an element or an adapter - and that is
+//! a question a reviewer gets asked rather than one nobody is shown.
 //!
 //! # An unmarked write is a STALE PANE
 //!
@@ -167,7 +178,7 @@ impl<K: PaneKey> PaneGate<K> {
     ///
     /// `build` renders the pane into a list of its OWN - never into `out`
     /// directly - which is what makes the result keepable. Both paths then go
-    /// through [`DrawList::append`], so the splice is exercised on a miss as
+    /// through [`DrawList::append_from`], so the splice is exercised on a miss as
     /// well as a hit and a rebasing bug cannot hide until the first skip.
     pub fn draw(&self, mark: &PaneMark, key: K, out: &mut DrawList, build: impl FnOnce(&mut DrawList)) {
         let rev = mark.revision();
@@ -192,15 +203,15 @@ impl<K: PaneKey> PaneGate<K> {
                     self.name,
                 );
                 assert_eq!(ink.chars(), fresh.chars(), "pane `{}`: kept glyphs are stale", self.name);
-                out.append(ink);
+                out.append_from(ink);
                 return;
             }
-            out.append(&self.kept.borrow().as_ref().expect("just checked").ink);
+            out.append_from(&self.kept.borrow().as_ref().expect("just checked").ink);
             return;
         }
         let mut ink = DrawList::new();
         build(&mut ink);
-        out.append(&ink);
+        out.append_from(&ink);
         self.rebuilds.set(self.rebuilds.get() + 1);
         *self.kept.borrow_mut() = Some(Kept { key, rev, ink });
     }
