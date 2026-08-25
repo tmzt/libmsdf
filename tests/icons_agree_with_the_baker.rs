@@ -229,8 +229,9 @@ fn every_marker_rust_names_is_one_the_baker_draws() {
 ///    blocks.
 /// 2. **glyph id -> baked cell**, through the atlas. A miss HERE is the one
 ///    that draws a tofu box, and the first hop cannot see it: the atlas is a
-///    BOUNDED subset - `atlas.rs:721` refuses a build over `atlas_capacity()` -
-///    so a glyph can sit in the face and never reach a cell.
+///    BOUNDED subset - `FontAtlasBuilder::build` refuses a build over
+///    `atlas_capacity()` - so a glyph can sit in the face and never reach a
+///    cell.
 ///
 /// Checking only the cmap would claim to catch the tofu box and miss exactly
 /// the case that causes it.

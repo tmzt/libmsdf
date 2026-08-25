@@ -12,8 +12,9 @@
 //! does it shape, does it have a cell, and does that cell have ink in it.
 
 use libmsdf::font::{
-    FontAtlas, MSYMBOLS_ICONS, PRIVATE_USE, ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII,
-    TEXT_RANGES, TextShaper, msymbols_codepoint,
+    FontAtlas, FontAtlasBuilder, GlyphSet, HIGHBAY_ICONS_BLOCK, MARKERS, MSYMBOLS_ICONS,
+    PRIVATE_USE, ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII, TEXT_RANGES, TextShaper,
+    msymbols_codepoint,
 };
 use libmsdf::{ATLAS_COLS, ATLAS_ROWS, DrawList, SdfKind, atlas_capacity};
 
@@ -166,23 +167,44 @@ fn uncovered_characters_resolve_to_the_placeholder_cell() {
 }
 
 /// ...and the DRAW LIST agrees. The two above could both hold while the emitter
-/// still pointed the run at table index 0, which for every shipped atlas is the
-/// space — the invisible gap by a second route.
+/// still pointed the run at table index 0, which for every shipped atlas used to
+/// be the space — the invisible gap by a second route.
+///
+/// # The vacuity pin moved, and why it had to
+///
+/// This used to assert `notdef_idx != 0` first, so that matching it meant
+/// something. That is no longer possible: the glyph table is ordered by GLYPH
+/// ID and glyph 0 is the lowest there is, so the placeholder is table index 0
+/// in every atlas that bakes it. Two things follow. The emitter's last-resort
+/// arm (`None => (0, ..)`, for an atlas with no glyph 0 at all) now lands on
+/// the placeholder wherever there is one, which is strictly better than
+/// "whatever was packed first". And a stuck zero is no longer distinguishable
+/// from the right answer by looking at this glyph alone — so the run carries a
+/// SECOND glyph, and the pin is that the second one comes back as itself.
 #[test]
 fn the_emitter_points_an_uncovered_run_at_the_placeholder() {
     let (shaper, atlas) = (shaper(), atlas());
     let notdef_idx = atlas.glyph_table_index(0).expect("glyph 0 is in the table") as u32;
-    assert_ne!(notdef_idx, 0, "vacuity: glyph 0 must not BE table index 0 here");
 
     let mut list = DrawList::new();
-    list.push_shaped_text(&shaper.shape("\u{2014}"), &atlas, [0.0, 0.0], 16.0, PX_RANGE, [1.0; 4]);
+    // An em-dash (uncovered) followed by an 'A' (covered).
+    list.push_shaped_text(&shaper.shape("\u{2014}A"), &atlas, [0.0, 0.0], 16.0, PX_RANGE, [1.0; 4]);
     let frame = list.lower();
     let SdfKind::MsdfText { char_start, char_count, .. } = list.instances[0].kind else {
         panic!("expected a text instance");
     };
-    assert_eq!(char_count, 1);
-    let packed = frame.char_buffer[char_start as usize];
-    assert_eq!(packed >> 16, notdef_idx, "the em-dash was emitted as some other cell");
+    assert_eq!(char_count, 2);
+    let packed = |i: u32| frame.char_buffer[(char_start + i) as usize] >> 16;
+    assert_eq!(packed(0), notdef_idx, "the em-dash was emitted as some other cell");
+
+    // Vacuity pin: the buffer is carrying real indices, not zeros. 'A' is a
+    // covered glyph, so it must come back as its OWN cell and not as the
+    // placeholder's.
+    let a_idx = atlas
+        .glyph_table_index(shaper.shape("A").glyphs[0].glyph_id)
+        .expect("'A' is baked") as u32;
+    assert_ne!(a_idx, notdef_idx, "vacuity: 'A' must not resolve to the placeholder");
+    assert_eq!(packed(1), a_idx, "'A' was emitted as some other cell");
 }
 
 /// A glyph the FACE carries but the BAKE skipped also lands on the box, rather
@@ -386,4 +408,123 @@ fn the_shipped_atlas_is_pinned_and_has_the_reserved_headroom() {
         "{} glyphs is well past the recorded budget - see ATLAS_ROWS",
         a.glyphs.len()
     );
+}
+
+// ── the declared cell order ─────────────────────────────────────────────
+
+/// The queue the shipped atlas was baked from, for either bundled face.
+fn shipped_queue(face: &[u8]) -> FontAtlasBuilder {
+    let mut builder = FontAtlasBuilder::new(face.to_vec(), 48, PX_RANGE as f64);
+    builder.add_shipped_coverage();
+    builder
+}
+
+/// **The bytes on disk are in the order the code says they are.**
+///
+/// `GlyphSet` declares the layout and `FontAtlasBuilder::cell_order` computes
+/// it; this reads the layout back off the ARTIFACT — cells in raster order,
+/// which is the only order the texture actually has — and holds the two
+/// against each other. Without it the declaration is a comment: the atlas is
+/// baked by hand and committed, so a bake done from a different order would
+/// ship, load, and render, with nothing to say the order had drifted.
+///
+/// It also pins the claim `cell_order` makes about geometry, that entry *n* is
+/// the glyph in cell *n* of the grid. A caller reasoning about where a glyph
+/// will land needs that to be true and cannot see the packer.
+#[test]
+fn the_shipped_atlas_is_laid_out_in_the_declared_cell_order() {
+    let a = atlas();
+    let declared = shipped_queue(ROBOTO_REGULAR_ASCII).cell_order();
+    assert_eq!(declared.len(), a.glyphs.len(), "the bake queued a different number of glyphs");
+    assert!(declared.len() > 200, "vacuity: the queue came back nearly empty");
+
+    // The artifact's own order: cells left to right, top to bottom.
+    let mut by_cell: Vec<&libmsdf::GlyphEntry> = a.glyphs.iter().collect();
+    by_cell.sort_by_key(|e| (e.atlas_y, e.atlas_x));
+
+    let padded = 48 + 2;
+    for (cell, (&(set, glyph_id), entry)) in declared.iter().zip(by_cell.iter()).enumerate() {
+        assert_eq!(
+            entry.glyph_id, glyph_id,
+            "cell {cell} holds glyph {} and the declared order puts {glyph_id} ({set:?}) there \
+             - the committed atlas was baked from a different order than the one \
+             `GlyphSet` states",
+            entry.glyph_id
+        );
+        // ...and cell `n` is where `cell_order`'s doc says it is.
+        assert_eq!(
+            (entry.atlas_x as u32, entry.atlas_y as u32),
+            (
+                1 + (cell as u32 % ATLAS_COLS) * padded,
+                1 + (cell as u32 / ATLAS_COLS) * padded
+            ),
+            "cell {cell} is not at grid position ({}, {})",
+            cell % ATLAS_COLS as usize,
+            cell / ATLAS_COLS as usize
+        );
+    }
+    // The sets really are laid down in blocks, and in the declared sequence.
+    let sets: Vec<GlyphSet> = declared.iter().map(|&(set, _)| set).collect();
+    assert!(sets.windows(2).all(|w| w[0] <= w[1]), "the sets are interleaved");
+    assert_eq!(sets[0], GlyphSet::Placeholder, "cell 0 is not the placeholder box");
+}
+
+/// **The two bundled faces bake to the SAME cells**, right up to the borrowed
+/// icons the merged one adds on the end.
+///
+/// `libhbui` ships the merged atlas and `highbay_ui` the plain one, and this is
+/// what makes a cell in one comparable to a cell in the other. It falls out of
+/// `GlyphSet::BorrowedIcons` being last: the vendor half is the only part of
+/// the merged face that is not in the plain one, so appending it disturbs
+/// nothing. Under the old codepoint scan a borrowed `U+E0xx` sorted below our
+/// `U+F8xx`, so the merged bake pushed Latin-1 and the placeholder 13 cells
+/// along and the two atlases agreed about almost nothing.
+///
+/// Compared through CODEPOINTS, because the glyph ids differ between the faces
+/// — that is the whole reason the set id, and not the glyph id, is what makes
+/// the order ours.
+#[test]
+fn the_two_bundled_faces_share_a_cell_layout() {
+    let (plain_face, merged_face) = (shaper(), TextShaper::new(ROBOTO_ASCII_MSYMBOLS.to_vec()).unwrap());
+    let (plain, merged) = (
+        shipped_queue(ROBOTO_REGULAR_ASCII).cell_order(),
+        shipped_queue(ROBOTO_ASCII_MSYMBOLS).cell_order(),
+    );
+    let cell_of = |order: &[(GlyphSet, u16)], gid: u16| {
+        order.iter().position(|&(_, g)| g == gid)
+    };
+
+    let mut checked = 0;
+    let ranges = TEXT_RANGES
+        .iter()
+        .copied()
+        .chain([HIGHBAY_ICONS_BLOCK, MARKERS]);
+    for (lo, hi) in ranges {
+        for cp in (lo as u32)..=(hi as u32) {
+            let ch = char::from_u32(cp).unwrap();
+            let (Some(pg), Some(mg)) = (plain_face.glyph_id_for_char(ch), merged_face.glyph_id_for_char(ch))
+            else {
+                continue;
+            };
+            assert_eq!(
+                cell_of(&plain, pg),
+                cell_of(&merged, mg),
+                "U+{cp:04X} is glyph {pg} in the plain face and {mg} in the merged one, \
+                 and the two bakes put it in different cells"
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 190, "vacuity: only {checked} codepoints were comparable");
+
+    // The merged face's extra cells are exactly its borrowed icons, and they
+    // are all at the END — after every cell the plain face has.
+    assert_eq!(merged.len(), plain.len() + MSYMBOLS_ICONS.len());
+    for (cell, &(set, _)) in merged.iter().enumerate() {
+        assert_eq!(
+            set == GlyphSet::BorrowedIcons,
+            cell >= plain.len(),
+            "cell {cell} of the merged bake is {set:?}"
+        );
+    }
 }

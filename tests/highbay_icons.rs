@@ -144,9 +144,12 @@ impl Cell {
 /// **The top 256 codepoints of the Private Use Area are the repo's**, split in
 /// two blocks that abut exactly and overlap nowhere.
 ///
-/// This is the property that lets `add_shipped_coverage` queue the whole PUA
-/// without knowing an icon set: borrowed glyphs sit far below the line, ours
-/// sit above it, and neither can wander into the other by accident.
+/// This is the property that lets `add_shipped_coverage` queue the whole PUA as
+/// three declared BLOCKS without knowing an icon set: borrowed glyphs sit far
+/// below the line, ours sit above it in two abutting halves, and neither can
+/// wander into the other by accident. The bake asserts the same shape before it
+/// scans, because a gap between the blocks would be codepoints the face defines
+/// and the atlas never queues.
 #[test]
 fn owned_blocks_are_the_top_of_the_carveout() {
     let (pua_lo, pua_hi) = PRIVATE_USE;

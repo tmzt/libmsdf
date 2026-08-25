@@ -9,6 +9,7 @@
 //! The atlas packs glyphs into a single texture using shelf-based bin
 //! packing. Each glyph is rendered as a 3-channel (RGB) MSDF bitmap.
 
+use crate::font::GlyphSet;
 use crate::font::glyph_table::GlyphEntry;
 #[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
 use crate::font::packer::ShelfPacker;
@@ -24,10 +25,10 @@ pub struct FontAtlas {
     pub channels: u32,
     /// Raw pixel data: width * height * channels bytes, row-major
     pub pixel_data: Vec<u8>,
-    /// Per-glyph entries indexed by position in the table
+    /// **Per-glyph entries, ordered by glyph id** — see
+    /// [`FontAtlas::get_glyph`] for why that specific order, and
+    /// [`crate::font::GlyphSet`] for why it is not the order the CELLS are in.
     pub glyphs: Vec<GlyphEntry>,
-    /// Map from glyph_id to index in `glyphs`
-    glyph_index: std::collections::HashMap<u16, usize>,
     /// Fraction from cell top to baseline (e.g. 0.75 = baseline at 75% from top).
     /// Used by the shader to align glyphs on the baseline.
     pub baseline_frac: f32,
@@ -35,13 +36,32 @@ pub struct FontAtlas {
 
 impl FontAtlas {
     /// Look up a glyph entry by glyph ID.
+    ///
+    /// # Two orders, and this is the one the LOOKUP uses
+    ///
+    /// [`FontAtlas::glyphs`] is sorted by glyph id, so this is a binary search
+    /// over at most [`atlas_capacity`] entries and the atlas carries no lookup
+    /// table at all. It used to carry a `HashMap<u16, usize>` that was never
+    /// serialized and was rebuilt on every load — an accelerator that existed
+    /// because the entries had no order worth searching. They have one now.
+    ///
+    /// The order the CELLS are packed in is a different thing:
+    /// `(set, glyph id)`, declared by [`crate::font::GlyphSet`], and it lives
+    /// in each entry's `atlas_x`/`atlas_y`. Cell order is what has to stay put
+    /// across a re-bake, because it decides the artifact's bytes and the
+    /// texture coordinate every frame samples. Table order is derived on load
+    /// and matters to nothing outside one loaded atlas: the GPU table
+    /// ([`FontAtlas::glyph_table_u32s`]) and the index packed into a draw list
+    /// both come from the same instance.
     pub fn get_glyph(&self, glyph_id: u16) -> Option<&GlyphEntry> {
-        self.glyph_index.get(&glyph_id).map(|&idx| &self.glyphs[idx])
+        self.glyph_table_index(glyph_id).map(|idx| &self.glyphs[idx])
     }
 
     /// Index of a glyph in the GPU glyph table (position in `glyphs`).
     pub fn glyph_table_index(&self, glyph_id: u16) -> Option<usize> {
-        self.glyph_index.get(&glyph_id).copied()
+        self.glyphs
+            .binary_search_by_key(&glyph_id, |e| e.glyph_id)
+            .ok()
     }
 
     /// The full GPU glyph table: 8 u32 (2 × vec4<u32>) per entry, in table
@@ -125,13 +145,23 @@ impl FontAtlas {
         }
 
         let mut glyphs = Vec::with_capacity(num_glyphs);
-        let mut glyph_index = std::collections::HashMap::new();
         for i in 0..num_glyphs {
             let offset = entries_start + i * GlyphEntry::PACKED_SIZE;
-            let entry = GlyphEntry::from_bytes(&data[offset..offset + GlyphEntry::PACKED_SIZE])?;
-            glyph_index.insert(entry.glyph_id, i);
-            glyphs.push(entry);
+            glyphs.push(GlyphEntry::from_bytes(
+                &data[offset..offset + GlyphEntry::PACKED_SIZE],
+            )?);
         }
+        // **Sorted here, not trusted from the file.** [`FontAtlas::get_glyph`]
+        // binary-searches this, and a stale artifact baked before the order
+        // existed would otherwise answer lookups with the wrong glyph rather
+        // than failing — the worst available outcome. Sorting an already-sorted
+        // few hundred entries costs a scan, against the HashMap build (an
+        // allocation and a rehash per load, wasm included) this replaces.
+        //
+        // Nothing is lost by re-ordering a loaded atlas: every entry carries
+        // its own cell coordinates, so the file's entry order is not a fact
+        // about the texture.
+        glyphs.sort_unstable_by_key(|e| e.glyph_id);
 
         let pixel_start = entries_end;
         let expected_pixels = (width * height * channels) as usize;
@@ -148,7 +178,6 @@ impl FontAtlas {
             pixel_data,
             glyphs,
             baseline_frac: 0.75, // default for deserialized atlases
-            glyph_index,
         })
     }
 
@@ -161,7 +190,6 @@ impl FontAtlas {
             channels,
             pixel_data: vec![0; (width * height * channels) as usize],
             glyphs: Vec::new(),
-            glyph_index: std::collections::HashMap::new(),
             baseline_frac: 0.75,
         }
     }
@@ -226,15 +254,26 @@ impl FontAtlas {
 
     /// Register a glyph entry (dynamic append path). Replaces any existing
     /// entry for the same glyph id and returns the table index.
+    ///
+    /// The entry is inserted at its glyph id's place, not appended, because
+    /// [`FontAtlas::get_glyph`] binary-searches the table. Table indices after
+    /// the insertion point therefore shift — which is why an index is a value
+    /// to use now, never one to cache across a later insert. (Its CELL does not
+    /// move: this path allocates cells through [`crate::font::AtlasManager`],
+    /// which is a separate allocator over the texture.)
     pub fn insert_entry(&mut self, entry: GlyphEntry) -> usize {
-        if let Some(&idx) = self.glyph_index.get(&entry.glyph_id) {
-            self.glyphs[idx] = entry;
-            idx
-        } else {
-            let idx = self.glyphs.len();
-            self.glyph_index.insert(entry.glyph_id, idx);
-            self.glyphs.push(entry);
-            idx
+        match self
+            .glyphs
+            .binary_search_by_key(&entry.glyph_id, |e| e.glyph_id)
+        {
+            Ok(idx) => {
+                self.glyphs[idx] = entry;
+                idx
+            }
+            Err(idx) => {
+                self.glyphs.insert(idx, entry);
+                idx
+            }
         }
     }
 }
@@ -346,10 +385,11 @@ pub const ATLAS_COLS: u32 = 8;
 /// re-bake is a strict superset of the last one, and **a rendered frame that
 /// moves is a real finding**.
 ///
-/// (Cells still shift within the grid if a glyph is queued BEFORE an existing
-/// one — see `add_shipped_coverage`, which is append-only for exactly that
-/// reason. Pinning the height fixes the global denominator; the queue order
-/// fixes the local numbering. Both are needed and they are different things.)
+/// (Cells still shift within the grid if a glyph sorts BEFORE an existing one
+/// — see [`crate::font::GlyphSet`], which declares the order so that a glyph
+/// added to the last set cannot. Pinning the height fixes the global
+/// denominator; the set order fixes the local numbering. Both are needed and
+/// they are different things.)
 ///
 /// # Why 40, and what the budget is
 ///
@@ -401,8 +441,17 @@ pub struct FontAtlasBuilder {
     font_data: Vec<u8>,
     glyph_size: u32,
     px_range: f64,
-    /// Queued glyph IDs to generate
-    queued_glyphs: Vec<u16>,
+    /// **Queued glyphs, each with the vocabulary it was queued FROM.**
+    ///
+    /// The set has to be recorded here because here is the only place it
+    /// exists: the caller knows it is adding the marker block or the shaped
+    /// superset at the moment it asks, and a glyph id carries no trace of it
+    /// afterwards. Recovering it later would mean guessing from the id, which
+    /// is exactly the emergent ordering [`crate::font::GlyphSet`] replaces.
+    ///
+    /// This is a QUEUE, not the layout: [`FontAtlasBuilder::cell_order`] sorts
+    /// it.
+    queued_glyphs: Vec<(GlyphSet, u16)>,
 }
 
 impl FontAtlasBuilder {
@@ -429,15 +478,26 @@ impl FontAtlasBuilder {
         self.px_range
     }
 
-    /// Queue a single glyph ID for atlas generation.
-    pub fn add_glyph(&mut self, glyph_id: u16) {
-        if !self.queued_glyphs.contains(&glyph_id) {
-            self.queued_glyphs.push(glyph_id);
+    /// Queue a single glyph ID for atlas generation, as part of `set`.
+    ///
+    /// **A glyph queued twice keeps the LOWEST set that claimed it**, not the
+    /// first one to ask. One glyph gets one cell, so a rule is needed either
+    /// way; taking the minimum makes it independent of the order the queue
+    /// calls came in, which is the whole point of recording a set. It is also
+    /// the meaning the sets want: an `f` reached by both
+    /// [`FontAtlasBuilder::add_ascii`] and
+    /// [`FontAtlasBuilder::add_shaped_ascii`] is TEXT, and
+    /// [`GlyphSet::ShapedText`] means "beyond the declared ranges" rather than
+    /// "everything shaping emits".
+    pub fn add_glyph(&mut self, set: GlyphSet, glyph_id: u16) {
+        match self.queued_glyphs.iter_mut().find(|(_, g)| *g == glyph_id) {
+            Some(queued) => queued.0 = queued.0.min(set),
+            None => self.queued_glyphs.push((set, glyph_id)),
         }
     }
 
-    /// Queue all glyphs for a codepoint range (resolves via cmap).
-    pub fn add_codepoint_range(&mut self, start: char, end: char) {
+    /// Queue all glyphs for a codepoint range (resolves via cmap) into `set`.
+    pub fn add_codepoint_range(&mut self, set: GlyphSet, start: char, end: char) {
         let face = match ttf_parser::Face::parse(&self.font_data, 0) {
             Ok(f) => f,
             Err(_) => return,
@@ -452,20 +512,39 @@ impl FontAtlasBuilder {
             }
         }
         for gid in gids {
-            self.add_glyph(gid);
+            self.add_glyph(set, gid);
         }
     }
 
-    /// Queue common Latin + digit + punctuation glyphs.
+    /// Queue common Latin + digit + punctuation glyphs, as [`GlyphSet::Text`].
     ///
     /// cmap-only: this is the glyph a codepoint maps to *in isolation*. Text is
     /// not laid out in isolation — see [`FontAtlasBuilder::add_shaped_ascii`].
     pub fn add_ascii(&mut self) {
-        self.add_codepoint_range(' ', '~');
+        self.add_codepoint_range(GlyphSet::Text, ' ', '~');
     }
 
-    /// Queue every glyph the SHAPER can emit for printable ASCII, which is a
-    /// superset of [`FontAtlasBuilder::add_ascii`]'s cmap lookups.
+    /// **The order cells are placed in**: every queued glyph as
+    /// `(set, glyph id)`, sorted — [`crate::font::GlyphSet`] first, glyph id
+    /// within it.
+    ///
+    /// [`FontAtlasBuilder::build`] lays the atlas out in exactly this sequence,
+    /// so entry *n* of this is the glyph in cell *n*: row `n / ATLAS_COLS`,
+    /// column `n % ATLAS_COLS`. It is available without the `cpu-bake` feature
+    /// on purpose — the layout is a fact about the QUEUE, so a caller (or a
+    /// test) can ask where a glyph will land, or check where a shipped atlas
+    /// put it, without running msdfgen.
+    pub fn cell_order(&self) -> Vec<(GlyphSet, u16)> {
+        let mut order = self.queued_glyphs.clone();
+        order.sort_unstable_by_key(|&(set, glyph_id)| (set, glyph_id));
+        order
+    }
+
+    /// Queue every glyph the SHAPER can emit for printable ASCII, as
+    /// [`GlyphSet::ShapedText`] — a superset of [`FontAtlasBuilder::add_ascii`]'s
+    /// cmap lookups, of which only the glyphs BEYOND that set land here (a
+    /// glyph keeps the lowest set that claims it, see
+    /// [`FontAtlasBuilder::add_glyph`]).
     ///
     /// Two ways shaping escapes the cmap set:
     /// * **GSUB substitutions on a single codepoint** — some subset fonts remap
@@ -506,7 +585,7 @@ impl FontAtlasBuilder {
 
         for probe in probes {
             for g in shaper.shape(&probe).glyphs {
-                self.add_glyph(g.glyph_id);
+                self.add_glyph(GlyphSet::ShapedText, g.glyph_id);
             }
         }
     }
@@ -515,71 +594,83 @@ impl FontAtlasBuilder {
     /// [`crate::font::TEXT_RANGES`] cannot disagree about coverage.
     ///
     /// Stated as ranges the face is asked about, never as a list of glyphs.
-    /// [`crate::font::PRIVATE_USE`] is asked for as one span, so the merged
-    /// face's icons and both faces' [`crate::font::MARKERS`] come along without
-    /// this ever learning an icon set or a marker set, and a face that defines
-    /// nothing there queues nothing. **Adding a glyph is therefore an edit to
-    /// the FONT, not to this method** — which is the whole reason coverage has
-    /// one home.
+    /// [`crate::font::PRIVATE_USE`] is asked for as its three declared BLOCKS,
+    /// so the merged face's borrowed icons, our own icons and both faces'
+    /// [`crate::font::MARKERS`] come along without this ever learning an icon
+    /// name or a marker name, and a face that defines nothing in a block queues
+    /// nothing for it. **Adding a glyph is therefore an edit to the FONT, not
+    /// to this method** - which is the whole reason coverage has one home.
     ///
-    /// **The order is append-only, and that is load-bearing.** Cells are packed
-    /// in queue order, so a glyph's atlas coordinates and its glyph-table index
-    /// are both fixed by how many glyphs were queued before it. Appending a new
-    /// range leaves every existing cell exactly where it was and simply makes
-    /// the atlas taller — a re-bake is then a strict superset of the last one,
-    /// and a rendered frame that moves is a real finding rather than repacking
-    /// noise. Inserting in the middle would renumber everything after it.
-    /// Hence Latin-1 sits after the Private Use Area here even though it reads
-    /// backwards: ASCII and the icons were baked first.
+    /// # The order used to be this method, and now it is not
     ///
-    /// **A new PUA glyph is the one case that is only half append-only**, and
-    /// it is worth knowing before it surprises someone. The PUA is scanned
-    /// here **in codepoint order**, so a glyph added to it lands *before*
-    /// Latin-1 in the queue and shifts those 96 cells plus glyph 0 one slot
-    /// along — and, if its codepoint falls in the middle of the block, shifts
-    /// every PUA cell above it too. Their CONTENT is unchanged and nothing
-    /// looks a cell up by coordinate, so a frame only moves if it draws one of
-    /// the shifted glyphs — and then only in the last ulp of
-    /// `sdf_render.wgsl`'s `(atlas_gx + acx + 0.5) / atlas_dim.x`. ASCII is
-    /// queued first and never moves, which is why most frames are unaffected.
+    /// Cells were packed in QUEUE order, so the sequence of calls below was the
+    /// atlas layout: ASCII, then the shaped superset, then the Private Use Area
+    /// in codepoint order, then the rest of the text ranges, then glyph 0.
+    /// Reordering two lines renumbered every cell after the first of them, and
+    /// nothing said so. Latin-1 sat after the Private Use Area for no reason
+    /// except that ASCII and the icons had been baked first.
     ///
-    /// Allocating [`crate::font::MARKERS`] and
-    /// [`crate::font::HIGHBAY_ICONS_BLOCK`] upward is what keeps the glyphs we
-    /// DRAW from moving. It cannot help a BORROWED one: a Material icon sits
-    /// at Material's codepoint, so `code` (`U+E86F`) lands between `more_vert`
-    /// and `settings` whatever we would prefer. The lasting fix is to queue
-    /// this range in GLYPH-ID order rather than codepoint order — every script
-    /// in `fonts/` appends, so glyph ids are already allocated append-only —
-    /// which would make any additive font edit a true append here as well,
-    /// without this method learning an icon list. Not done; a change of bake
-    /// order renumbers every PUA cell once, which is its own wave.
+    /// The layout is now [`FontAtlasBuilder::cell_order`]: `(set, glyph id)`,
+    /// with the sets declared by [`crate::font::GlyphSet`]. Two consequences
+    /// worth naming, because they were the two live defects:
+    ///
+    /// * **A new PUA glyph is a true append.** Scanning that range by codepoint
+    ///   used to put a new glyph *before* Latin-1 and, for a BORROWED icon, in
+    ///   the middle of its own block - a Material icon sits at Material's
+    ///   codepoint, so `code` (`U+E86F`) lands between `more_vert` and
+    ///   `settings` whatever we would prefer. Every script in `fonts/` appends
+    ///   glyph ids, so ordering by glyph id inside a set makes any additive
+    ///   font edit append here too, borrowed icons included.
+    /// * **The call sequence below is no longer load-bearing.** These lines can
+    ///   be reordered, and [`crate::font::TEXT_RANGES`] can be reordered or
+    ///   widened, without moving a cell. The `debug_assert` that used to pin
+    ///   `TEXT_RANGES[0]` to the range `add_ascii` covers is gone with the
+    ///   coupling it guarded.
+    ///
+    /// A re-bake is therefore a strict superset of the last one whenever the
+    /// addition is to the last set that has anything in it, and a rendered
+    /// frame that moves is a real finding rather than repacking noise.
     ///
     /// The atlas's DIMENSIONS are not affected by any of this: they are pinned
-    /// ([`ATLAS_ROWS`]), so the divisor in that expression is a constant.
+    /// ([`ATLAS_ROWS`]), so the divisor in `sdf_render.wgsl`'s
+    /// `(atlas_gx + acx + 0.5) / atlas_dim.x` is a constant either way.
     pub fn add_shipped_coverage(&mut self) {
-        // cmap lookups for printable ASCII...
-        debug_assert_eq!(
-            crate::font::TEXT_RANGES[0],
-            ('\u{0020}', '\u{007E}'),
-            "the first declared range is the one `add_ascii` covers, and the tail \
-             below is queued on that basis - reordering TEXT_RANGES here would \
-             silently drop a range or bake one twice"
-        );
-        self.add_ascii();
-        // ...unioned with what the SHAPER emits for it, which is a superset.
-        self.add_shaped_ascii();
-        // Our own glyphs.
-        let (pua_lo, pua_hi) = crate::font::PRIVATE_USE;
-        self.add_codepoint_range(pua_lo, pua_hi);
-        // Latin-1 Supplement (appended; see above).
-        for &(lo, hi) in &crate::font::TEXT_RANGES[1..] {
-            self.add_codepoint_range(lo, hi);
+        // The declared TEXT coverage, every range of it, through the cmap.
+        for &(lo, hi) in crate::font::TEXT_RANGES {
+            self.add_codepoint_range(GlyphSet::Text, lo, hi);
         }
+        // ...unioned with what the SHAPER emits for ASCII, which is a superset.
+        // Glyphs already claimed above stay Text (`add_glyph` keeps the lowest
+        // set), so this contributes exactly the ligatures and GSUB forms.
+        self.add_shaped_ascii();
+
+        // The Private Use Area, as the three blocks that tile it: the vendor's
+        // half, then ours. Still ranges, never names.
+        let (pua_lo, pua_hi) = crate::font::PRIVATE_USE;
+        let (own_lo, own_hi) = crate::font::OWNED_BLOCKS;
+        let (icons_lo, icons_hi) = crate::font::HIGHBAY_ICONS_BLOCK;
+        let (markers_lo, markers_hi) = crate::font::MARKERS;
+        debug_assert!(
+            own_hi == pua_hi
+                && icons_lo == own_lo
+                && markers_hi == own_hi
+                && icons_hi as u32 + 1 == markers_lo as u32,
+            "the owned blocks no longer tile the top of the carveout, so the three \
+             scans below leave a hole in it - a codepoint in the gap would be \
+             defined by the face and never queued, which draws as a tofu box \
+             (`owned_blocks_are_the_top_of_the_carveout` states the same shape)"
+        );
+        let borrowed_hi = char::from_u32(own_lo as u32 - 1).expect("U+F7FF is a scalar value");
+        self.add_codepoint_range(GlyphSet::BorrowedIcons, pua_lo, borrowed_hi);
+        self.add_codepoint_range(GlyphSet::Markers, markers_lo, markers_hi);
+        self.add_codepoint_range(GlyphSet::OwnedIcons, icons_lo, icons_hi);
+
         // **The placeholder.** Queued explicitly because no codepoint maps to
         // it: `cmap` cannot name glyph 0, so no `add_codepoint_range` will ever
         // reach it, and without a cell every uncovered character is back to
-        // drawing nothing. Last, so it never shifts a cell that already exists.
-        self.add_glyph(0);
+        // drawing nothing. Its own set, and the first one: one glyph, no way to
+        // gain a second, so it is the one cell that can never be pushed along.
+        self.add_glyph(GlyphSet::Placeholder, 0);
     }
 }
 
@@ -689,6 +780,11 @@ impl FontAtlasBuilder {
     }
 
     /// Build the MSDF atlas from all queued glyphs (CPU msdfgen bake).
+    ///
+    /// Cells are placed in [`FontAtlasBuilder::cell_order`] - the declared
+    /// `(set, glyph id)` order - and the finished table is then sorted by glyph
+    /// id, which is the key it is looked up by ([`FontAtlas::get_glyph`]). The
+    /// two orders are deliberately different and neither is the queue's.
     pub fn build(&self) -> Result<FontAtlas, String> {
         let face25 = ttf_parser::Face::parse(&self.font_data, 0)
             .map_err(|e| format!("font parse error: {e}"))?;
@@ -712,7 +808,7 @@ impl FontAtlasBuilder {
         }
 
         let mut placed = Vec::with_capacity(self.queued_glyphs.len());
-        for &glyph_id in &self.queued_glyphs {
+        for (_, glyph_id) in self.cell_order() {
             let cell = self.bake_cell(glyph_id)?;
             let (x, y) = packer.pack(padded, padded);
             placed.push(Placed { cell, atlas_x: x + 1, atlas_y: y + 1 });
@@ -732,7 +828,6 @@ impl FontAtlasBuilder {
         let atlas_h = packer.used_height().max(ATLAS_ROWS * padded).max(1);
         let mut pixel_data = vec![0u8; (atlas_w * atlas_h * channels) as usize];
         let mut glyphs = Vec::with_capacity(placed.len());
-        let mut glyph_index = std::collections::HashMap::new();
 
         for p in &mut placed {
             for row in 0..gs {
@@ -750,9 +845,12 @@ impl FontAtlasBuilder {
             let mut entry = p.cell.entry;
             entry.atlas_x = p.atlas_x as u16;
             entry.atlas_y = p.atlas_y as u16;
-            glyph_index.insert(entry.glyph_id, glyphs.len());
             glyphs.push(entry);
         }
+        // The table is the LOOKUP order; the cells above were the layout. Each
+        // entry carries the coordinates it was placed at, so re-ordering here
+        // moves nothing in the texture.
+        glyphs.sort_unstable_by_key(|e| e.glyph_id);
 
         Ok(FontAtlas {
             width: atlas_w,
@@ -760,7 +858,6 @@ impl FontAtlasBuilder {
             channels,
             pixel_data,
             glyphs,
-            glyph_index,
             baseline_frac,
         })
     }
@@ -810,7 +907,7 @@ mod tests {
     #[test]
     fn atlas_roundtrip() {
         let mut builder = FontAtlasBuilder::new(roboto(), 32, 4.0);
-        builder.add_codepoint_range('A', 'Z');
+        builder.add_codepoint_range(GlyphSet::Text, 'A', 'Z');
         let atlas = builder.build().expect("build failed");
         let bytes = atlas.to_bytes();
         let parsed = FontAtlas::from_bytes(&bytes).expect("parse failed");
@@ -852,5 +949,218 @@ mod tests {
         let idx2 = atlas.insert_entry(GlyphEntry { advance_x: 0.6, ..e });
         assert_eq!(idx2, 0);
         assert_eq!(atlas.get_glyph(7).unwrap().advance_x, 0.6);
+    }
+
+    /// The dynamic-append path keeps the table searchable however the caller
+    /// happens to order its inserts — a glyph arriving out of order lands at
+    /// its own place rather than at the end, so `get_glyph`'s binary search
+    /// stays correct.
+    #[test]
+    fn insert_entry_keeps_the_table_searchable_out_of_order() {
+        let mut atlas = FontAtlas::empty(64, 64, 3);
+        let entry = |glyph_id: u16| GlyphEntry {
+            glyph_id, atlas_x: 1, atlas_y: 1, atlas_w: 32, atlas_h: 32,
+            advance_x: glyph_id as f32 / 100.0, baseline_row: 24.0,
+            px_per_em: 24.6, x_margin: 4.8,
+        };
+        for gid in [90u16, 7, 300, 0, 41] {
+            atlas.insert_entry(entry(gid));
+        }
+        let ids: Vec<u16> = atlas.glyphs.iter().map(|e| e.glyph_id).collect();
+        assert_eq!(ids, vec![0, 7, 41, 90, 300], "the table is not glyph-id ordered");
+        for gid in [0u16, 7, 41, 90, 300] {
+            assert_eq!(atlas.get_glyph(gid).map(|e| e.glyph_id), Some(gid));
+        }
+        // ...and a glyph that was never inserted is still absent, rather than
+        // matching the neighbour a bad search would land on.
+        for gid in [1u16, 42, 89, 299, 301] {
+            assert!(atlas.get_glyph(gid).is_none(), "glyph {gid} was never inserted");
+        }
+    }
+
+    /// **A glyph belongs to the lowest set that claimed it, whatever order the
+    /// queue calls came in** — so the layout does not depend on the sequence
+    /// of `add_*` calls, which is the failure the sets exist to remove.
+    #[test]
+    fn the_queue_call_order_no_longer_decides_anything() {
+        let gid = |ch: char| {
+            ttf_parser::Face::parse(&crate::font::ROBOTO_REGULAR_ASCII, 0)
+                .unwrap()
+                .glyph_index(ch)
+                .unwrap()
+                .0
+        };
+
+        let mut forwards = FontAtlasBuilder::new(roboto(), 48, 6.0);
+        forwards.add_codepoint_range(GlyphSet::Text, 'a', 'z');
+        forwards.add_glyph(GlyphSet::ShapedText, gid('a'));
+        forwards.add_codepoint_range(GlyphSet::OwnedIcons, '\u{F800}', '\u{F8EF}');
+        forwards.add_glyph(GlyphSet::Placeholder, 0);
+
+        let mut backwards = FontAtlasBuilder::new(roboto(), 48, 6.0);
+        backwards.add_glyph(GlyphSet::Placeholder, 0);
+        backwards.add_codepoint_range(GlyphSet::OwnedIcons, '\u{F800}', '\u{F8EF}');
+        backwards.add_glyph(GlyphSet::ShapedText, gid('a'));
+        backwards.add_codepoint_range(GlyphSet::Text, 'a', 'z');
+
+        assert_eq!(forwards.cell_order(), backwards.cell_order());
+        // Vacuity: the two really did queue in opposite orders, so the equality
+        // above is the SORT agreeing and not the two builders being identical.
+        assert_ne!(forwards.queued_glyphs, backwards.queued_glyphs);
+        // And `a` is Text in both, not ShapedText: the lowest set wins.
+        let order = forwards.cell_order();
+        assert!(order.contains(&(GlyphSet::Text, gid('a'))));
+        assert!(!order.iter().any(|&(set, g)| g == gid('a') && set == GlyphSet::ShapedText));
+    }
+
+    /// **The payoff, on the queue: growth in a LATER set leaves an earlier
+    /// set's cells exactly where they were.**
+    ///
+    /// Over the real shipped coverage, and stated as cell INDEX because that is
+    /// what `build` turns into `atlas_x`/`atlas_y` — see
+    /// `a_new_icon_leaves_every_earlier_cell_untouched` for the same property
+    /// demonstrated on baked pixels.
+    ///
+    /// The added glyph is `number_of_glyphs`, i.e. the id the next glyph would
+    /// get: `fonts/icon.py`, `marker.py` and `msymbols.py` all extend the face
+    /// with `getGlyphOrder() + added`, so an appended glyph is exactly what a
+    /// font edit produces.
+    #[test]
+    fn a_later_set_never_moves_an_earlier_sets_cells() {
+        for face_bytes in [crate::font::ROBOTO_REGULAR_ASCII, crate::font::ROBOTO_ASCII_MSYMBOLS] {
+            let next_gid = ttf_parser::Face::parse(face_bytes, 0).unwrap().number_of_glyphs();
+
+            let mut before = FontAtlasBuilder::new(face_bytes.to_vec(), 48, 6.0);
+            before.add_shipped_coverage();
+            let before = before.cell_order();
+
+            let mut after = FontAtlasBuilder::new(face_bytes.to_vec(), 48, 6.0);
+            after.add_shipped_coverage();
+            after.add_glyph(GlyphSet::OwnedIcons, next_gid);
+            let after = after.cell_order();
+
+            assert_eq!(after.len(), before.len() + 1, "the new glyph was swallowed");
+            let new_cell = after
+                .iter()
+                .position(|&(set, g)| set == GlyphSet::OwnedIcons && g == next_gid)
+                .expect("the new icon is somewhere");
+
+            // Every cell BEFORE the new one is the same glyph in the same cell.
+            assert_eq!(&after[..new_cell], &before[..new_cell]);
+            // Every set EARLIER than the new glyph's is entirely inside that
+            // untouched prefix — the property, rather than an accident of how
+            // many cells happened to precede it.
+            for (cell, &(set, _)) in before.iter().enumerate() {
+                if set < GlyphSet::OwnedIcons {
+                    assert!(cell < new_cell, "an earlier set's cell moved");
+                }
+            }
+            // Vacuity: cells DO move when the addition is not to the last set.
+            // The merged face carries borrowed icons after ours, and they shift
+            // by exactly one; the plain face has none, so there is nothing
+            // after the new cell and nothing to shift.
+            let later: Vec<_> = before[new_cell..].to_vec();
+            assert_eq!(after[new_cell + 1..], later[..], "a later set shifted by more than one");
+            // Everything after the new cell belongs to a LATER set: it sorted
+            // into its own set rather than onto the end of the queue.
+            for &(set, _) in &after[new_cell + 1..] {
+                assert!(set > GlyphSet::OwnedIcons, "a cell of set {set:?} sorted after an icon");
+            }
+            if face_bytes == crate::font::ROBOTO_ASCII_MSYMBOLS {
+                assert!(!later.is_empty(), "the merged face should have borrowed cells after ours");
+                assert_ne!(after[new_cell..], before[new_cell..], "nothing moved at all");
+                // The sharp one: the merged face has borrowed cells AFTER ours,
+                // so a new icon must land in the middle of the atlas. Landing
+                // last would mean cells still follow the queue rather than the
+                // declared order.
+                assert!(
+                    new_cell + 1 < after.len(),
+                    "the new icon landed at the END of the atlas rather than at the end \
+                     of its SET - that is queue order, which is what the sets replaced"
+                );
+            }
+        }
+    }
+
+    /// **The same payoff, demonstrated on BAKED PIXELS.** The queue test above
+    /// compares cell indices; this bakes two atlases and compares the texture.
+    ///
+    /// Reads as the event it stands for: a face gains one icon, and everything
+    /// baked before it — the text, the marker — is byte-for-byte where it was.
+    #[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
+    #[test]
+    fn a_new_icon_leaves_every_earlier_cell_untouched() {
+        use std::collections::BTreeMap;
+
+        let gid = |ch: char| {
+            ttf_parser::Face::parse(&crate::font::ROBOTO_REGULAR_ASCII, 0)
+                .unwrap()
+                .glyph_index(ch)
+                .map(|g| g.0)
+                .unwrap_or_else(|| panic!("the shipped face draws U+{:04X}", ch as u32))
+        };
+
+        /// Every glyph's cell: where it sits, and the texels in it.
+        fn cells(atlas: &FontAtlas) -> BTreeMap<u16, ((u16, u16), Vec<u8>)> {
+            atlas
+                .glyphs
+                .iter()
+                .map(|e| {
+                    let mut texels = Vec::new();
+                    for row in 0..e.atlas_h as u32 {
+                        let start = (((e.atlas_y as u32 + row) * atlas.width + e.atlas_x as u32)
+                            * atlas.channels) as usize;
+                        let len = (e.atlas_w as u32 * atlas.channels) as usize;
+                        texels.extend_from_slice(&atlas.pixel_data[start..start + len]);
+                    }
+                    (e.glyph_id, ((e.atlas_x, e.atlas_y), texels))
+                })
+                .collect()
+        }
+
+        let bake = |icons: &[char]| {
+            let mut b = FontAtlasBuilder::new(roboto(), 32, 4.0);
+            b.add_glyph(GlyphSet::Placeholder, 0);
+            b.add_codepoint_range(GlyphSet::Text, 'A', 'E');
+            b.add_glyph(GlyphSet::Markers, gid(crate::font::MARKER_ARROW));
+            for &ch in icons {
+                b.add_glyph(GlyphSet::OwnedIcons, gid(ch));
+            }
+            b.build().expect("bake")
+        };
+
+        // `graph` and `props` ship; then the face gains `table`.
+        let before = bake(&['\u{F800}', '\u{F801}']);
+        let after = bake(&['\u{F800}', '\u{F801}', '\u{F802}']);
+
+        let (b, a) = (cells(&before), cells(&after));
+        assert_eq!(b.len() + 1, a.len(), "the second bake should have one more cell");
+        for (glyph_id, cell) in &b {
+            assert_eq!(
+                a.get(glyph_id),
+                Some(cell),
+                "glyph {glyph_id}'s cell moved or changed when an icon was added \
+                 after it - the atlas is not append-only across sets any more"
+            );
+        }
+        // Vacuity, both halves. The new icon really is a new cell...
+        let new_cell = a[&gid('\u{F802}')].0;
+        assert!(!b.values().any(|(xy, _)| *xy == new_cell), "the new icon reused a cell");
+        // ...and this comparison can SEE a cell move: adding to an earlier set
+        // (one more letter, in Text) shifts the marker and the icons.
+        let mut widened = FontAtlasBuilder::new(roboto(), 32, 4.0);
+        widened.add_glyph(GlyphSet::Placeholder, 0);
+        widened.add_codepoint_range(GlyphSet::Text, 'A', 'F');
+        widened.add_glyph(GlyphSet::Markers, gid(crate::font::MARKER_ARROW));
+        for ch in ['\u{F800}', '\u{F801}'] {
+            widened.add_glyph(GlyphSet::OwnedIcons, gid(ch));
+        }
+        let widened = cells(&widened.build().expect("bake"));
+        let arrow = gid(crate::font::MARKER_ARROW);
+        assert_ne!(
+            widened[&arrow].0, b[&arrow].0,
+            "adding a letter should push the marker's cell along - if it does not, \
+             this test cannot see movement and the assertions above prove nothing"
+        );
     }
 }

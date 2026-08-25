@@ -29,12 +29,21 @@
 //! Both bundled faces carry the blocks this repo DRAWS
 //! ([`libmsdf::OWNED_BLOCKS`] — the edge markers and our own UI icons, as
 //! opposed to the Material Symbols it borrows), so the two bakes differ only
-//! by the nine borrowed cells.
+//! by the borrowed cells - thirteen of them today, and they are baked LAST, so
+//! the two atlases agree cell-for-cell everywhere else.
 //!
-//! The queue is append-only, so a re-bake after a coverage widening is a
-//! strict SUPERSET of the previous one: every cell that existed keeps its
-//! atlas coordinates and its glyph-table index, and the texture just gets
-//! taller. A rendered frame that moves after a re-bake is a real finding.
+//! Cells are laid out in the order [`libmsdf::GlyphSet`] declares -
+//! `(set, glyph id)`, not the order the queue happened to be filled in - so a
+//! re-bake after a coverage widening is a strict SUPERSET of the previous one
+//! whenever the addition lands in the last set that has anything in it: every
+//! earlier cell keeps its atlas coordinates, and the texture is pinned so it
+//! does not even get taller. A rendered frame that moves after a re-bake is a
+//! real finding.
+//!
+//! (The glyph-TABLE index is a different thing and is not promised to be
+//! stable: the table is sorted by glyph id, so a new glyph takes its place
+//! among the others. Nothing outside a loaded atlas can see that - the GPU
+//! table and every index packed into a draw list come from the same instance.)
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {

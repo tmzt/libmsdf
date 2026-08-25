@@ -31,9 +31,13 @@ pub use shaper::{ShapedGlyph, ShapedRun, TextShaper};
 
 /// **The TEXT coverage of the bundled faces, and there is exactly one of it.**
 ///
-/// Inclusive codepoint ranges, in the order [`FontAtlasBuilder::add_shipped_coverage`]
-/// queues them — which is also the order the atlas packs them, so this list is
-/// append-only (see that method for why the ordering is load-bearing).
+/// Inclusive codepoint ranges. Every one of them is queued into
+/// [`GlyphSet::Text`], so the order they are WRITTEN in here is no longer the
+/// order the atlas packs them: cells go in `(set, glyph id)` order, and this
+/// list can be reordered, or a range widened, without renumbering a cell that
+/// a range below it already owns. (It used to be load-bearing, and
+/// [`FontAtlasBuilder::add_shipped_coverage`] carried a `debug_assert` about
+/// its first element to keep it that way.)
 ///
 /// * `U+0020..=U+007E` printable ASCII.
 /// * `U+00A0..=U+00FF` **Latin-1 Supplement**, the widening: it is what a
@@ -77,6 +81,10 @@ pub const PRIVATE_USE: (char, char) = ('\u{E000}', '\u{F8FF}');
 ///
 /// * [`MARKERS`], the last sixteen — geometry the RENDERER reaches for.
 /// * [`HIGHBAY_ICONS_BLOCK`], the 240 below them — names an APP asks for.
+///
+/// The atlas says so too: they are [`GlyphSet::Markers`] and
+/// [`GlyphSet::OwnedIcons`], two sets rather than one, which is what keeps a
+/// growing icon vocabulary from moving the arrowhead's cell.
 pub const OWNED_BLOCKS: (char, char) = ('\u{F800}', '\u{F8FF}');
 
 /// **The block our own UI ICONS are allocated from** — names this repo owns,
@@ -84,9 +92,14 @@ pub const OWNED_BLOCKS: (char, char) = ('\u{F800}', '\u{F8FF}');
 ///
 /// `U+F800..=U+F8EF`: the bottom 240 of [`OWNED_BLOCKS`], directly below
 /// [`MARKERS`]. Codepoints are handed out *upward* from `U+F800` for the same
-/// reason markers run upward — [`FontAtlasBuilder::add_shipped_coverage`] scans
-/// the Private Use Area in codepoint order, so a name added above every
-/// existing one leaves every existing icon's cell exactly where it was.
+/// reason markers run upward — a name added above every existing one is a pure
+/// append to the block, so no icon that has already shipped is renumbered
+/// (`fonts/icon.py` records what that renumbering cost when the codepoints
+/// were still `ICON_BASE + index`). What keeps the icon's atlas CELL where it
+/// was is [`GlyphSet::OwnedIcons`] plus `icon.py` appending glyph ids, since
+/// cells are laid out in `(set, glyph id)` order — but the two rules point the
+/// same way, and allocating downward would mean renumbering a shipped
+/// codepoint to no purpose.
 ///
 /// It is 15x the size of [`MARKERS`] because the two grow at completely
 /// different rates: the marker set is an arrowhead and whatever cardinality
@@ -110,13 +123,17 @@ pub const HIGHBAY_ICONS_BLOCK: (char, char) = ('\u{F800}', '\u{F8EF}');
 ///   run far below here (the bundled nine top out at `U+F0D3`), so a borrowed
 ///   icon and a drawn marker can never land on the same codepoint — checked by
 ///   `icons_sort_below_the_marker_block`, not by remembering.
-/// * **Upward**, because [`FontAtlasBuilder::add_shipped_coverage`] scans this
-///   range in codepoint order and the bake queue is append-only: a marker added
-///   above every existing one leaves every existing cell exactly where it was.
-///   Allocating downward would renumber the block on every addition.
+/// * **Upward**, so a marker added above every existing one never renumbers a
+///   marker that has already shipped. Its atlas CELL is held still by a
+///   different rule — [`GlyphSet::Markers`] is its own set and `fonts/marker.py`
+///   appends glyph ids, so a new marker sorts last within the set and moves
+///   nothing before it.
 ///
 /// [`HIGHBAY_ICONS_BLOCK`] sits immediately below, so the two owned blocks are
-/// contiguous and a marker still sorts last of everything in the face.
+/// contiguous and a marker still sorts last of everything in the face. Their
+/// CELLS are the other way round on purpose: [`GlyphSet::Markers`] is baked
+/// before [`GlyphSet::OwnedIcons`], because the icon vocabulary is the one that
+/// accumulates and a set that grows must come after one that does not.
 ///
 /// The outlines themselves are authored in `fonts/marker.py`, which is where
 /// the geometry is decided; `marker_contract_holds` asserts what Rust relies on
@@ -133,6 +150,104 @@ pub const MARKERS: (char, char) = ('\u{F8F0}', '\u{F8FF}');
 /// ([`msymbols_codepoint`]), whereas this is geometry the renderer reaches for
 /// itself.
 pub const MARKER_ARROW: char = '\u{F8F0}';
+
+/// **Which vocabulary a glyph was baked from — and, in this declaration order,
+/// where its cell goes.**
+///
+/// # What this replaces
+///
+/// A glyph's atlas cell used to be decided by WHEN it was queued.
+/// [`FontAtlasBuilder::add_shipped_coverage`] called `add_ascii`, then
+/// `add_shaped_ascii`, then scanned the Private Use Area, then the rest of
+/// [`TEXT_RANGES`], and the packer took them in exactly that order. So the
+/// layout was ALREADY grouped by vocabulary — by accident of call sequence.
+/// Nothing declared it, nothing preserved it, and swapping two of those calls
+/// silently renumbered every cell from the first one on. The atlas also
+/// carried a `HashMap<u16, usize>` rebuilt on every load, which existed for no
+/// other reason than that the entries had no order worth binary-searching.
+///
+/// This is the order, stated. The builder records the set at the moment a
+/// glyph is QUEUED — the only moment it is known, because a glyph id cannot be
+/// asked afterwards which vocabulary asked for it — and cells are placed in
+/// `(set, glyph id)` order.
+///
+/// # Why the set id and not the codepoint
+///
+/// The codepoint space is sparse and it is not ours: borrowed icons sit at
+/// Material's scattered `U+E0xx`..`U+F0xx`, ours at `U+F800`, text is
+/// elsewhere again. Sorting by codepoint would interleave a vendor's
+/// allocation decisions with our own, and a lookup could not use the result
+/// anyway — the key a cell is fetched by is a GLYPH ID, which is what the
+/// shaper hands back. Glyph ids are not ours either: re-merge Roboto with
+/// Material Symbols differently and every id moves (in the shipped merged face
+/// the borrowed icons are glyphs 111..=119 and 231..=234, two merge waves,
+/// with 107 Latin-1 glyphs sitting between them). The SET is the part of the
+/// order that is ours; the glyph id orders within it, and it does so
+/// append-only because every script in `fonts/` appends.
+///
+/// # The order runs most-fixed to most-fluid
+///
+/// Growth in the LAST set is a pure append: no earlier set's cells move. So
+/// the sets are declared in ascending order of how much they can still change,
+/// which is what makes `a_later_set_never_moves_an_earlier_sets_cells` a
+/// property of the design rather than a coincidence of today's contents.
+///
+/// It also buys a property across the two bundled faces: the borrowed half is
+/// LAST, so [`ROBOTO_REGULAR_ASCII`] and [`ROBOTO_ASCII_MSYMBOLS`] bake to the
+/// same 211 cells in the same places, and the merged face simply appends its
+/// 13 borrowed ones. Before this the merged bake shifted Latin-1 and the
+/// placeholder by 13 cells relative to the plain one, because a vendor's
+/// `U+E0xx` sorts below our `U+F8xx` in a codepoint scan.
+///
+/// # Markers and icons are TWO sets, not one
+///
+/// [`OWNED_BLOCKS`] already argues that *edge marker* and *UI icon* are
+/// different KINDS of thing and that "the namespace should say so rather than
+/// a comment". This is that namespace, so it says so. The distinction earns
+/// its place here rather than only documenting one: [`MARKERS`] is geometry
+/// the RENDERER reaches for and mod.rs sizes it at single digits, done;
+/// [`HIGHBAY_ICONS_BLOCK`] is names an APP asks for and is "the one that
+/// actually accumulates". Two sets, growing set later, means the icon
+/// vocabulary can grow for years without ever moving the arrowhead's cell.
+/// One set would have put them back on a shared numbering where a new icon
+/// shifts a marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum GlyphSet {
+    /// Glyph 0, the placeholder box ([`ROBOTO_REGULAR_ASCII`]). One glyph, no
+    /// codepoint maps to it, and there will never be a second — the most fixed
+    /// thing in the atlas, so it is first and its cell is cell 0.
+    Placeholder = 0,
+    /// [`TEXT_RANGES`] resolved through the face's `cmap`. Declared coverage,
+    /// and declared closed.
+    Text = 1,
+    /// What the SHAPER emits for text beyond what `cmap` names: ligatures and
+    /// GSUB forms ([`FontAtlasBuilder::add_shaped_ascii`]). A function of the
+    /// face's layout tables rather than of a range we wrote down, which is why
+    /// it is a set of its own and sits after the ranges it supplements.
+    ShapedText = 2,
+    /// The [`MARKERS`] block: geometry the renderer reaches for.
+    Markers = 3,
+    /// The [`HIGHBAY_ICONS_BLOCK`]: names an app asks for, drawn by this repo.
+    OwnedIcons = 4,
+    /// The vendor half of [`PRIVATE_USE`] — [`MSYMBOLS_ICONS`] at Material's
+    /// own codepoints, present only in the merged face. Last, because it is
+    /// the one set whose glyph ids someone else allocates.
+    BorrowedIcons = 5,
+}
+
+impl GlyphSet {
+    /// Every set, in cell order. Iterating this is how a caller walks the
+    /// atlas by vocabulary without hard-coding the list a second time.
+    pub const ALL: &'static [GlyphSet] = &[
+        GlyphSet::Placeholder,
+        GlyphSet::Text,
+        GlyphSet::ShapedText,
+        GlyphSet::Markers,
+        GlyphSet::OwnedIcons,
+        GlyphSet::BorrowedIcons,
+    ];
+}
 
 /// Bundled Roboto Regular, subset to [`TEXT_RANGES`] — printable ASCII plus
 /// Latin-1 Supplement — with both [`OWNED_BLOCKS`] added.
