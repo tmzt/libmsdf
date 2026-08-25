@@ -12,6 +12,7 @@
 //! does it shape, does it have a cell, and does that cell have ink in it.
 
 use libmsdf::font::{
+    CellKey,
     FontAtlas, FontAtlasBuilder, GlyphSet, HIGHBAY_ICONS_BLOCK, MARKERS, MSYMBOLS_ICONS,
     PRIVATE_USE, ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII, TEXT_RANGES, TextShaper,
     msymbols_codepoint,
@@ -443,7 +444,8 @@ fn the_shipped_atlas_is_laid_out_in_the_declared_cell_order() {
     by_cell.sort_by_key(|e| (e.atlas_y, e.atlas_x));
 
     let padded = 48 + 2;
-    for (cell, (&(set, glyph_id), entry)) in declared.iter().zip(by_cell.iter()).enumerate() {
+    for (cell, (&key, entry)) in declared.iter().zip(by_cell.iter()).enumerate() {
+        let (set, glyph_id) = (key.set(), key.glyph_id());
         assert_eq!(
             entry.glyph_id, glyph_id,
             "cell {cell} holds glyph {} and the declared order puts {glyph_id} ({set:?}) there \
@@ -464,7 +466,7 @@ fn the_shipped_atlas_is_laid_out_in_the_declared_cell_order() {
         );
     }
     // The sets really are laid down in blocks, and in the declared sequence.
-    let sets: Vec<GlyphSet> = declared.iter().map(|&(set, _)| set).collect();
+    let sets: Vec<GlyphSet> = declared.iter().map(|k| k.set()).collect();
     assert!(sets.windows(2).all(|w| w[0] <= w[1]), "the sets are interleaved");
     assert_eq!(sets[0], GlyphSet::Placeholder, "cell 0 is not the placeholder box");
 }
@@ -490,8 +492,8 @@ fn the_two_bundled_faces_share_a_cell_layout() {
         shipped_queue(ROBOTO_REGULAR_ASCII).cell_order(),
         shipped_queue(ROBOTO_ASCII_MSYMBOLS).cell_order(),
     );
-    let cell_of = |order: &[(GlyphSet, u16)], gid: u16| {
-        order.iter().position(|&(_, g)| g == gid)
+    let cell_of = |order: &[CellKey], gid: u16| {
+        order.iter().position(|k| k.glyph_id() == gid)
     };
 
     let mut checked = 0;
@@ -520,7 +522,8 @@ fn the_two_bundled_faces_share_a_cell_layout() {
     // The merged face's extra cells are exactly its borrowed icons, and they
     // are all at the END — after every cell the plain face has.
     assert_eq!(merged.len(), plain.len() + MSYMBOLS_ICONS.len());
-    for (cell, &(set, _)) in merged.iter().enumerate() {
+    for (cell, key) in merged.iter().enumerate() {
+        let set = key.set();
         assert_eq!(
             set == GlyphSet::BorrowedIcons,
             cell >= plain.len(),

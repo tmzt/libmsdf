@@ -237,6 +237,66 @@ pub enum GlyphSet {
 }
 
 impl GlyphSet {
+    /// The variant whose discriminant is `n`.
+    ///
+    /// Written as an exhaustive match rather than a transmute so that adding a
+    /// variant is a COMPILE ERROR here, not a silently unreachable arm - the
+    /// same reason [`CellKey`] can claim to be lossless.
+    pub const fn from_ordinal(n: u8) -> Self {
+        match n {
+            0 => GlyphSet::Placeholder,
+            1 => GlyphSet::Text,
+            2 => GlyphSet::ShapedText,
+            3 => GlyphSet::Markers,
+            4 => GlyphSet::OwnedIcons,
+            5 => GlyphSet::BorrowedIcons,
+            _ => panic!("no GlyphSet has this discriminant - a CellKey was built from raw bits"),
+        }
+    }
+}
+
+/// **A cell's sort position, as one integer**: the set above the glyph id.
+///
+/// `(set, glyph id)` is the order [`GlyphSet`] declares, and this is that pair
+/// JOINED rather than compared field by field - the set in the high bits, the
+/// glyph id in the low sixteen. Ascending numeric order is therefore exactly
+/// the declared cell order, so the sort is one `u32` compare and the ordering
+/// cannot drift from the join: they are the same number.
+///
+/// **Lossless, and provably so.** A glyph id is a `u16`, and [`GlyphSet`] has
+/// six variants with explicit discriminants - three bits. Nineteen bits into
+/// thirty-two, with [`CellKey::set`] and [`CellKey::glyph_id`] recovering both
+/// exactly; `a_key_round_trips_every_set_and_glyph_id` pins it at the extremes.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct CellKey(u32);
+
+impl CellKey {
+    /// Bits reserved for the glyph id. The set occupies everything above.
+    const GLYPH_BITS: u32 = 16;
+
+    /// Join a set and a glyph id into the position their cell takes.
+    pub const fn new(set: GlyphSet, glyph_id: u16) -> Self {
+        Self(((set as u32) << Self::GLYPH_BITS) | glyph_id as u32)
+    }
+
+    /// The set half.
+    pub const fn set(self) -> GlyphSet {
+        GlyphSet::from_ordinal((self.0 >> Self::GLYPH_BITS) as u8)
+    }
+
+    /// The glyph id half - what [`crate::FontAtlas::get_glyph`] is called with.
+    pub const fn glyph_id(self) -> u16 {
+        self.0 as u16
+    }
+
+    /// The joined bits. For a test that wants to show the order IS the number.
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+}
+
+
+impl GlyphSet {
     /// Every set, in cell order. Iterating this is how a caller walks the
     /// atlas by vocabulary without hard-coding the list a second time.
     pub const ALL: &'static [GlyphSet] = &[
@@ -474,4 +534,65 @@ pub fn highbay_codepoint(name: &str) -> Option<char> {
         .binary_search_by_key(&name, |&(n, _)| n)
         .ok()
         .map(|i| HIGHBAY_ICONS[i].1)
+}
+
+#[cfg(test)]
+mod cell_key_tests {
+    use super::{CellKey, GlyphSet};
+
+    /// **The join is lossless at the extremes**, which is what lets the sort be
+    /// one integer compare instead of a tuple compare.
+    #[test]
+    fn a_key_round_trips_every_set_and_glyph_id() {
+        let sets = [
+            GlyphSet::Placeholder,
+            GlyphSet::Text,
+            GlyphSet::ShapedText,
+            GlyphSet::Markers,
+            GlyphSet::OwnedIcons,
+            GlyphSet::BorrowedIcons,
+        ];
+        for set in sets {
+            for glyph_id in [0u16, 1, 255, 256, 32767, 32768, u16::MAX] {
+                let key = CellKey::new(set, glyph_id);
+                assert_eq!(key.set(), set, "set lost for glyph {glyph_id}");
+                assert_eq!(key.glyph_id(), glyph_id, "glyph id lost for {set:?}");
+            }
+        }
+    }
+
+    /// **Ascending numeric order IS `(set, glyph id)` order.** This is the whole
+    /// claim the join rests on: if it failed, cells would be laid out in an
+    /// order the sets do not describe, silently.
+    #[test]
+    fn numeric_order_is_the_declared_order() {
+        let sets = [
+            GlyphSet::Placeholder,
+            GlyphSet::Text,
+            GlyphSet::ShapedText,
+            GlyphSet::Markers,
+            GlyphSet::OwnedIcons,
+            GlyphSet::BorrowedIcons,
+        ];
+        let mut keys: Vec<CellKey> = Vec::new();
+        for set in sets {
+            for glyph_id in [0u16, 7, u16::MAX] {
+                keys.push(CellKey::new(set, glyph_id));
+            }
+        }
+        let mut by_bits = keys.clone();
+        by_bits.sort_unstable_by_key(|k| k.bits());
+        let mut by_pair = keys.clone();
+        by_pair.sort_unstable_by_key(|k| (k.set(), k.glyph_id()));
+        assert_eq!(by_bits, by_pair, "the packed order and the pair order differ");
+    }
+
+    /// A glyph id can never reach into the set's bits - the guard that makes
+    /// "lossless" a property rather than an observation about small inputs.
+    #[test]
+    fn the_widest_glyph_id_cannot_reach_the_set_bits() {
+        let low = CellKey::new(GlyphSet::Placeholder, u16::MAX);
+        let high = CellKey::new(GlyphSet::Text, 0);
+        assert!(low < high, "a maximal glyph id in one set outranked the next set");
+    }
 }

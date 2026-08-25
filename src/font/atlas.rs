@@ -9,7 +9,7 @@
 //! The atlas packs glyphs into a single texture using shelf-based bin
 //! packing. Each glyph is rendered as a 3-channel (RGB) MSDF bitmap.
 
-use crate::font::GlyphSet;
+use crate::font::{CellKey, GlyphSet};
 use crate::font::glyph_table::GlyphEntry;
 #[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
 use crate::font::packer::ShelfPacker;
@@ -451,7 +451,7 @@ pub struct FontAtlasBuilder {
     ///
     /// This is a QUEUE, not the layout: [`FontAtlasBuilder::cell_order`] sorts
     /// it.
-    queued_glyphs: Vec<(GlyphSet, u16)>,
+    queued_glyphs: Vec<CellKey>,
 }
 
 impl FontAtlasBuilder {
@@ -490,9 +490,10 @@ impl FontAtlasBuilder {
     /// [`GlyphSet::ShapedText`] means "beyond the declared ranges" rather than
     /// "everything shaping emits".
     pub fn add_glyph(&mut self, set: GlyphSet, glyph_id: u16) {
-        match self.queued_glyphs.iter_mut().find(|(_, g)| *g == glyph_id) {
-            Some(queued) => queued.0 = queued.0.min(set),
-            None => self.queued_glyphs.push((set, glyph_id)),
+        let key = CellKey::new(set, glyph_id);
+        match self.queued_glyphs.iter_mut().find(|k| k.glyph_id() == glyph_id) {
+            Some(queued) => *queued = (*queued).min(key),
+            None => self.queued_glyphs.push(key),
         }
     }
 
@@ -534,9 +535,12 @@ impl FontAtlasBuilder {
     /// on purpose — the layout is a fact about the QUEUE, so a caller (or a
     /// test) can ask where a glyph will land, or check where a shipped atlas
     /// put it, without running msdfgen.
-    pub fn cell_order(&self) -> Vec<(GlyphSet, u16)> {
+    pub fn cell_order(&self) -> Vec<CellKey> {
         let mut order = self.queued_glyphs.clone();
-        order.sort_unstable_by_key(|&(set, glyph_id)| (set, glyph_id));
+        // ONE integer compare. The key packs the set above the glyph id, so
+        // ascending numeric order IS `(set, glyph id)` order - the join and the
+        // sort are the same fact rather than two that must agree.
+        order.sort_unstable();
         order
     }
 
@@ -808,7 +812,8 @@ impl FontAtlasBuilder {
         }
 
         let mut placed = Vec::with_capacity(self.queued_glyphs.len());
-        for (_, glyph_id) in self.cell_order() {
+        for key in self.cell_order() {
+            let glyph_id = key.glyph_id();
             let cell = self.bake_cell(glyph_id)?;
             let (x, y) = packer.pack(padded, padded);
             placed.push(Placed { cell, atlas_x: x + 1, atlas_y: y + 1 });
@@ -1009,8 +1014,8 @@ mod tests {
         assert_ne!(forwards.queued_glyphs, backwards.queued_glyphs);
         // And `a` is Text in both, not ShapedText: the lowest set wins.
         let order = forwards.cell_order();
-        assert!(order.contains(&(GlyphSet::Text, gid('a'))));
-        assert!(!order.iter().any(|&(set, g)| g == gid('a') && set == GlyphSet::ShapedText));
+        assert!(order.contains(&CellKey::new(GlyphSet::Text, gid('a'))));
+        assert!(!order.iter().any(|k| k.glyph_id() == gid('a') && k.set() == GlyphSet::ShapedText));
     }
 
     /// **The payoff, on the queue: growth in a LATER set leaves an earlier
@@ -1042,7 +1047,7 @@ mod tests {
             assert_eq!(after.len(), before.len() + 1, "the new glyph was swallowed");
             let new_cell = after
                 .iter()
-                .position(|&(set, g)| set == GlyphSet::OwnedIcons && g == next_gid)
+                .position(|k| k.set() == GlyphSet::OwnedIcons && k.glyph_id() == next_gid)
                 .expect("the new icon is somewhere");
 
             // Every cell BEFORE the new one is the same glyph in the same cell.
@@ -1050,8 +1055,8 @@ mod tests {
             // Every set EARLIER than the new glyph's is entirely inside that
             // untouched prefix — the property, rather than an accident of how
             // many cells happened to precede it.
-            for (cell, &(set, _)) in before.iter().enumerate() {
-                if set < GlyphSet::OwnedIcons {
+            for (cell, key) in before.iter().enumerate() {
+                if key.set() < GlyphSet::OwnedIcons {
                     assert!(cell < new_cell, "an earlier set's cell moved");
                 }
             }
@@ -1063,7 +1068,8 @@ mod tests {
             assert_eq!(after[new_cell + 1..], later[..], "a later set shifted by more than one");
             // Everything after the new cell belongs to a LATER set: it sorted
             // into its own set rather than onto the end of the queue.
-            for &(set, _) in &after[new_cell + 1..] {
+            for key in &after[new_cell + 1..] {
+                let set = key.set();
                 assert!(set > GlyphSet::OwnedIcons, "a cell of set {set:?} sorted after an icon");
             }
             if face_bytes == crate::font::ROBOTO_ASCII_MSYMBOLS {
