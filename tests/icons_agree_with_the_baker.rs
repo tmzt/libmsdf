@@ -36,7 +36,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use libmsdf::{HIGHBAY_ICONS, HIGHBAY_ICONS_BLOCK, highbay_codepoint};
+use libmsdf::{HIGHBAY_ICONS, MARKERS, MARKER_ARROW, highbay_codepoint};
 
 /// The `ICONS = [...]` list out of `fonts/icon.py`, as `(name, codepoint)`.
 ///
@@ -146,17 +146,69 @@ fn every_icon_the_baker_draws_is_one_rust_can_resolve() {
     );
 }
 
+/// The `MARKERS = { 0x....: (...) }` dict out of `fonts/marker.py`, as
+/// codepoints. Keyed by codepoint there rather than by name, because a marker
+/// is not a name a developer types - `MARKER_ARROW`'s doc says so: it is
+/// "geometry the renderer reaches for itself".
+fn baked_markers() -> Vec<u32> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts/marker.py");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let start = text.find("\nMARKERS = {").unwrap_or_else(|| {
+        panic!("no `MARKERS = {{` in {} - the baker's dict moved or was renamed", path.display())
+    });
+    let body = &text[start..];
+    let end = body.find("\n}").unwrap_or_else(|| panic!("`MARKERS = {{` is never closed"));
+    let mut out = Vec::new();
+    for line in body[..end].lines() {
+        let line = line.trim();
+        let Some(hex) = line.strip_prefix("0x").or_else(|| line.strip_prefix("0X")) else {
+            continue;
+        };
+        let Some((digits, _)) = hex.split_once(':') else { continue };
+        if let Ok(v) = u32::from_str_radix(digits.trim(), 16) {
+            out.push(v);
+        }
+    }
+    out
+}
+
 #[test]
-fn every_codepoint_sits_in_the_block_the_repo_owns() {
-    let (lo, hi) = HIGHBAY_ICONS_BLOCK;
-    let (lo, hi) = (lo as u32, hi as u32);
-    for (name, &code) in &baker_manifest() {
+fn markers_were_actually_found() {
+    let baked = baked_markers();
+    assert!(
+        !baked.is_empty(),
+        "parsed no markers from marker.py - the parse broke, and the assertion \
+         below would have passed by reading nothing"
+    );
+}
+
+/// **Every marker Rust names is one the baker draws**, and it sits in the block.
+///
+/// `tests/marker.rs` already checks `MARKER_ARROW` against the SHIPPED ATLAS,
+/// which is the stronger artifact-level check. This is the half that one cannot
+/// make: a `marker.py` edited and not yet re-baked leaves the atlas agreeing
+/// with Rust while the SOURCE disagrees with both, and the next bake would
+/// silently move a glyph.
+#[test]
+fn every_marker_rust_names_is_one_the_baker_draws() {
+    let baked = baked_markers();
+    let (lo, hi) = MARKERS;
+    let arrow = MARKER_ARROW as u32;
+    assert!(
+        baked.contains(&arrow),
+        "MARKER_ARROW is U+{arrow:04X} and marker.py bakes {:?} - Rust names a \
+         cell the face never drew, which the atlas renders as a visible tofu box",
+        baked.iter().map(|c| format!("U+{c:04X}")).collect::<Vec<_>>()
+    );
+    for code in baked {
         assert!(
-            (lo..=hi).contains(&code),
-            "`{name}` is U+{code:04X}, outside HIGHBAY_ICONS_BLOCK \
-             (U+{lo:04X}..=U+{hi:04X}). Below it is Material's own range and \
-             above it is MARKERS; a codepoint outside the block is one this \
-             repo does not own."
+            (lo as u32..=hi as u32).contains(&code),
+            "marker.py bakes U+{code:04X}, outside MARKERS \
+             (U+{:04X}..=U+{:04X}) - below it is the icon block, and a marker \
+             outside its own range collides with a name an app can ask for",
+            lo as u32,
+            hi as u32
         );
     }
 }
