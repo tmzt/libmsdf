@@ -57,6 +57,43 @@ fn main() {
     builder.add_shipped_coverage();
     let atlas = builder.build().expect("atlas bake failed");
     let bytes = atlas.to_bytes();
+
+    // **`--check` compares instead of writing.** The atlas is a COMMITTED
+    // artifact that five test files `include_bytes!`, produced by this example
+    // run BY HAND. Nothing noticed when a face was re-baked and this was not
+    // re-run: the stale bytes still parse, still render, and draw the old
+    // glyphs. That is the same silent shape the `.hbdef` artifacts had before
+    // `hb-pack --mode compile` gave them a producer, and this is the same
+    // remedy.
+    //
+    // A byte comparison is sound because the bake is REPRODUCIBLE - verified
+    // by baking twice and `cmp`-ing, 2406768 bytes identical. What is NOT
+    // established is reproducibility ACROSS ARCHITECTURES: MSDF generation is
+    // float math, and an arm64 and an x86 host have not been compared. Run
+    // this check where the artifact was baked; if it ever runs somewhere else
+    // and fails on pixels alone, compare the index (glyph ids, cell
+    // coordinates, dimensions) rather than raising the tolerance.
+    if args.iter().any(|a| a == "--check") {
+        let committed = std::fs::read(&out_path)
+            .unwrap_or_else(|e| panic!("read {out_path} to check against: {e}"));
+        if committed == bytes {
+            println!("bake_atlas: OK - {out_path} is what this bake produces");
+            return;
+        }
+        eprintln!(
+            "bake_atlas: STALE - {out_path} is {} bytes and this bake produces {}.\n\
+             \n\
+             The committed atlas is not what the shipped face bakes to. Either the\n\
+             face changed and this example was not re-run, or the atlas was hand-\n\
+             edited. Re-run without --check to regenerate, and say WHICH of the two\n\
+             it was - a regenerated artifact committed without that answer hides the\n\
+             defect it was meant to surface.",
+            committed.len(),
+            bytes.len()
+        );
+        std::process::exit(1);
+    }
+
     std::fs::write(&out_path, &bytes).expect("write atlas");
     println!(
         "baked {}: {}x{} px, {} glyphs, {} bytes",
