@@ -36,7 +36,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use libmsdf::{HIGHBAY_ICONS, MARKERS, MARKER_ARROW, highbay_codepoint};
+use libmsdf::{HIGHBAY_ICONS, MARKERS, MARKER_ARROW, ROBOTO_ASCII_MSYMBOLS, TextShaper, highbay_codepoint};
 
 /// The `ICONS = [...]` list out of `fonts/icon.py`, as `(name, codepoint)`.
 ///
@@ -211,4 +211,46 @@ fn every_marker_rust_names_is_one_the_baker_draws() {
             hi as u32
         );
     }
+}
+
+/// **The shipped face is the ground truth, and Rust already has its bytes.**
+///
+/// The two checks above compare Rust to what `icon.py`/`marker.py` INTEND. This
+/// compares it to what actually shipped, which is a different question and the
+/// one that decides what renders: a `HIGHBAY_ICONS` entry whose codepoint has
+/// no glyph in the face is a **visible tofu box** at every call site, and no
+/// amount of agreement with a Python source prevents that if the bake never ran.
+///
+/// Together the three cover the whole chain - source, manifest, artifact - and
+/// each catches something the others cannot. Source-vs-Rust catches an edit
+/// nobody baked; this catches a bake nobody ran, and a face swapped underneath.
+///
+/// `tests/marker.rs` asserts the same thing for `MARKER_ARROW` by RASTERISING
+/// it and finding ink, which is stronger and slower. This is the cheap total
+/// version: every icon, one cmap lookup each.
+#[test]
+fn every_name_rust_resolves_has_a_glyph_in_the_shipped_face() {
+    let face = TextShaper::new(ROBOTO_ASCII_MSYMBOLS.to_vec())
+        .expect("the shipped face parses");
+
+    let mut absent = Vec::new();
+    for &(name, ch) in HIGHBAY_ICONS {
+        if face.glyph_id_for_char(ch).is_none() {
+            absent.push(format!("`{name}` (U+{:04X})", ch as u32));
+        }
+    }
+    if face.glyph_id_for_char(MARKER_ARROW).is_none() {
+        absent.push(format!("MARKER_ARROW (U+{:04X})", MARKER_ARROW as u32));
+    }
+
+    assert!(
+        absent.is_empty(),
+        "{} codepoint(s) Rust resolves have NO GLYPH in the shipped face: {}\n\n\
+         Every call site drawing one gets a tofu box and no finding. Either the \
+         bake did not run after the manifest changed (`fonts/icon.py`, \
+         `fonts/marker.py` - see their headers for the invocation), or the face \
+         in `fonts/` was replaced by one that does not carry this repo's blocks.",
+        absent.len(),
+        absent.join(", ")
+    );
 }
