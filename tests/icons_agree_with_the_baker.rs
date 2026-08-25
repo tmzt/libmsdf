@@ -36,7 +36,12 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use libmsdf::{HIGHBAY_ICONS, MARKERS, MARKER_ARROW, ROBOTO_ASCII_MSYMBOLS, TextShaper, highbay_codepoint};
+const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
+
+use libmsdf::{
+    FontAtlas, HIGHBAY_ICONS, MARKERS, MARKER_ARROW, ROBOTO_REGULAR_ASCII, TextShaper,
+    highbay_codepoint,
+};
 
 /// The `ICONS = [...]` list out of `fonts/icon.py`, as `(name, codepoint)`.
 ///
@@ -213,44 +218,59 @@ fn every_marker_rust_names_is_one_the_baker_draws() {
     }
 }
 
-/// **The shipped face is the ground truth, and Rust already has its bytes.**
+/// **What renders is the ATLAS, and reaching it takes two hops.**
 ///
-/// The two checks above compare Rust to what `icon.py`/`marker.py` INTEND. This
-/// compares it to what actually shipped, which is a different question and the
-/// one that decides what renders: a `HIGHBAY_ICONS` entry whose codepoint has
-/// no glyph in the face is a **visible tofu box** at every call site, and no
-/// amount of agreement with a Python source prevents that if the bake never ran.
+/// The checks above compare Rust to what `icon.py`/`marker.py` INTEND. This
+/// asks what actually ships, and it must follow the whole path, because the
+/// codepoint is not the atlas offset:
 ///
-/// Together the three cover the whole chain - source, manifest, artifact - and
-/// each catches something the others cannot. Source-vs-Rust catches an edit
-/// nobody baked; this catches a bake nobody ran, and a face swapped underneath.
+/// 1. **codepoint -> glyph id**, through the face's cmap. A miss here means the
+///    bake never ran, or the face was swapped for one without this repo's
+///    blocks.
+/// 2. **glyph id -> baked cell**, through the atlas. A miss HERE is the one
+///    that draws a tofu box, and the first hop cannot see it: the atlas is a
+///    BOUNDED subset - `atlas.rs:721` refuses a build over `atlas_capacity()` -
+///    so a glyph can sit in the face and never reach a cell.
 ///
-/// `tests/marker.rs` asserts the same thing for `MARKER_ARROW` by RASTERISING
-/// it and finding ink, which is stronger and slower. This is the cheap total
-/// version: every icon, one cmap lookup each.
+/// Checking only the cmap would claim to catch the tofu box and miss exactly
+/// the case that causes it.
+///
+/// `tests/marker.rs` asserts more for `MARKER_ARROW` - it rasterises the cell
+/// and finds INK, which catches a cell that exists and is blank. This is the
+/// cheap total version over every name.
 #[test]
-fn every_name_rust_resolves_has_a_glyph_in_the_shipped_face() {
-    let face = TextShaper::new(ROBOTO_ASCII_MSYMBOLS.to_vec())
-        .expect("the shipped face parses");
+fn every_name_rust_resolves_reaches_a_baked_cell() {
+    let face = TextShaper::new(ROBOTO_REGULAR_ASCII.to_vec()).expect("the shipped face parses");
+    let atlas = FontAtlas::from_bytes(ATLAS_FIXTURE).expect("the shipped atlas parses");
 
-    let mut absent = Vec::new();
+    let mut broken = Vec::new();
+    let mut check = |label: String, ch: char| match face.glyph_id_for_char(ch) {
+        None => broken.push(format!(
+            "{label} (U+{:04X}) has NO GLYPH in the face - the bake did not run, \
+             or the face was replaced",
+            ch as u32
+        )),
+        Some(gid) if atlas.get_glyph(gid).is_none() => broken.push(format!(
+            "{label} (U+{:04X}) is glyph {gid} in the face and has NO CELL in the \
+             atlas - this is the tofu box, and a cmap check cannot see it",
+            ch as u32
+        )),
+        Some(_) => {}
+    };
+
     for &(name, ch) in HIGHBAY_ICONS {
-        if face.glyph_id_for_char(ch).is_none() {
-            absent.push(format!("`{name}` (U+{:04X})", ch as u32));
-        }
+        check(format!("`{name}`"), ch);
     }
-    if face.glyph_id_for_char(MARKER_ARROW).is_none() {
-        absent.push(format!("MARKER_ARROW (U+{:04X})", MARKER_ARROW as u32));
-    }
+    check("MARKER_ARROW".to_string(), MARKER_ARROW);
 
     assert!(
-        absent.is_empty(),
-        "{} codepoint(s) Rust resolves have NO GLYPH in the shipped face: {}\n\n\
-         Every call site drawing one gets a tofu box and no finding. Either the \
-         bake did not run after the manifest changed (`fonts/icon.py`, \
-         `fonts/marker.py` - see their headers for the invocation), or the face \
-         in `fonts/` was replaced by one that does not carry this repo's blocks.",
-        absent.len(),
-        absent.join(", ")
+        broken.is_empty(),
+        "{} name(s) Rust resolves do not reach a baked cell:\n  {}\n\n\
+         Every call site drawing one gets a tofu box and no finding. Re-bake \
+         (`fonts/icon.py`, `fonts/marker.py` - their headers carry the \
+         invocation), and if the atlas refused the glyph, `atlas_capacity()` is \
+         the ceiling it hit.",
+        broken.len(),
+        broken.join("\n  ")
     );
 }
