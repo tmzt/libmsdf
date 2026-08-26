@@ -21,7 +21,8 @@ pub mod shaper;
 
 pub use atlas::{
     ATLAS_COLS, ATLAS_HEADER_SIZE, ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, CAP_TOP_FRAC,
-    CELL_EM_RATIO, FALLBACK_BASELINE_FRAC, FALLBACK_CAP_HEIGHT_EM, FontAtlas, FontAtlasBuilder,
+    CELL_EM_RATIO, FALLBACK_BASELINE_FRAC, FALLBACK_CAP_HEIGHT_EM, FALLBACK_MAX_INK_DESCENT_EM,
+    FontAtlas, FontAtlasBuilder,
     GlyphProjection, SetMetrics, atlas_capacity, cap_height, glyph_projection,
 };
 pub use glyph_table::GlyphEntry;

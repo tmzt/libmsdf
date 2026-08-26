@@ -21,9 +21,21 @@ use crate::font::packer::ShelfPacker;
 /// plausible-looking atlas instead of failing.
 pub const ATLAS_MAGIC: &[u8; 4] = b"hbfa";
 
-/// The format version this build writes and the only one it reads. v2 is the
-/// first with [`ATLAS_MAGIC`] and the [`SetMetrics`] header; v1 had neither.
-pub const ATLAS_VERSION: u32 = 2;
+/// The format version this build writes and the only one it reads.
+///
+/// * v1 had neither magic nor a set header.
+/// * v2 added [`ATLAS_MAGIC`] and the [`SetMetrics`] table at 32 bytes a row.
+/// * v3 added [`SetMetrics::ink_descent_em`], which makes a row 36 bytes.
+///
+/// **v3 is a bump rather than a spare-byte fill because there were no spare
+/// bytes**: a v2 row was 2 + 2 + 7x4 = exactly 32, so the new field can only
+/// widen the stride. A v2 file read at 36 would take the second set's header
+/// four bytes late, walk every later row further off, and land the glyph table
+/// at an offset that is wrong by `4 * set_count` - which is not a clean failure
+/// but a plausible-looking atlas. That is the exact substitution the magic and
+/// the version exist to prevent, so the version moves and every atlas is
+/// re-baked.
+pub const ATLAS_VERSION: u32 = 3;
 
 /// Fixed part of the header, before the [`SetMetrics`] table: magic, version,
 /// width, height, glyph count, channels, set count.
@@ -52,9 +64,14 @@ pub const ATLAS_HEADER_SIZE: usize = 28;
 /// drawing at 12px and one drawing at 48px, and a re-bake at a different
 /// `glyph_size` does not change a single number in it.
 ///
-/// Sign convention is the FACE's, not the screen's: `underline_pos_em` and
-/// `descent_em` are negative BELOW the baseline, exactly as `post` and `hhea`
-/// state them, so a reader comparing against a font tool sees the same signs.
+/// Sign convention is the FACE's, not the screen's: `underline_pos_em`,
+/// `descent_em` and `ink_descent_em` are negative BELOW the baseline, exactly
+/// as `post` and `hhea` state them, so a reader comparing against a font tool
+/// sees the same signs. There is NO field here with the screen's sign - a
+/// consumer that wants a downward depth calls
+/// [`SetMetrics::max_ink_descent_em`], which is a method precisely so that the
+/// flip is visible at the call site rather than sitting in a struct where two
+/// neighbouring "descent" fields would disagree about which way is down.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SetMetrics {
     /// Which set these describe.
@@ -79,8 +96,45 @@ pub struct SetMetrics {
     /// Consumer: line height. `LINE_BOX_RATIO` is a constant today, and
     /// `ascent - descent + line_gap` is the face's own answer for it.
     pub ascent_em: f32,
-    /// `hhea` descender, in em (NEGATIVE below the baseline).
+    /// `hhea` descender, in em (NEGATIVE below the baseline). What the face
+    /// DECLARES, which is a different quantity from `ink_descent_em` below -
+    /// see there.
     pub descent_em: f32,
+    /// **The deepest ink any glyph OF THIS SET actually reaches**, in em,
+    /// NEGATIVE below the baseline: the minimum `yMin` over the set's glyph
+    /// bounding boxes, from the `glyf` outlines the cells were baked from.
+    ///
+    /// # Why this is not `descent_em`
+    ///
+    /// `descent_em` is a DECLARATION and is not a bound on ink in either
+    /// direction. Measured on the bundled Roboto subset (upem 2048, `hhea`
+    /// descender -500):
+    ///
+    /// * [`GlyphSet::Text`] reaches -495 (`U+00A7 SECTION SIGN`) - 5 units
+    ///   SHALLOWER than declared, so a rule placed at the declared descender is
+    ///   low by a quarter-pixel at 48px for no reason.
+    /// * [`GlyphSet::Markers`] reaches -512 (`U+F8F0`) - 12 units DEEPER than
+    ///   declared, so the declaration would have been an under-report and a
+    ///   rule trusting it would be crossed.
+    ///
+    /// One face, one `hhea` row, two sets that disagree with it in OPPOSITE
+    /// directions. That is the whole argument for measuring: a face-wide
+    /// declaration cannot answer a per-set question, and it is not conservative
+    /// enough to be used as a bound instead.
+    ///
+    /// # Per-SET, and that is the point of it
+    ///
+    /// The face-wide minimum is -512, from a marker glyph that never appears in
+    /// a text run. A consumer ruling a line under text wants the TEXT set's
+    /// -495, and gets it here without knowing anything about which glyphs the
+    /// run contained.
+    ///
+    /// Zero for a set whose glyphs have no outlines at all (whitespace only),
+    /// and POSITIVE for a set whose ink never reaches the baseline
+    /// ([`GlyphSet::OwnedIcons`] bottoms out at +0.1875 em, above it) - both
+    /// are the measurement, not a sentinel. See
+    /// [`SetMetrics::max_ink_descent_em`] for the consumer-facing form.
+    pub ink_descent_em: f32,
     /// `hhea` line gap, in em. Part of the line-height sum above; carried with
     /// the other two because a line height computed from two of the three
     /// would be wrong for any face that uses it.
@@ -95,8 +149,22 @@ pub struct SetMetrics {
 }
 
 impl SetMetrics {
-    /// Packed size in the atlas file: 2 + 2 + 7x4.
-    pub const PACKED_SIZE: usize = 32;
+    /// Packed size in the atlas file: 2 + 2 + 8x4. It was 32 in v2 and had no
+    /// slack, which is why `ink_descent_em` cost a version - see
+    /// [`ATLAS_VERSION`].
+    pub const PACKED_SIZE: usize = 36;
+
+    /// **How far below the baseline the set's deepest ink reaches**, in em, as
+    /// a DOWNWARD depth: positive is below the baseline, the screen's sign and
+    /// not the face's.
+    ///
+    /// A method rather than a field so that the one flip in this type happens
+    /// somewhere a reader can see it. Negative for a set whose ink never
+    /// reaches the baseline, so a caller adding it to a baseline should clamp
+    /// at zero unless it means to draw above one.
+    pub fn max_ink_descent_em(&self) -> f32 {
+        -self.ink_descent_em
+    }
 
     fn to_bytes(self) -> [u8; Self::PACKED_SIZE] {
         let mut buf = [0u8; Self::PACKED_SIZE];
@@ -109,6 +177,7 @@ impl SetMetrics {
         buf[20..24].copy_from_slice(&self.line_gap_em.to_le_bytes());
         buf[24..28].copy_from_slice(&self.underline_pos_em.to_le_bytes());
         buf[28..32].copy_from_slice(&self.underline_thickness_em.to_le_bytes());
+        buf[32..36].copy_from_slice(&self.ink_descent_em.to_le_bytes());
         buf
     }
 
@@ -137,6 +206,7 @@ impl SetMetrics {
             line_gap_em: f(20),
             underline_pos_em: f(24),
             underline_thickness_em: f(28),
+            ink_descent_em: f(32),
         })
     }
 }
@@ -181,6 +251,20 @@ impl FontAtlas {
     /// so it cannot depend on which cell sorts first.
     pub fn text_baseline_frac(&self) -> Option<f32> {
         self.set_metrics(GlyphSet::Text).map(|m| m.baseline_frac)
+    }
+
+    /// **How far below the baseline the TEXT cells' deepest ink reaches**, in
+    /// em as a downward depth, or `None` if this atlas carries no text.
+    ///
+    /// The published form of the second question `libhbui` asks when it rules
+    /// a line: the first is where the baseline is, this is what has to be
+    /// cleared. Answered from [`GlyphSet::Text`] for the same reason the
+    /// baseline is - the run being ruled is text, so the marker and icon sets'
+    /// geometry is not its business, and the face's own `hhea` descender is a
+    /// declaration rather than a measurement
+    /// ([`SetMetrics::ink_descent_em`] has the numbers).
+    pub fn text_max_ink_descent_em(&self) -> Option<f32> {
+        self.set_metrics(GlyphSet::Text).map(SetMetrics::max_ink_descent_em)
     }
     /// Look up a glyph entry by glyph ID.
     ///
@@ -253,7 +337,7 @@ impl FontAtlas {
     /// [4b magic "hbfa"][4b version]                      -- 8
     /// [4b width][4b height][4b num_glyphs][4b channels]  -- 16
     /// [4b set_count]                                     -- 4   = 28 byte header
-    /// [SetMetrics * set_count]                           -- 32 bytes each
+    /// [SetMetrics * set_count]                           -- 36 bytes each
     /// [GlyphEntry * num_glyphs]                          -- 32 bytes each
     /// [pixel_data]                                       -- width*height*channels bytes
     /// ```
@@ -591,6 +675,18 @@ pub const CELL_EM_RATIO: f64 = 1.3;
 /// substitution that used to hide a wrong baseline.
 pub const FALLBACK_BASELINE_FRAC: f32 =
     (CAP_TOP_FRAC + FALLBACK_CAP_HEIGHT_EM / CELL_EM_RATIO) as f32;
+
+/// **The ink depth assumed for an atlas that carries no [`SetMetrics`]** - the
+/// same runtime-populated [`FontAtlas::empty`] that gets
+/// [`FALLBACK_BASELINE_FRAC`], and never a baked one.
+///
+/// A downward depth in em, matching [`SetMetrics::max_ink_descent_em`], and
+/// deliberately the deepest ink in EITHER bundled face rather than its Text
+/// set's: 512/2048, the `U+F8F0` marker. A fallback is used when nothing was
+/// measured, so it should be a bound on what this repo bakes rather than a
+/// typical value - erring here puts a rule slightly low, and erring the other
+/// way puts it through a descender.
+pub const FALLBACK_MAX_INK_DESCENT_EM: f32 = 0.25;
 
 /// Default cell metrics for glyphs without outlines (whitespace):
 /// (baseline_row, x_margin, px_per_em).
@@ -1097,6 +1193,19 @@ impl FontAtlasBuilder {
         // Reading it off the cells is what makes that true.
         let sets = {
             let em = self.face_em_metrics(&face25);
+            let upem = face25.units_per_em() as f32;
+            // **The deepest ink is measured from the OUTLINES, per set** -
+            // `SetMetrics::ink_descent_em` has the numbers and the argument.
+            // Taken from the same `glyf` bounding box `glyph_projection` lays
+            // the cell out from, so it describes the ink that was actually
+            // baked. A glyph with no outline (whitespace) contributes nothing:
+            // 0.0 is not below the baseline, so `min` passes over it, and a
+            // set that is ALL whitespace reports 0.0, which is true of it.
+            let ink_y_min_em = |key: &CellKey| {
+                face25
+                    .glyph_bounding_box(ttf_parser::GlyphId(key.glyph_id()))
+                    .map_or(0.0, |bb| bb.y_min as f32 / upem)
+            };
             let mut sets: Vec<SetMetrics> = Vec::new();
             for (key, p) in order.iter().zip(placed.iter()) {
                 let frac = p.cell.entry.baseline_row / gs as f32;
@@ -1109,12 +1218,14 @@ impl FontAtlasBuilder {
                             key.glyph_id()
                         );
                         m.glyph_count += 1;
+                        m.ink_descent_em = m.ink_descent_em.min(ink_y_min_em(key));
                     }
                     None => sets.push(SetMetrics {
                         set: key.set(),
                         glyph_count: 1,
                         baseline_frac: frac,
                         px_per_em_frac: p.cell.entry.px_per_em / gs as f32,
+                        ink_descent_em: ink_y_min_em(key),
                         ..em
                     }),
                 }
@@ -1193,6 +1304,10 @@ impl FontAtlasBuilder {
             line_gap_em: face.line_gap() as f32 / upem,
             underline_pos_em: underline.map_or(0.0, |m| m.position as f32 / upem),
             underline_thickness_em: underline.map_or(0.0, |m| m.thickness as f32 / upem),
+            // Per-set, measured off the cells by `build`; zero here so that
+            // `..em` cannot quietly supply a face-wide answer to a per-set
+            // question.
+            ink_descent_em: 0.0,
         }
     }
 }
@@ -1302,6 +1417,7 @@ mod tests {
             line_gap_em: 0.0,
             underline_pos_em: -0.07324,
             underline_thickness_em: 0.04883,
+            ink_descent_em: -0.241699,
         }];
 
         let round = FontAtlas::from_bytes(&atlas.to_bytes()).expect("round trips");
@@ -1309,6 +1425,11 @@ mod tests {
         assert_eq!(round.set_metrics(GlyphSet::Text), atlas.sets.first());
         assert_eq!(round.set_metrics(GlyphSet::Markers), None);
         assert_eq!(round.text_baseline_frac(), Some(0.696875));
+        // Stored with the FACE's sign, read out with the SCREEN's. Both
+        // directions are asserted here because the flip is the one place this
+        // type's convention is not uniform.
+        assert_eq!(round.sets[0].ink_descent_em, -0.241699);
+        assert_eq!(round.text_max_ink_descent_em(), Some(0.241699));
     }
 
     /// A header whose counts do not add up to the entries it ships with was
@@ -1326,6 +1447,7 @@ mod tests {
             line_gap_em: 0.0,
             underline_pos_em: -0.07,
             underline_thickness_em: 0.05,
+            ink_descent_em: -0.24,
         }];
         let err = FontAtlas::from_bytes(&atlas.to_bytes()).expect_err("9 != 0 entries");
         assert!(err.contains("sum"), "{err}");

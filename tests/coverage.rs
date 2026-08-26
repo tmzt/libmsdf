@@ -623,6 +623,111 @@ fn the_em_metrics_are_read_from_the_face() {
     assert!((em_px - 12.0).abs() < 1e-3, "one em at 12px came out {em_px}");
 }
 
+/// **The ink descent is MEASURED from the outlines, and the face's declared
+/// descender is not a bound on it in either direction.**
+///
+/// This is the finding the field exists for, so it is asserted rather than
+/// written in a comment. Roboto-Regular, upem 2048, `hhea` descender -500:
+///
+/// * `Text` reaches -495 (`U+00A7`), five units SHALLOWER than declared.
+/// * `Markers` reaches -512 (`U+F8F0`), twelve units DEEPER than declared.
+///
+/// One face, one declaration, two sets that miss it in opposite directions. A
+/// consumer that used `descent_em` as a clearance would be needlessly low on
+/// text and actually crossed on markers.
+#[test]
+fn the_ink_descent_is_the_deepest_outline_of_its_own_set() {
+    let face = face();
+    let upem = face.units_per_em() as f32;
+    let atlas = atlas();
+
+    let text = atlas.set_metrics(GlyphSet::Text).expect("a Text set");
+    assert!(
+        (text.ink_descent_em - -495.0 / upem).abs() < 1e-6,
+        "Text ink descent came out {} em",
+        text.ink_descent_em
+    );
+    // The deepest Text glyph, found rather than assumed: whatever the set's
+    // minimum is, some glyph of the set has to reach exactly it.
+    let section = face.glyph_index('\u{00A7}').expect("the face draws a section sign");
+    let deepest = face.glyph_bounding_box(section).expect("it has an outline").y_min;
+    assert_eq!(deepest, -495);
+
+    let markers = atlas.set_metrics(GlyphSet::Markers).expect("a Markers set");
+    assert!(
+        (markers.ink_descent_em - -512.0 / upem).abs() < 1e-6,
+        "Markers ink descent came out {} em",
+        markers.ink_descent_em
+    );
+
+    // The two misses, in opposite directions, against one declaration.
+    assert!(
+        text.ink_descent_em > text.descent_em,
+        "Text ink {} is not shallower than the declared {}",
+        text.ink_descent_em,
+        text.descent_em
+    );
+    assert!(
+        markers.ink_descent_em < markers.descent_em,
+        "Markers ink {} is not deeper than the declared {}",
+        markers.ink_descent_em,
+        markers.descent_em
+    );
+
+    // The consumer-facing flip, and the accessor `libhbui` actually calls.
+    assert_eq!(text.max_ink_descent_em(), -text.ink_descent_em);
+    assert_eq!(atlas.text_max_ink_descent_em(), Some(495.0 / upem));
+
+    // Not every set has ink below the baseline, and the measurement says so
+    // rather than clamping: the owned icons bottom out ABOVE it.
+    let icons = atlas.set_metrics(GlyphSet::OwnedIcons).expect("an OwnedIcons set");
+    assert!(icons.ink_descent_em > 0.0, "owned icons: {}", icons.ink_descent_em);
+    assert!(icons.max_ink_descent_em() < 0.0, "so the depth is negative");
+}
+
+/// **The set the underline reads is not the deepest set in the file**, which is
+/// the whole reason the metric is per-set.
+///
+/// Measured face-wide, the answer is `Markers`' -512 - a glyph that never
+/// appears in a text run, dragging every underline in the app a quarter-pixel
+/// lower at 48px for nothing. A rule that clears `Text` clears the text.
+#[test]
+fn the_face_wide_minimum_is_deeper_than_the_text_set() {
+    let atlas = atlas();
+    let face_wide = atlas
+        .sets
+        .iter()
+        .map(|m| m.ink_descent_em)
+        .fold(f32::INFINITY, f32::min);
+    let text = atlas.set_metrics(GlyphSet::Text).expect("a Text set").ink_descent_em;
+    assert!(
+        face_wide < text,
+        "face-wide {face_wide} is not deeper than Text {text} - if a re-bake made \
+         them equal, the per-set argument is still sound but this test no longer \
+         demonstrates it"
+    );
+}
+
+/// **A run of text can also carry SHAPED forms**, and the rule is placed from
+/// `Text` alone - so `ShapedText` must not be deeper than `Text`, or a ligature
+/// would poke through a rule sized for the letters around it.
+///
+/// Checked rather than assumed: the ligatures and GSUB forms in the shipped
+/// bake bottom out at -20/2048, nowhere near the letters. If a future face
+/// brought in a descending form, this is where it would be caught.
+#[test]
+fn no_shaped_form_is_deeper_than_the_text_set() {
+    let atlas = atlas();
+    let text = atlas.set_metrics(GlyphSet::Text).expect("a Text set").ink_descent_em;
+    let shaped = atlas.set_metrics(GlyphSet::ShapedText).expect("a ShapedText set");
+    assert!(
+        shaped.ink_descent_em >= text,
+        "a shaped form reaches {} em, past the Text set's {text} em that the rule is \
+         placed from - `underline_rect` would be crossed by it",
+        shaped.ink_descent_em
+    );
+}
+
 /// Every set in the shipped bake declares itself, and the counts are the real
 /// cell counts.
 #[test]
