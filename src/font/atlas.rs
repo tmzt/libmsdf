@@ -14,6 +14,133 @@ use crate::font::glyph_table::GlyphEntry;
 #[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
 use crate::font::packer::ShelfPacker;
 
+/// **The first four bytes of a baked atlas.** `hbfa` - highbay font atlas.
+///
+/// See [`FontAtlas::from_bytes`] for why a magic exists at all: v1 of this
+/// format started at `width`, so without one an old file misparses into a
+/// plausible-looking atlas instead of failing.
+pub const ATLAS_MAGIC: &[u8; 4] = b"hbfa";
+
+/// The format version this build writes and the only one it reads. v2 is the
+/// first with [`ATLAS_MAGIC`] and the [`SetMetrics`] header; v1 had neither.
+pub const ATLAS_VERSION: u32 = 2;
+
+/// Fixed part of the header, before the [`SetMetrics`] table: magic, version,
+/// width, height, glyph count, channels, set count.
+pub const ATLAS_HEADER_SIZE: usize = 28;
+
+/// **What one [`GlyphSet`]'s cells were baked FROM**, in units that do not
+/// mention the bake size.
+///
+/// # Why the atlas has to say this, rather than the reader working it out
+///
+/// A consumer needs the baseline to put a rule under a run, and the face's own
+/// underline metrics to know how far under. Until this header existed, none of
+/// that was in the file: `libhbui` recovered the baseline from
+/// `atlas.glyphs.first()` - whichever cell happened to sort first - and got
+/// away with it only for as long as every cell agreed. When the table gained
+/// an order (by glyph id), "first" became glyph 0 instead of the space glyph,
+/// the two disagreed by `0.75 - 0.6969` of a cell, and every underline in the
+/// app moved most of a pixel. Nothing failed; the frames just changed.
+///
+/// So the fix is not a better cell to read: it is that a per-cell field cannot
+/// answer a per-FACE question, and the file now carries the answer.
+///
+/// # Every field is a fraction, and that is the point
+///
+/// Nothing here is in cell pixels, so the same header serves a consumer
+/// drawing at 12px and one drawing at 48px, and a re-bake at a different
+/// `glyph_size` does not change a single number in it.
+///
+/// Sign convention is the FACE's, not the screen's: `underline_pos_em` and
+/// `descent_em` are negative BELOW the baseline, exactly as `post` and `hhea`
+/// state them, so a reader comparing against a font tool sees the same signs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SetMetrics {
+    /// Which set these describe.
+    pub set: GlyphSet,
+    /// Cells this set contributed to the bake. Not an index range - the table
+    /// is re-sorted by glyph id on load ([`FontAtlas::from_bytes`]), so the
+    /// set's cells are not contiguous in it. It is a COUNT, and the loader
+    /// checks the counts sum to the number of entries.
+    pub glyph_count: u16,
+    /// Fraction of the cell, from its top, at which the baseline sits.
+    /// Consumer: placing anything relative to a run's baseline - today the
+    /// underline in `libhbui`'s `underline_rect`.
+    pub baseline_frac: f32,
+    /// One em as a fraction of the cell ([`CELL_EM_RATIO`] inverted).
+    /// Consumer: converting the em-denominated fields below into pixels. A
+    /// cell drawn to a line box of `size * LINE_BOX_RATIO` puts one em at
+    /// `px_per_em_frac * LINE_BOX_RATIO * size` - which is why "one em is the
+    /// font size" holds, and this is where a consumer can check it rather
+    /// than assume it.
+    pub px_per_em_frac: f32,
+    /// `hhea` ascender, in em (positive above the baseline).
+    /// Consumer: line height. `LINE_BOX_RATIO` is a constant today, and
+    /// `ascent - descent + line_gap` is the face's own answer for it.
+    pub ascent_em: f32,
+    /// `hhea` descender, in em (NEGATIVE below the baseline).
+    pub descent_em: f32,
+    /// `hhea` line gap, in em. Part of the line-height sum above; carried with
+    /// the other two because a line height computed from two of the three
+    /// would be wrong for any face that uses it.
+    pub line_gap_em: f32,
+    /// `post` underlinePosition, in em: the top of the underline relative to
+    /// the baseline, NEGATIVE below it. Consumer: `underline_rect`, which
+    /// deliberately draws a roomier rule than this at body sizes and can now
+    /// say so against the face's actual number instead of a remembered one.
+    pub underline_pos_em: f32,
+    /// `post` underlineThickness, in em.
+    pub underline_thickness_em: f32,
+}
+
+impl SetMetrics {
+    /// Packed size in the atlas file: 2 + 2 + 7x4.
+    pub const PACKED_SIZE: usize = 32;
+
+    fn to_bytes(self) -> [u8; Self::PACKED_SIZE] {
+        let mut buf = [0u8; Self::PACKED_SIZE];
+        buf[0..2].copy_from_slice(&(self.set as u16).to_le_bytes());
+        buf[2..4].copy_from_slice(&self.glyph_count.to_le_bytes());
+        buf[4..8].copy_from_slice(&self.baseline_frac.to_le_bytes());
+        buf[8..12].copy_from_slice(&self.px_per_em_frac.to_le_bytes());
+        buf[12..16].copy_from_slice(&self.ascent_em.to_le_bytes());
+        buf[16..20].copy_from_slice(&self.descent_em.to_le_bytes());
+        buf[20..24].copy_from_slice(&self.line_gap_em.to_le_bytes());
+        buf[24..28].copy_from_slice(&self.underline_pos_em.to_le_bytes());
+        buf[28..32].copy_from_slice(&self.underline_thickness_em.to_le_bytes());
+        buf
+    }
+
+    fn from_bytes(data: &[u8]) -> Result<Self, &'static str> {
+        if data.len() < Self::PACKED_SIZE {
+            return Err("atlas set header entry too short");
+        }
+        let f = |o: usize| f32::from_le_bytes(data[o..o + 4].try_into().unwrap());
+        let ordinal = u16::from_le_bytes([data[0], data[1]]);
+        // Checked rather than punned: `GlyphSet::from_ordinal` PANICS on an
+        // unknown discriminant, and a file is untrusted input. An atlas baked
+        // by a newer libmsdf with a seventh set must be a clean refusal here.
+        if ordinal > GlyphSet::BorrowedIcons as u16 {
+            return Err(
+                "atlas names a glyph set this build does not have - it was baked by a newer \
+                 libmsdf; update, or re-bake with this one",
+            );
+        }
+        Ok(Self {
+            set: GlyphSet::from_ordinal(ordinal as u8),
+            glyph_count: u16::from_le_bytes([data[2], data[3]]),
+            baseline_frac: f(4),
+            px_per_em_frac: f(8),
+            ascent_em: f(12),
+            descent_em: f(16),
+            line_gap_em: f(20),
+            underline_pos_em: f(24),
+            underline_thickness_em: f(28),
+        })
+    }
+}
+
 /// MSDF atlas containing packed glyph bitmaps and their metrics.
 #[derive(Debug, Clone)]
 pub struct FontAtlas {
@@ -29,12 +156,32 @@ pub struct FontAtlas {
     /// [`FontAtlas::get_glyph`] for why that specific order, and
     /// [`crate::font::GlyphSet`] for why it is not the order the CELLS are in.
     pub glyphs: Vec<GlyphEntry>,
-    /// Fraction from cell top to baseline (e.g. 0.75 = baseline at 75% from top).
-    /// Used by the shader to align glyphs on the baseline.
-    pub baseline_frac: f32,
+    /// **Per-set metrics, one entry per [`GlyphSet`] that has cells here** -
+    /// see [`SetMetrics`] for what they are and why the file has to carry
+    /// them. Ordered by set; read it through [`FontAtlas::set_metrics`].
+    ///
+    /// EMPTY for an atlas built at runtime ([`FontAtlas::empty`] plus
+    /// appends), which has no face to measure. A BAKED atlas always has one:
+    /// [`FontAtlas::from_bytes`] refuses a file without it.
+    pub sets: Vec<SetMetrics>,
 }
 
 impl FontAtlas {
+    /// The metrics of one glyph set, or `None` for a set this atlas has no
+    /// cells from - and for every set of a runtime-populated atlas.
+    pub fn set_metrics(&self, set: GlyphSet) -> Option<&SetMetrics> {
+        self.sets.iter().find(|m| m.set == set)
+    }
+
+    /// **The baseline of the atlas's TEXT cells**, as a fraction of the cell
+    /// from its top, or `None` if this atlas carries no text.
+    ///
+    /// The published form of the question `libhbui` asks every time it rules a
+    /// line under a run. Answered from the set header rather than from a cell,
+    /// so it cannot depend on which cell sorts first.
+    pub fn text_baseline_frac(&self) -> Option<f32> {
+        self.set_metrics(GlyphSet::Text).map(|m| m.baseline_frac)
+    }
     /// Look up a glyph entry by glyph ID.
     ///
     /// # Two orders, and this is the one the LOOKUP uses
@@ -101,24 +248,32 @@ impl FontAtlas {
 
     /// Serialize the atlas to bytes for embedding / baking to disk.
     ///
-    /// Format:
+    /// Format ([`ATLAS_MAGIC`], [`ATLAS_VERSION`]):
     /// ```text
-    /// [4b width][4b height][4b num_glyphs][4b channels]  -- 16 byte header
+    /// [4b magic "hbfa"][4b version]                      -- 8
+    /// [4b width][4b height][4b num_glyphs][4b channels]  -- 16
+    /// [4b set_count]                                     -- 4   = 28 byte header
+    /// [SetMetrics * set_count]                           -- 32 bytes each
     /// [GlyphEntry * num_glyphs]                          -- 32 bytes each
     /// [pixel_data]                                       -- width*height*channels bytes
     /// ```
     pub fn to_bytes(&self) -> Vec<u8> {
-        let header_size = 16;
+        let sets_size = self.sets.len() * SetMetrics::PACKED_SIZE;
         let entries_size = self.glyphs.len() * GlyphEntry::PACKED_SIZE;
-        let pixel_size = self.pixel_data.len();
-        let total = header_size + entries_size + pixel_size;
+        let total = ATLAS_HEADER_SIZE + sets_size + entries_size + self.pixel_data.len();
 
         let mut buf = Vec::with_capacity(total);
+        buf.extend_from_slice(ATLAS_MAGIC);
+        buf.extend_from_slice(&ATLAS_VERSION.to_le_bytes());
         buf.extend_from_slice(&self.width.to_le_bytes());
         buf.extend_from_slice(&self.height.to_le_bytes());
         buf.extend_from_slice(&(self.glyphs.len() as u32).to_le_bytes());
         buf.extend_from_slice(&self.channels.to_le_bytes());
+        buf.extend_from_slice(&(self.sets.len() as u32).to_le_bytes());
 
+        for set in &self.sets {
+            buf.extend_from_slice(&set.to_bytes());
+        }
         for entry in &self.glyphs {
             buf.extend_from_slice(&entry.to_bytes());
         }
@@ -128,17 +283,65 @@ impl FontAtlas {
     }
 
     /// Deserialize from bytes.
+    ///
+    /// # The first eight bytes are a REFUSAL, not decoration
+    ///
+    /// Version 1 of this format began at `width`, with no magic and no
+    /// version. Reading a v1 file with this code would take `width`'s low half
+    /// as the magic, disagree, and stop - which is the entire reason the magic
+    /// goes FIRST. Without it, a v1 file's `width` would be read as the magic's
+    /// place, every later field would be off by the header's growth, and the
+    /// atlas would load: wrong dimensions, garbage metrics, glyphs sampling
+    /// whatever was at those coordinates. A stale artifact that still parses is
+    /// the failure this repo has already paid for twice (see `bake_atlas`'s
+    /// `--check`), so the break here is deliberate and loud, and the message
+    /// says which command fixes it.
     pub fn from_bytes(data: &[u8]) -> Result<Self, &'static str> {
-        if data.len() < 16 {
+        if data.len() < ATLAS_HEADER_SIZE {
             return Err("atlas data too short");
         }
+        if &data[0..4] != ATLAS_MAGIC {
+            return Err(
+                "not an 'hbfa' atlas - this is a headerless pre-v2 file, and reading it as v2 \
+                 would silently misparse rather than fail. Re-bake it: cargo run -p libmsdf \
+                 --features cpu-bake --example bake_atlas -- <font.ttf> <out.atlas> 48 6.0",
+            );
+        }
+        let version = u32::from_le_bytes(data[4..8].try_into().unwrap());
+        if version != ATLAS_VERSION {
+            return Err(
+                "atlas version is not the one this build writes - re-bake it with this libmsdf's \
+                 bake_atlas example",
+            );
+        }
 
-        let width = u32::from_le_bytes(data[0..4].try_into().unwrap());
-        let height = u32::from_le_bytes(data[4..8].try_into().unwrap());
-        let num_glyphs = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
-        let channels = u32::from_le_bytes(data[12..16].try_into().unwrap());
+        let width = u32::from_le_bytes(data[8..12].try_into().unwrap());
+        let height = u32::from_le_bytes(data[12..16].try_into().unwrap());
+        let num_glyphs = u32::from_le_bytes(data[16..20].try_into().unwrap()) as usize;
+        let channels = u32::from_le_bytes(data[20..24].try_into().unwrap());
+        let set_count = u32::from_le_bytes(data[24..28].try_into().unwrap()) as usize;
 
-        let entries_start = 16;
+        let sets_end = ATLAS_HEADER_SIZE + set_count * SetMetrics::PACKED_SIZE;
+        if data.len() < sets_end {
+            return Err("atlas data too short for the set header");
+        }
+        let mut sets = Vec::with_capacity(set_count);
+        for i in 0..set_count {
+            let offset = ATLAS_HEADER_SIZE + i * SetMetrics::PACKED_SIZE;
+            sets.push(SetMetrics::from_bytes(
+                &data[offset..offset + SetMetrics::PACKED_SIZE],
+            )?);
+        }
+        // The counts are a fact about the same bake as the entries, so they are
+        // checked against it rather than believed. A file where they disagree
+        // was assembled by something other than `build`.
+        if !sets.is_empty()
+            && sets.iter().map(|s| s.glyph_count as usize).sum::<usize>() != num_glyphs
+        {
+            return Err("atlas set counts do not sum to its glyph count");
+        }
+
+        let entries_start = sets_end;
         let entries_end = entries_start + num_glyphs * GlyphEntry::PACKED_SIZE;
         if data.len() < entries_end {
             return Err("atlas data too short for glyph entries");
@@ -177,7 +380,7 @@ impl FontAtlas {
             channels,
             pixel_data,
             glyphs,
-            baseline_frac: 0.75, // default for deserialized atlases
+            sets,
         })
     }
 
@@ -190,7 +393,11 @@ impl FontAtlas {
             channels,
             pixel_data: vec![0; (width * height * channels) as usize],
             glyphs: Vec::new(),
-            baseline_frac: 0.75,
+            // No face was measured, so there is nothing to say. A consumer
+            // that needs a baseline here gets `FALLBACK_BASELINE_FRAC` and
+            // knows it is a fallback, rather than a plausible-looking number
+            // it cannot tell apart from a measured one.
+            sets: Vec::new(),
         }
     }
 
@@ -315,16 +522,12 @@ pub fn glyph_projection(
 ) -> Option<GlyphProjection> {
     let gs = glyph_size as f64;
     let upem = face.units_per_em() as f64;
-    let em_scale = gs / (upem * 1.3);
+    let em_scale = gs / (upem * CELL_EM_RATIO);
 
     let gid = ttf_parser::GlyphId(glyph_id);
     let advance_x = face.glyph_hor_advance(gid).unwrap_or(0) as f32 / upem as f32;
 
-    let cap_y_max = face
-        .glyph_index('A')
-        .and_then(|a| face.glyph_bounding_box(a))
-        .map(|b| b.y_max as f64)
-        .unwrap_or(upem * 0.7);
+    let cap_y_max = cap_height(face);
 
     let bbox = face.glyph_bounding_box(gid)?;
 
@@ -335,7 +538,7 @@ pub fn glyph_projection(
 
     // Vertical: align the font's cap height to 15% from the cell top so all
     // digits and caps share a level top boundary.
-    let target_top_px = gs * 0.15;
+    let target_top_px = gs * CAP_TOP_FRAC;
     let g_ty = (gs - target_top_px) / em_scale - cap_y_max;
 
     Some(GlyphProjection {
@@ -349,17 +552,85 @@ pub fn glyph_projection(
     })
 }
 
+/// **Where the cap band starts**, as a fraction of the cell from its top.
+///
+/// [`glyph_projection`] aligns every face's cap height to this line so that
+/// digits and capitals share a level top boundary, and the baseline falls out
+/// of it: `baseline_frac = CAP_TOP_FRAC + cap_height / (upem * LINE_BOX_RATIO)`.
+/// Named because three places need the same number and one of them
+/// ([`FALLBACK_BASELINE_FRAC`]) is not near the other two.
+///
+/// It is NOT [`crate::drawlist::X_MARGIN_FRAC`], which is also 0.15 and is the
+/// horizontal ink margin - two different measurements that happen to share a
+/// value, kept apart so that changing one does not silently change the other.
+pub const CAP_TOP_FRAC: f64 = 0.15;
+
+/// The cap height assumed for a face whose `'A'` has no bounding box, in em.
+/// Only [`glyph_projection`] and [`FALLBACK_BASELINE_FRAC`] use it.
+pub const FALLBACK_CAP_HEIGHT_EM: f64 = 0.7;
+
+/// **Em per atlas cell**: a cell is 1.3 em tall, which is why one em of drawn
+/// text is exactly the font size.
+///
+/// The same ratio as [`crate::drawlist::LINE_BOX_RATIO`] and it must stay that
+/// way - `a_cell_is_the_line_box` asserts it - but it is written here as its
+/// own `f64` rather than converted from that `f32`. `LINE_BOX_RATIO as f64` is
+/// 1.2999999523162842, not 1.3, and this number multiplies the projection every
+/// baked texel is generated through: taking the lossy route would re-bake every
+/// cell in every atlas to buy nothing.
+pub const CELL_EM_RATIO: f64 = 1.3;
+
+/// **The baseline of an atlas that carries no [`SetMetrics`] at all** — a
+/// runtime-populated [`FontAtlas::empty`], never a baked one.
+///
+/// It is [`glyph_projection`]'s own answer for a face it cannot measure
+/// (`CAP_TOP_FRAC + FALLBACK_CAP_HEIGHT_EM / LINE_BOX_RATIO`), rather than a
+/// separate number chosen here, so the two fallbacks cannot drift apart. A
+/// baked atlas can no longer reach it: [`FontAtlas::from_bytes`] refuses a file
+/// with no set header rather than substituting a default, which is exactly the
+/// substitution that used to hide a wrong baseline.
+pub const FALLBACK_BASELINE_FRAC: f32 =
+    (CAP_TOP_FRAC + FALLBACK_CAP_HEIGHT_EM / CELL_EM_RATIO) as f32;
+
 /// Default cell metrics for glyphs without outlines (whitespace):
 /// (baseline_row, x_margin, px_per_em).
+///
+/// # The baseline here is the FACE's, not a round number
+///
+/// It used to be `gs * 0.75`, which was not any face's baseline: every glyph
+/// WITH an outline is baked at `CAP_TOP_FRAC * gs + cap_height * em_scale`
+/// (33.45 of 48 for Roboto, a fraction of 0.6969), so the two whitespace cells
+/// in the shipped atlas were the only cells in it that disagreed with the ink
+/// beside them by most of a pixel at body sizes.
+///
+/// That disagreement was invisible - a whitespace cell is empty, so where its
+/// baseline sits changes no texel - right up until something read a baseline
+/// off "a cell" rather than off a face, and got whichever cell sorted first.
+/// The cells all agree now, so that read cannot go wrong again, and
+/// [`FontAtlas::set_metrics`] answers it properly on top of that.
 pub fn default_cell_metrics(face: &ttf_parser::Face, glyph_size: u32) -> (f32, f32, f32) {
     let gs = glyph_size as f64;
     let upem = face.units_per_em() as f64;
-    let em_scale = gs / (upem * 1.3);
+    let em_scale = gs / (upem * CELL_EM_RATIO);
     (
-        (gs * 0.75) as f32,
+        (gs * CAP_TOP_FRAC + em_scale * cap_height(face)) as f32,
+        // The same 0.15 as [`crate::drawlist::X_MARGIN_FRAC`], written out
+        // because that constant is an `f32` and `0.15f32 as f64` is
+        // 0.1500000059604645 - enough to land on a different `f32` here.
         (gs * 0.15) as f32,
         (em_scale * upem) as f32,
     )
+}
+
+/// The face's cap height in font units - `'A'`'s ink top, or
+/// [`FALLBACK_CAP_HEIGHT_EM`] of the em square for a face that does not draw
+/// one. The one place the cap band is measured, for
+/// [`glyph_projection`] and [`default_cell_metrics`] alike.
+pub fn cap_height(face: &ttf_parser::Face) -> f64 {
+    face.glyph_index('A')
+        .and_then(|a| face.glyph_bounding_box(a))
+        .map(|b| b.y_max as f64)
+        .unwrap_or(face.units_per_em() as f64 * FALLBACK_CAP_HEIGHT_EM)
 }
 
 // ── The pinned atlas grid ───────────────────────────────────────────────
@@ -800,24 +1071,56 @@ impl FontAtlasBuilder {
         let atlas_w = ATLAS_COLS * padded;
         let mut packer = ShelfPacker::new(atlas_w);
 
-        let baseline_frac = {
-            let (baseline_def, _, _) = default_cell_metrics(&face25, gs);
-            baseline_def / gs as f32
-        };
-
         struct Placed {
             cell: BakedGlyphCell,
             atlas_x: u32,
             atlas_y: u32,
         }
 
+        let order = self.cell_order();
         let mut placed = Vec::with_capacity(self.queued_glyphs.len());
-        for key in self.cell_order() {
+        for key in &order {
             let glyph_id = key.glyph_id();
             let cell = self.bake_cell(glyph_id)?;
             let (x, y) = packer.pack(padded, padded);
             placed.push(Placed { cell, atlas_x: x + 1, atlas_y: y + 1 });
         }
+
+        // **The set header, measured off the cells that were just baked** -
+        // not copied from a face-wide number computed alongside them.
+        //
+        // Today every set answers the same, because one face is baked and
+        // [`glyph_projection`] derives the baseline from that face's cap
+        // height. That is a fact about this bake, not a property of the
+        // format: a set fed from a second face would land here with its own
+        // baseline and the header would say so without any further change.
+        // Reading it off the cells is what makes that true.
+        let sets = {
+            let em = self.face_em_metrics(&face25);
+            let mut sets: Vec<SetMetrics> = Vec::new();
+            for (key, p) in order.iter().zip(placed.iter()) {
+                let frac = p.cell.entry.baseline_row / gs as f32;
+                match sets.iter_mut().find(|m| m.set == key.set()) {
+                    Some(m) => {
+                        debug_assert_eq!(
+                            m.baseline_frac, frac,
+                            "glyph {} disagrees with its own set's baseline - every cell of a set \
+                             is projected from one face, so this is a bake bug, not a metric",
+                            key.glyph_id()
+                        );
+                        m.glyph_count += 1;
+                    }
+                    None => sets.push(SetMetrics {
+                        set: key.set(),
+                        glyph_count: 1,
+                        baseline_frac: frac,
+                        px_per_em_frac: p.cell.entry.px_per_em / gs as f32,
+                        ..em
+                    }),
+                }
+            }
+            sets
+        };
 
         if placed.len() > atlas_capacity() {
             return Err(format!(
@@ -863,8 +1166,34 @@ impl FontAtlasBuilder {
             channels,
             pixel_data,
             glyphs,
-            baseline_frac,
+            sets,
         })
+    }
+
+    /// The face-wide half of [`SetMetrics`] - everything that comes from the
+    /// font's own tables rather than from the cells: `hhea` line metrics and
+    /// `post` underline metrics, converted to em.
+    ///
+    /// Returned as a `SetMetrics` with the per-set fields left at zero, for
+    /// the caller to fill with `..`; there is no second place that decides
+    /// what a missing `post` table means.
+    fn face_em_metrics(&self, face: &ttf_parser::Face) -> SetMetrics {
+        let upem = face.units_per_em() as f32;
+        // A face with no `post` table states no underline. Zero is the honest
+        // reading of "the face does not say", and a consumer choosing its own
+        // rule (which `libhbui` does at body sizes) is unaffected either way.
+        let underline = face.underline_metrics();
+        SetMetrics {
+            set: GlyphSet::Placeholder,
+            glyph_count: 0,
+            baseline_frac: 0.0,
+            px_per_em_frac: 0.0,
+            ascent_em: face.ascender() as f32 / upem,
+            descent_em: face.descender() as f32 / upem,
+            line_gap_em: face.line_gap() as f32 / upem,
+            underline_pos_em: underline.map_or(0.0, |m| m.position as f32 / upem),
+            underline_thickness_em: underline.map_or(0.0, |m| m.thickness as f32 / upem),
+        }
     }
 }
 
@@ -888,6 +1217,131 @@ mod tests {
 
     fn roboto() -> Vec<u8> {
         crate::font::ROBOTO_REGULAR_ASCII.to_vec()
+    }
+
+    /// **The cell IS the line box**, and two constants say so independently.
+    ///
+    /// [`CELL_EM_RATIO`] scales every baked projection; `LINE_BOX_RATIO` scales
+    /// the box that projection is drawn into. They are the same fact, written
+    /// twice because one has to be `f64` to bake with and the other is `f32`
+    /// arithmetic in the hot path. If they ever disagree, one em of baked type
+    /// stops being one em of drawn type - and every metric in [`SetMetrics`],
+    /// which is stated in em, quietly means something else.
+    #[test]
+    fn a_cell_is_the_line_box() {
+        assert_eq!(CELL_EM_RATIO as f32, crate::drawlist::LINE_BOX_RATIO);
+    }
+
+    /// **A v1 atlas is REFUSED, and the message says what to run.**
+    ///
+    /// v1 began at `width` with no magic, so these bytes are exactly what a
+    /// pre-v2 artifact looks like: plausible dimensions, a sane glyph count,
+    /// real pixel data. Read as v2 they would parse - `width` would be taken
+    /// for the magic, and every field after it read from the wrong offset - so
+    /// the atlas would LOAD and draw from garbage coordinates. That is the
+    /// failure mode the magic exists to convert into a stop.
+    #[test]
+    fn a_v1_atlas_is_refused_rather_than_misparsed() {
+        let mut v1 = Vec::new();
+        v1.extend_from_slice(&400u32.to_le_bytes()); // width
+        v1.extend_from_slice(&2000u32.to_le_bytes()); // height
+        v1.extend_from_slice(&1u32.to_le_bytes()); // num_glyphs
+        v1.extend_from_slice(&3u32.to_le_bytes()); // channels
+        v1.extend_from_slice(&GlyphEntry {
+            glyph_id: 0,
+            atlas_x: 1,
+            atlas_y: 1,
+            atlas_w: 48,
+            atlas_h: 48,
+            advance_x: 0.5,
+            baseline_row: 33.45,
+            px_per_em: 36.923,
+            x_margin: 7.2,
+        }
+        .to_bytes());
+        v1.resize(v1.len() + 400 * 2000 * 3, 0);
+
+        let err = FontAtlas::from_bytes(&v1).expect_err("a v1 atlas must not load");
+        assert!(err.contains("hbfa"), "the message must name the magic: {err}");
+        assert!(err.contains("bake_atlas"), "the message must name the fix: {err}");
+    }
+
+    /// A file whose version is not ours stops too, for the same reason.
+    #[test]
+    fn a_future_version_is_refused() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(ATLAS_MAGIC);
+        buf.extend_from_slice(&(ATLAS_VERSION + 1).to_le_bytes());
+        buf.resize(ATLAS_HEADER_SIZE, 0);
+        let err = FontAtlas::from_bytes(&buf).expect_err("a v3 atlas must not load");
+        assert!(err.contains("version"), "{err}");
+    }
+
+    /// The set header survives a round trip, every field of it.
+    #[test]
+    fn the_set_header_round_trips() {
+        let mut atlas = FontAtlas::empty(4, 4, 3);
+        atlas.glyphs.push(GlyphEntry {
+            glyph_id: 7,
+            atlas_x: 0,
+            atlas_y: 0,
+            atlas_w: 4,
+            atlas_h: 4,
+            advance_x: 0.5,
+            baseline_row: 2.5,
+            px_per_em: 3.0,
+            x_margin: 0.6,
+        });
+        atlas.sets = vec![SetMetrics {
+            set: GlyphSet::Text,
+            glyph_count: 1,
+            baseline_frac: 0.696875,
+            px_per_em_frac: 0.769231,
+            ascent_em: 0.92773,
+            descent_em: -0.24414,
+            line_gap_em: 0.0,
+            underline_pos_em: -0.07324,
+            underline_thickness_em: 0.04883,
+        }];
+
+        let round = FontAtlas::from_bytes(&atlas.to_bytes()).expect("round trips");
+        assert_eq!(round.sets, atlas.sets);
+        assert_eq!(round.set_metrics(GlyphSet::Text), atlas.sets.first());
+        assert_eq!(round.set_metrics(GlyphSet::Markers), None);
+        assert_eq!(round.text_baseline_frac(), Some(0.696875));
+    }
+
+    /// A header whose counts do not add up to the entries it ships with was
+    /// not written by `build`, and is refused rather than half-believed.
+    #[test]
+    fn set_counts_must_sum_to_the_glyph_count() {
+        let mut atlas = FontAtlas::empty(4, 4, 3);
+        atlas.sets = vec![SetMetrics {
+            set: GlyphSet::Text,
+            glyph_count: 9,
+            baseline_frac: 0.7,
+            px_per_em_frac: 0.77,
+            ascent_em: 0.9,
+            descent_em: -0.2,
+            line_gap_em: 0.0,
+            underline_pos_em: -0.07,
+            underline_thickness_em: 0.05,
+        }];
+        let err = FontAtlas::from_bytes(&atlas.to_bytes()).expect_err("9 != 0 entries");
+        assert!(err.contains("sum"), "{err}");
+    }
+
+    /// **An atlas with no header says so**, instead of answering 0.75.
+    ///
+    /// The runtime-populated path has no face to measure. What matters is that
+    /// a consumer can TELL - `None`, not a number indistinguishable from a
+    /// measured one. Returning 0.75 here is precisely how a wrong baseline
+    /// shipped.
+    #[test]
+    fn a_runtime_atlas_declares_no_baseline() {
+        let atlas = FontAtlas::empty(64, 64, 3);
+        assert_eq!(atlas.text_baseline_frac(), None);
+        assert!(atlas.sets.is_empty());
     }
 
     #[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]

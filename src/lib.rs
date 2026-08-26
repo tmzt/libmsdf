@@ -34,7 +34,8 @@ pub use crate::core::{
 pub use drawlist::{rotate_rect, DrawEffects, DrawList, Elevation, SdfFrame, SdfInstance, SdfKind, SdfRotate};
 pub use pane::{PaneGate, PaneMark};
 pub use font::{
-    ATLAS_COLS, ATLAS_ROWS, AtlasManager, AtlasRegion, FontAtlas, FontAtlasBuilder, GlyphEntry,
+    ATLAS_COLS, ATLAS_HEADER_SIZE, ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, AtlasManager,
+    AtlasRegion, FALLBACK_BASELINE_FRAC, FontAtlas, FontAtlasBuilder, GlyphEntry, SetMetrics,
     CellKey, GlyphSet, HIGHBAY_ICONS, atlas_capacity,
     HIGHBAY_ICONS_BLOCK, MARKERS, MARKER_ARROW, MSYMBOLS_ICONS, OWNED_BLOCKS,
     ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII, ShapedRun, TextShaper, highbay_codepoint,

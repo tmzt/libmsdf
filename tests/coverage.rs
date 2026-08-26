@@ -531,3 +531,110 @@ fn the_two_bundled_faces_share_a_cell_layout() {
         );
     }
 }
+
+// ── The set header: the face's metrics, and every cell agreeing with them ──
+
+/// The face the fixture atlas was baked from.
+fn face() -> ttf_parser::Face<'static> {
+    ttf_parser::Face::parse(ROBOTO_REGULAR_ASCII, 0).expect("the shipped face parses")
+}
+
+/// **The baked baseline is the FACE's baseline**, recomputed here from the
+/// font rather than copied from the file.
+///
+/// `glyph_projection` aligns the cap band to `CAP_TOP_FRAC` of the cell, so the
+/// baseline lands at `CAP_TOP_FRAC + cap_height / (upem * CELL_EM_RATIO)` -
+/// 0.696875 for Roboto, whose `'A'` tops out at 1456 of 2048 units. Anything
+/// else in the header means the bake and the face have come apart.
+///
+/// Note what this number is NOT: `hhea`'s `ascender / (ascender - descender)`
+/// is 0.7917 for this face, and that is a different quantity - where a line
+/// box's ascent sits, not where THIS atlas's cells put their baseline. Reading
+/// one for the other is a mistake worth 0.09 of a cell.
+#[test]
+fn the_text_baseline_is_the_faces_cap_projection() {
+    let face = face();
+    let upem = face.units_per_em() as f64;
+    let expected =
+        (libmsdf::font::CAP_TOP_FRAC + libmsdf::font::cap_height(&face) / (upem * libmsdf::font::CELL_EM_RATIO)) as f32;
+
+    let atlas = atlas();
+    let baked = atlas.text_baseline_frac().expect("the shipped atlas carries a Text set");
+    assert!(
+        (baked - expected).abs() < 1e-6,
+        "header says {baked}, the face says {expected}"
+    );
+    assert!(
+        (baked - 0.696875).abs() < 1e-6,
+        "Roboto's cap projection is 0.696875 of the cell, not {baked}"
+    );
+}
+
+/// **Every cell agrees with its set's header.**
+///
+/// This is the regression guard, and it is written over ALL cells on purpose:
+/// the underline bug was one cell in 211 disagreeing with the other 210, and
+/// `atlas.glyphs.first()` happening to be that one. A whitespace cell used to
+/// carry `0.75 * cell` while every cell with ink carried 0.6969, and because a
+/// space draws nothing, no rendered frame could show it. Only a test that reads
+/// the metric rather than the pixels can.
+#[test]
+fn no_cell_disagrees_with_its_sets_baseline() {
+    let atlas = atlas();
+    let header = atlas.text_baseline_frac().expect("a Text set");
+    for e in &atlas.glyphs {
+        let cell = e.baseline_row / e.atlas_h as f32;
+        assert!(
+            (cell - header).abs() < 1e-6,
+            "glyph {} is baked at {cell} of its cell, the header says {header}",
+            e.glyph_id
+        );
+    }
+}
+
+/// **The em metrics are the face's own tables**, not remembered numbers.
+///
+/// `libhbui` deliberately rules a roomier underline than Roboto asks for at
+/// 12px. That is a decision it is entitled to make - but it can only be stated
+/// as a decision if the face's actual value is available to compare against,
+/// which is what these fields are for.
+#[test]
+fn the_em_metrics_are_read_from_the_face() {
+    let face = face();
+    let upem = face.units_per_em() as f32;
+    let atlas = atlas();
+    let m = atlas.set_metrics(GlyphSet::Text).expect("a Text set");
+
+    let underline = face.underline_metrics().expect("Roboto has a post table");
+    assert!((m.underline_pos_em - underline.position as f32 / upem).abs() < 1e-6);
+    assert!((m.underline_thickness_em - underline.thickness as f32 / upem).abs() < 1e-6);
+    // Roboto-Regular: post underlinePosition -150/2048, thickness 100/2048.
+    assert!((m.underline_pos_em + 0.07324).abs() < 1e-4, "{}", m.underline_pos_em);
+    assert!((m.underline_thickness_em - 0.04883).abs() < 1e-4);
+
+    assert!((m.ascent_em - face.ascender() as f32 / upem).abs() < 1e-6);
+    assert!((m.descent_em - face.descender() as f32 / upem).abs() < 1e-6);
+    assert!((m.line_gap_em - face.line_gap() as f32 / upem).abs() < 1e-6);
+    assert!(m.descent_em < 0.0, "descent is negative below the baseline");
+
+    // One em is the font size, and this is the field that says why: a cell is
+    // `CELL_EM_RATIO` em tall and is drawn to `LINE_BOX_RATIO` x the size.
+    let em_px = m.px_per_em_frac * libmsdf::drawlist::LINE_BOX_RATIO * 12.0;
+    assert!((em_px - 12.0).abs() < 1e-3, "one em at 12px came out {em_px}");
+}
+
+/// Every set in the shipped bake declares itself, and the counts are the real
+/// cell counts.
+#[test]
+fn every_baked_set_is_in_the_header() {
+    let atlas = atlas();
+    assert!(!atlas.sets.is_empty(), "a baked atlas always has a set header");
+    let counted: usize = atlas.sets.iter().map(|s| s.glyph_count as usize).sum();
+    assert_eq!(counted, atlas.glyphs.len());
+    for set in [GlyphSet::Placeholder, GlyphSet::Text, GlyphSet::ShapedText, GlyphSet::Markers] {
+        assert!(atlas.set_metrics(set).is_some(), "{set:?} has cells but no header");
+    }
+    // The plain face borrows nothing, so it has no BorrowedIcons cells - and
+    // therefore no header entry for them. An absent set is `None`, not zero.
+    assert_eq!(atlas.set_metrics(GlyphSet::BorrowedIcons), None);
+}

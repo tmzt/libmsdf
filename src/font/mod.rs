@@ -20,8 +20,9 @@ pub mod packer;
 pub mod shaper;
 
 pub use atlas::{
-    ATLAS_COLS, ATLAS_ROWS, FontAtlas, FontAtlasBuilder, GlyphProjection, atlas_capacity,
-    glyph_projection,
+    ATLAS_COLS, ATLAS_HEADER_SIZE, ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, CAP_TOP_FRAC,
+    CELL_EM_RATIO, FALLBACK_BASELINE_FRAC, FALLBACK_CAP_HEIGHT_EM, FontAtlas, FontAtlasBuilder,
+    GlyphProjection, SetMetrics, atlas_capacity, cap_height, glyph_projection,
 };
 pub use glyph_table::GlyphEntry;
 pub use manager::{AtlasManager, AtlasRegion};
