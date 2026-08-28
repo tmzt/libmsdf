@@ -67,8 +67,30 @@ pub enum SdfKind {
     RoundedBoxPerCorner { radii: [f32; 4] },
     /// Filled circle inscribed in `size` (radius = min(w,h)/2).
     Circle,
-    /// Horizontal line across the rect: length = size.x, thickness = size.y.
-    Line,
+    /// Straight line segment from `position` to `end` (both ABSOLUTE, exactly
+    /// as [`SdfKind::BezierStroke`] reads them), stroked at `thickness`.
+    ///
+    /// **It is a segment between two points, not a bar across the rect.** It
+    /// used to be the latter - "horizontal line across the rect: length =
+    /// size.x, thickness = size.y" - which meant the only line this layer could
+    /// draw was axis-aligned, and a caller wanting a diagonal had to reach for
+    /// [`SdfKind::BezierStroke`] and pass collinear control points. That is
+    /// exact (collinear controls flatten to collinear sub-segments) but the
+    /// shader's `sd_cubic_stroke` flattens to `BEZIER_FLATTEN_STEPS = 24`
+    /// sub-segments and calls `sd_segment_raw` in a loop PER FRAGMENT, so a
+    /// straight line billed as a curve costs 24 distance evaluations to compute
+    /// what one closed-form `sd_segment` gives exactly. The horizontal
+    /// restriction was never in the SDF - `sd_segment(p, a, b, thickness)` has
+    /// always taken two arbitrary points - only in the `case 3u` body that
+    /// derived `a` and `b` from the rect. So the endpoints are given, and the
+    /// general function is called with them.
+    ///
+    /// **The old horizontal bar is the a/b at the rect's mid-height**: a rect
+    /// `pos`/`size` is `position = (pos.x, pos.y + size.y * 0.5)`,
+    /// `end = (pos.x + size.x, pos.y + size.y * 0.5)`, `thickness = size.y` -
+    /// the same pixels, asserted in `drawlist::tests`. [`DrawList::push_line`]
+    /// is the door; `SdfInstance::size` is unused, like a Bezier's.
+    Line { end: [f32; 2], thickness: f32 },
     /// Rounded-rect stroke (no fill). NOTE: `thickness` occupies the anim
     /// param slot in the wire format — outlines don't animate.
     Outline { radius: f32, thickness: f32 },
@@ -95,12 +117,13 @@ pub enum SdfKind {
 impl SdfKind {
     /// Move every point this kind carries in ABSOLUTE space by `(dx, dy)`.
     ///
-    /// Almost every kind carries none: `position` and `size` describe the
-    /// whole shape, so an instance moves by moving `position` and the kind has
-    /// nothing to say. [`SdfKind::BezierStroke`] is the exception — `c1`, `c2`
-    /// and `end` are absolute points beside `position`, not offsets from it —
-    /// and being the only exception is exactly why it was missed
-    /// ([`DrawList::translate_from`]).
+    /// Most kinds carry none: `position` and `size` describe the whole shape,
+    /// so an instance moves by moving `position` and the kind has nothing to
+    /// say. The STROKES are the exceptions - [`SdfKind::BezierStroke`]'s `c1`,
+    /// `c2` and `end`, and [`SdfKind::Line`]'s `end`, are absolute points
+    /// beside `position`, not offsets from it. Bezier being the only exception
+    /// is exactly why it was missed once already
+    /// ([`DrawList::translate_from`]), so `Line` answers here in the same arm.
     ///
     /// **The match is exhaustive on purpose.** A wildcard arm would make the
     /// next kind that carries geometry outside `position` translate silently
@@ -114,13 +137,16 @@ impl SdfKind {
                     point[1] += dy;
                 }
             }
+            SdfKind::Line { end, thickness: _ } => {
+                end[0] += dx;
+                end[1] += dy;
+            }
             // `position`/`size` (and, for the slabs, radii that are lengths
             // rather than points) are the whole geometry.
             SdfKind::Box
             | SdfKind::RoundedBox { .. }
             | SdfKind::RoundedBoxPerCorner { .. }
             | SdfKind::Circle
-            | SdfKind::Line
             | SdfKind::Outline { .. }
             | SdfKind::MsdfText { .. } => {}
         }
@@ -732,6 +758,26 @@ impl DrawList {
         self.active_transform.pop();
     }
 
+    /// Push a straight line segment from `a` to `b` (absolute) at
+    /// `thickness`.
+    ///
+    /// **Use this, not a Bezier with collinear controls, for anything
+    /// straight.** Both draw the same pixels, but the Bezier path flattens to
+    /// 24 sub-segments per fragment while this evaluates one closed-form
+    /// segment distance - see [`SdfKind::Line`].
+    ///
+    /// A horizontal rule that used to be a rect is
+    /// `push_line([x, y + h * 0.5], [x + w, y + h * 0.5], h, color)`.
+    pub fn push_line(&mut self, a: [f32; 2], b: [f32; 2], thickness: f32, color: [f32; 4]) {
+        self.push(SdfInstance {
+            kind: SdfKind::Line { end: b, thickness },
+            position: a,
+            size: [0.0, 0.0],
+            color,
+            anim: 0,
+        });
+    }
+
     /// Convenience: push a cubic Bézier stroke from `p0` to `p3`.
     pub fn push_bezier(
         &mut self,
@@ -1165,7 +1211,21 @@ impl DrawList {
                     let radius = inst.size[0].min(inst.size[1]) * 0.5;
                     (inst.position, inst.size, [DRAW_TYPE_CIRCLE, radius, anim, 0.0])
                 }
-                SdfKind::Line => (inst.position, inst.size, [DRAW_TYPE_LINE, 0.0, anim, 0.0]),
+                SdfKind::Line { end, thickness } => {
+                    // Same lowering shape as `BezierStroke` below: `pos` is the
+                    // start point, `params[1]` the thickness, and the point
+                    // that does not fit in `params` goes to the aux bank -
+                    // `params` is `[ty, radius, anim_idx, slot]` and two of the
+                    // four slots are already spoken for. The bank entry's `zw`
+                    // is reserved (a Bezier's is C2; a line has no third point).
+                    let idx = param_bank.len() as u32;
+                    param_bank.push([end[0], end[1], 0.0, 0.0]);
+                    (
+                        inst.position,
+                        inst.size,
+                        [DRAW_TYPE_LINE, thickness, anim, f32::from_bits(idx)],
+                    )
+                }
                 SdfKind::Outline { radius, thickness } => (
                     inst.position,
                     inst.size,
@@ -1910,6 +1970,182 @@ mod tests {
         assert_eq!(frame.draws[0].size, [690.0, 140.0], "P3 rides the size slot");
         let idx = frame.draws[0].params[3].to_bits() as usize;
         assert_eq!(frame.param_bank[idx], [686.0, 134.0, 690.0, 138.0], "C1/C2 as lowered");
+    }
+
+    // -- SdfKind::Line - two absolute endpoints, not a bar across the rect --
+
+    /// The `case 3u` body as it stood while a Line was "horizontal across the
+    /// rect": centre the pixel on the rect, put A and B at +/- half the width
+    /// on the centre line, and subtract HALF the rect's height (the old WGSL
+    /// `sd_segment` subtracted its `thickness` argument whole, and its one
+    /// caller passed `cmd.size.y * 0.5`).
+    ///
+    /// Written out here rather than referenced because the point of the test
+    /// below is that the two formulas agree; the moment this one is expressed
+    /// in terms of the new code it stops being evidence of anything.
+    fn legacy_horizontal_line_distance(pos: [f32; 2], size: [f32; 2], px: f32, py: f32) -> f32 {
+        let local_x = px - (pos[0] + size[0] * 0.5);
+        let local_y = py - (pos[1] + size[1] * 0.5);
+        let half_len = size[0] * 0.5;
+        // `core::sdf::sd_segment` takes the FULL width and halves it, so
+        // passing size.y here subtracts size.y * 0.5 - the old quantity.
+        crate::core::sdf::sd_segment(local_x, local_y, -half_len, 0.0, half_len, 0.0, size[1])
+    }
+
+    /// **The rect a Line used to be draws the same pixels as the segment it
+    /// now is.** A horizontal bar `pos`/`size` is the segment from
+    /// `(pos.x, pos.y + h/2)` to `(pos.x + w, pos.y + h/2)` at thickness `h`,
+    /// so this samples a grid covering the bar and well past both ends and
+    /// requires the two distance fields to agree everywhere - not merely to
+    /// agree about which pixels are inside, since the alpha ramp is a
+    /// smoothstep over the distance and an edge half a pixel out would still
+    /// pass an inside/outside check.
+    #[test]
+    fn a_line_across_a_rect_is_the_same_field_the_horizontal_bar_was() {
+        let pos = [70.0, 170.0];
+        let size = [660.0, 2.0];
+
+        let mut list = DrawList::new();
+        list.push_line(
+            [pos[0], pos[1] + size[1] * 0.5],
+            [pos[0] + size[0], pos[1] + size[1] * 0.5],
+            size[1],
+            [0.8, 0.8, 0.85, 1.0],
+        );
+        let frame = list.lower();
+        let cmd = &frame.draws[0];
+
+        let mut inside = 0;
+        let mut samples = 0;
+        // Past both ends (x), and past the 1px half-thickness (y), so the cap
+        // ends and the falloff are both covered rather than just the middle.
+        let mut y = pos[1] - 4.0;
+        while y <= pos[1] + size[1] + 4.0 {
+            let mut x = pos[0] - 20.0;
+            while x <= pos[0] + size[0] + 20.0 {
+                let legacy = legacy_horizontal_line_distance(pos, size, x, y);
+                let (now, _) = crate::core::sdf::sdf_eval_with_params(cmd, x, y, &frame.param_bank);
+                assert!(
+                    (now - legacy).abs() < 1e-3,
+                    "distance at ({x}, {y}) changed: was {legacy}, now {now}"
+                );
+                if now < 0.0 {
+                    inside += 1;
+                }
+                samples += 1;
+                x += 3.0;
+            }
+            y += 0.5;
+        }
+        // The grid has to have actually straddled the shape, or "they agree"
+        // would be a statement about two functions that both said "far away".
+        assert!(samples > 1000, "{samples} samples");
+        assert!(inside > 100, "only {inside} of {samples} samples landed in the bar");
+    }
+
+    /// **A Line lowers like a Bezier minus the control points**: `pos` is A,
+    /// `params[1]` the thickness, and the far endpoint rides the aux param
+    /// bank because `params` has no room for a second point.
+    #[test]
+    fn a_lowered_line_puts_its_far_endpoint_in_the_aux_param_bank() {
+        let mut list = DrawList::new();
+        list.push_line([10.0, 20.0], [90.0, 60.0], 3.0, [1.0; 4]);
+        let frame = list.lower();
+
+        assert_eq!(frame.draws.len(), 1);
+        assert_eq!(frame.draws[0].params[0], DRAW_TYPE_LINE, "still case 3, no new draw type");
+        assert_eq!(frame.draws[0].params[1], 3.0, "thickness rides the radius slot");
+        assert_eq!(frame.draws[0].pos, [10.0, 20.0], "A is the pos slot");
+        let idx = frame.draws[0].params[3].to_bits() as usize;
+        assert_eq!(frame.param_bank[idx], [90.0, 60.0, 0.0, 0.0], "B.xy, zw reserved");
+    }
+
+    /// **A diagonal is a diagonal.** The endpoints are honoured in both axes,
+    /// which the rect encoding could not express at all: under it, `size` was
+    /// (length, thickness) and every line came out horizontal.
+    #[test]
+    fn a_line_between_two_points_is_ink_along_that_line_and_nowhere_else() {
+        let (a, b) = ([10.0f32, 10.0], [90.0f32, 90.0]);
+        let mut list = DrawList::new();
+        list.push_line(a, b, 4.0, [1.0; 4]);
+        let frame = list.lower();
+        let cmd = &frame.draws[0];
+        let d = |x: f32, y: f32| {
+            crate::core::sdf::sdf_eval_with_params(cmd, x, y, &frame.param_bank).0
+        };
+
+        for t in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
+            let (x, y) = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t);
+            assert!(d(x, y) < 0.0, "t={t} is on the line: {}", d(x, y));
+        }
+        // The two corners of the bounding box the diagonal does NOT touch -
+        // exactly the pixels a horizontal-bar encoding would have filled.
+        assert!(d(90.0, 10.0) > 10.0, "off-diagonal corner: {}", d(90.0, 10.0));
+        assert!(d(10.0, 90.0) > 10.0, "off-diagonal corner: {}", d(10.0, 90.0));
+        // And past an endpoint, where the segment's cap is.
+        assert!(d(0.0, 0.0) > 0.0, "beyond A: {}", d(0.0, 0.0));
+        assert!(d(100.0, 100.0) > 0.0, "beyond B: {}", d(100.0, 100.0));
+    }
+
+    /// **The diagonal a Line draws is the one a degenerate Bezier drew** - to
+    /// within float noise, at 1/24th the per-fragment work. This is the
+    /// measurement the encoding change rests on: collinear control points
+    /// flatten to collinear sub-segments, so the two agree, and the Bezier
+    /// path is spending BEZIER_FLATTEN_STEPS segment evaluations to reach the
+    /// answer one closed-form call already gives.
+    #[test]
+    fn a_line_and_the_collinear_bezier_it_replaces_are_the_same_field() {
+        let (a, b) = ([10.0f32, 10.0], [90.0f32, 90.0]);
+        let lerp = |t: f32| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        let thickness = 4.0;
+
+        let mut list = DrawList::new();
+        list.push_line(a, b, thickness, [1.0; 4]);
+        let frame = list.lower();
+        let cmd = &frame.draws[0];
+
+        for (x, y) in [(50.0, 50.0), (45.0, 55.0), (30.0, 70.0), (20.0, 22.0), (88.0, 84.0)] {
+            let seg = crate::core::sdf::sdf_eval_with_params(cmd, x, y, &frame.param_bank).0;
+            let cubic = crate::core::sdf::sd_cubic_stroke(
+                x,
+                y,
+                a,
+                lerp(1.0 / 3.0),
+                lerp(2.0 / 3.0),
+                b,
+                thickness,
+            );
+            assert!(
+                (seg - cubic).abs() < 1e-3,
+                "({x}, {y}): segment {seg} vs flattened cubic {cubic}"
+            );
+        }
+    }
+
+    /// **`translate_from` moves a line's far endpoint with its origin** - the
+    /// same failure `BezierStroke` had, which is why `SdfKind::translate`'s
+    /// match is exhaustive. Asserted on the lowered frame too, because that is
+    /// where the endpoint goes into the param bank: a translate that fixed
+    /// only the instance's copy would still hand the shader the old point.
+    #[test]
+    fn translating_a_range_moves_a_lines_far_endpoint_with_it() {
+        let mut list = DrawList::new();
+        let start = list.instances.len();
+        list.push_line([10.0, 20.0], [16.0, 26.0], 1.0, [1.0; 4]);
+
+        list.translate_from(start, 674.0, 114.0);
+
+        let SdfKind::Line { end, thickness } = list.instances[start].kind else {
+            panic!("the line is still a line");
+        };
+        assert_eq!(list.instances[start].position, [684.0, 134.0], "A moved");
+        assert_eq!(end, [690.0, 140.0], "B moved with it");
+        assert_eq!(thickness, 1.0, "a translate moves a shape, it does not stretch one");
+
+        let frame = list.lower();
+        assert_eq!(frame.draws[0].pos, [684.0, 134.0], "A as lowered");
+        let idx = frame.draws[0].params[3].to_bits() as usize;
+        assert_eq!(frame.param_bank[idx], [690.0, 140.0, 0.0, 0.0], "B as lowered");
     }
 
     /// **A rotated instance in a translated range moves by `d`, not by `M*d`.**

@@ -8,7 +8,7 @@
 // composite with alpha blending front-to-back.
 //
 // Each DrawCmd specifies type via params.x:
-//   0 = Box, 1 = Slab (rounded rect), 2 = Circle, 3 = Line, 4 = Text,
+//   0 = Box, 1 = Slab (rounded rect), 2 = Circle, 3 = Line (segment), 4 = Text,
 //   5 = Texture, 8 = MSDF Text, 9 = Outline,
 //   10 = Cubic Bézier stroke, 11 = Slab per-corner
 //   (6/7 are retired — see `clip` below)
@@ -105,8 +105,9 @@ struct GpuTexture {
 // g1 = [baseline_row_bits, px_per_em_bits, x_margin_bits, 0]
 @group(0) @binding(11) var<storage, read> glyph_table: array<vec4<u32>>;
 
-// Aux per-instance data: Bézier control points (C1.xy, C2.xy), future
-// lo-fi per-instance parameters. Indexed by bitcast<u32>(cmd.params.w).
+// Aux per-instance data: Bezier control points (C1.xy, C2.xy), a line's far
+// endpoint (B.xy), per-corner slab radii, future lo-fi per-instance
+// parameters. Indexed by bitcast<u32>(cmd.params.w).
 @group(0) @binding(12) var<storage, read> param_bank: array<vec4<f32>>;
 
 // ── Vertex shader: full-screen triangle ──
@@ -160,8 +161,16 @@ fn sd_circle(p: vec2<f32>, radius: f32) -> f32 {
     return length(p) - radius;
 }
 
+/// Distance to a stroked segment from `a` to `b`. `thickness` is the FULL
+/// stroke width, so the stroke reaches half of it either side of the
+/// centreline - the same convention as sd_cubic_stroke below and as
+/// `core::sdf::sd_segment`, which is the CPU mirror of this function.
+///
+/// It used to take the HALF width here while the CPU mirror took the full
+/// width, so the two agreed on the geometry and disagreed on the argument;
+/// the only caller (case 3u) passed `cmd.size.y * 0.5` to compensate.
 fn sd_segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, thickness: f32) -> f32 {
-    return sd_segment_raw(p, a, b) - thickness;
+    return sd_segment_raw(p, a, b) - thickness * 0.5;
 }
 
 fn sd_segment_raw(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
@@ -345,11 +354,30 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 shadow_d = sd_circle(p - vec2<f32>(1.5, 2.0), radius);
                 shadow_on = true;
             }
-            case 3u: {
-                let half_len = cmd.size.x * 0.5;
-                let a = vec2<f32>(-half_len, 0.0);
-                let b = vec2<f32>(half_len, 0.0);
-                d = sd_segment(p, a, b, cmd.size.y * 0.5);
+            case 3u: { // Line - straight stroke between two absolute points
+                // pos = A; params.y = thickness; params.w = bitcast param_bank
+                // index holding (B.xy, reserved). Lowered exactly like the
+                // Bezier below (case 10u), minus the two control points, and
+                // evaluated in ABSOLUTE space for the same reason - the
+                // endpoints are absolute, so `effective_pixel` is the frame
+                // they are in, not the rect-centred `p`.
+                //
+                // This used to derive A and B from the rect, which made it a
+                // horizontal bar and nothing else; sd_segment was already
+                // general and only its caller was not. A diagonal drawn as a
+                // degenerate Bezier is exact but costs BEZIER_FLATTEN_STEPS
+                // sd_segment_raw calls per fragment to reach this same answer.
+                //
+                // Degenerate fallback (index past the bank): B = A, which
+                // sd_segment_raw resolves to a disc of the stroke radius at A
+                // rather than to ink somewhere unrelated.
+                let a = cmd.pos;
+                var b = a;
+                let pidx = bitcast<u32>(cmd.params.w);
+                if pidx < arrayLength(&param_bank) {
+                    b = param_bank[pidx].xy;
+                }
+                d = sd_segment(effective_pixel, a, b, cmd.params.y);
             }
             case 4u: { // Text — bitmap font atlas
                 let glyph_w = uniforms.font.x;

@@ -7,6 +7,14 @@
 pub const DRAW_TYPE_BOX: f32 = 0.0;
 pub const DRAW_TYPE_SLAB: f32 = 1.0;
 pub const DRAW_TYPE_CIRCLE: f32 = 2.0;
+/// Straight line stroke between two ABSOLUTE points. pos = A, params:
+/// `[3, thickness, anim_idx, param_bank index -> (B.xy, reserved)]` - the
+/// same lowering as [`DRAW_TYPE_BEZIER`] with the control points dropped.
+/// `size` is unused. Not a horizontal bar across `pos`/`size`, which is what
+/// it was until the endpoints were given: the shader's `sd_segment` was always
+/// general and only the `case 3u` body was not, so the one way to draw a
+/// diagonal was a Bezier with collinear controls - exact, but 24 flattened
+/// sub-segments per fragment for an answer one segment call gives closed-form.
 pub const DRAW_TYPE_LINE: f32 = 3.0;
 pub const DRAW_TYPE_TEXT: f32 = 4.0;
 pub const DRAW_TYPE_TEXTURE: f32 = 5.0;
@@ -207,9 +215,10 @@ impl ClipRect {
 /// color:  [f32; 4]   r, g, b, a (0.0-1.0)
 /// params: [f32; 4]   [type, radius, anim_idx, slot]
 ///   params[0] = draw type (DRAW_TYPE_*)
-///   params[1] = radius (Slab, Circle) / thickness (Outline, Bézier)
+///   params[1] = radius (Slab, Circle) / thickness (Outline, Bezier, Line)
 ///   params[2] = anim_bank index (0 = no animation, 1+ = AnimBank[idx-1])
-///   params[3] = slot (Text: string ref; Bézier: param_bank index, bitcast)
+///   params[3] = slot (Text: string ref; Bezier/Line/Slab-per-corner:
+///     param_bank index, bitcast)
 /// xform:  [f32; 4]   [xform_idx, raised, blur_radius, alpha_ombre]
 ///   xform[1] = [`XFORM_RAISED`] to cast this instance's drop shadow, 0.0
 ///     (the default for every instance) to stay flat.
@@ -374,8 +383,9 @@ pub fn sd_cubic_stroke(
 
 /// Evaluate the SDF for a single draw command at pixel position (px, py).
 /// Returns (distance, color) — negative distance means inside.
-/// Commands that need the aux param bank (Bézier control points) fall back
-/// to degenerate values; use [`sdf_eval_with_params`] for those.
+/// Commands that need the aux param bank (Bezier control points, a line's far
+/// endpoint, per-corner slab radii) fall back to degenerate values; use
+/// [`sdf_eval_with_params`] for those.
 pub fn sdf_eval(cmd: &SdfDrawCmd, px: f32, py: f32) -> (f32, [f32; 4]) {
     sdf_eval_with_params(cmd, px, py, &[])
 }
@@ -400,8 +410,9 @@ fn undo_xform(cmd: &SdfDrawCmd, px: f32, py: f32, param_bank: &[[f32; 4]]) -> (f
 }
 
 /// Evaluate the SDF for a single draw command, with access to the aux
-/// param bank (`param_bank[bitcast(params[3])]` = Bézier C1.xy, C2.xy; also
-/// where `SdfRotate` transforms live — see [`SdfDrawCmd::xform`]).
+/// param bank (`param_bank[bitcast(params[3])]` = Bezier C1.xy/C2.xy, a
+/// line's far endpoint B.xy, or per-corner slab radii; also where `SdfRotate`
+/// transforms live - see [`SdfDrawCmd::xform`]).
 pub fn sdf_eval_with_params(
     cmd: &SdfDrawCmd,
     px: f32,
@@ -421,8 +432,22 @@ pub fn sdf_eval_with_params(
         1 => sd_rounded_box(local_x, local_y, hw, hh, cmd.radius()),   // Slab
         2 => sd_circle(local_x, local_y, hw.min(hh)),                  // Circle
         3 => {
-            // Line: pos = (x1,y1), size = (x2,y2)
-            sd_segment(px, py, cmd.pos[0], cmd.pos[1], cmd.size[0], cmd.size[1], 1.0)
+            // Line: pos = A, params[1] = thickness, param bank holds B.xy.
+            // Degenerate fallback (index past the bank): B = A, a disc of the
+            // stroke radius at A - mirrors `case 3u` in sdf_render.wgsl.
+            //
+            // This arm has always read the endpoints out of the command rather
+            // than deriving a bar from the rect the way the shader did, so it
+            // was the CPU mirror that was right about the SHAPE and wrong about
+            // where the second point lives (it read `size`) and about the
+            // thickness (hardcoded 1.0). Both now come from the wire format.
+            let a = cmd.pos;
+            let idx = cmd.params[3].to_bits() as usize;
+            let b = match param_bank.get(idx) {
+                Some(entry) => [entry[0], entry[1]],
+                None => a,
+            };
+            sd_segment(px, py, a[0], a[1], b[0], b[1], cmd.params[1])
         }
         4 => sd_box(local_x, local_y, hw, hh),                         // Text (placeholder box)
         9 => {
@@ -643,6 +668,44 @@ mod tests {
         // Chord midpoint is far from the bowed curve.
         let (d_chord, _) = sdf_eval_with_params(&cmd, 50.0, 100.0, &params);
         assert!(d_chord > 10.0, "chord midpoint should be outside: {d_chord}");
+    }
+
+    #[test]
+    fn sdf_eval_line_reads_its_far_endpoint_from_the_param_bank() {
+        // A diagonal from (10,10) to (90,90), 4px wide.
+        let cmd = SdfDrawCmd {
+            pos: [10.0, 10.0],
+            size: [0.0, 0.0], // unused by a Line
+            color: [1.0; 4],
+            params: [DRAW_TYPE_LINE, 4.0, 0.0, f32::from_bits(0)],
+            xform: [0.0; 4],
+            clip: SdfDrawCmd::NO_CLIP,
+        };
+        let bank = [[90.0f32, 90.0, 0.0, 0.0]]; // B.xy, zw reserved
+        // On the diagonal.
+        assert!(sdf_eval_with_params(&cmd, 50.0, 50.0, &bank).0 < 0.0);
+        // The corner of the bounding box the diagonal misses - which is where
+        // a horizontal-bar reading of pos/size would have put ink.
+        assert!(sdf_eval_with_params(&cmd, 90.0, 10.0, &bank).0 > 10.0);
+        // params[1] is the FULL width: 4px wide reaches 2px either side.
+        let edge = sdf_eval_with_params(&cmd, 50.0 + 2.0f32.sqrt(), 50.0 - 2.0f32.sqrt(), &bank).0;
+        assert!(edge.abs() < 1e-4, "2px off the centreline is the stroke edge: {edge}");
+    }
+
+    #[test]
+    fn sdf_eval_line_without_the_bank_degenerates_to_a_disc_at_its_start() {
+        // Mirrors `case 3u`'s out-of-range fallback (B = A): a bounded blob at
+        // A rather than ink stretching to wherever a stale slot decoded to.
+        let cmd = SdfDrawCmd {
+            pos: [10.0, 10.0],
+            size: [0.0, 0.0],
+            color: [1.0; 4],
+            params: [DRAW_TYPE_LINE, 4.0, 0.0, f32::from_bits(7)], // no such slot
+            xform: [0.0; 4],
+            clip: SdfDrawCmd::NO_CLIP,
+        };
+        assert!(sdf_eval(&cmd, 10.0, 10.0).0 < 0.0, "the disc covers A");
+        assert!(sdf_eval(&cmd, 50.0, 50.0).0 > 0.0, "and nothing else");
     }
 
     // ── SdfRotate (xform) — mirrors the `sdf_render.wgsl` xform block ──────
