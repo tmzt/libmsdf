@@ -21,11 +21,16 @@ use crate::font::packer::ShelfPacker;
 /// plausible-looking atlas instead of failing.
 pub const ATLAS_MAGIC: &[u8; 4] = b"hbfa";
 
-/// The format version this build writes and the only one it reads.
+/// **The version a SINGLE-LAYER atlas is written at**, and one of the two this
+/// build reads - see [`ATLAS_VERSION_LAYERED`] for the other.
 ///
 /// * v1 had neither magic nor a set header.
 /// * v2 added [`ATLAS_MAGIC`] and the [`SetMetrics`] table at 32 bytes a row.
 /// * v3 added [`SetMetrics::ink_descent_em`], which makes a row 36 bytes.
+/// * v4 added the [`AtlasLayer`] table and multi-layer pixel data. **A
+///   single-layer atlas is still written at v3**, which is the whole reason
+///   the three committed artifacts did not have to be re-baked: layers cost a
+///   version only when a file actually has more than one.
 ///
 /// **v3 is a bump rather than a spare-byte fill because there were no spare
 /// bytes**: a v2 row was 2 + 2 + 7x4 = exactly 32, so the new field can only
@@ -36,6 +41,149 @@ pub const ATLAS_MAGIC: &[u8; 4] = b"hbfa";
 /// the version exist to prevent, so the version moves and every atlas is
 /// re-baked.
 pub const ATLAS_VERSION: u32 = 3;
+
+/// **The version a MULTI-LAYER atlas is written at.** Written only when
+/// [`FontAtlas::layers`] holds more than one; read alongside
+/// [`ATLAS_VERSION`].
+///
+/// # Why layers cost a version at all, when the ENTRY did not
+///
+/// [`GlyphEntry`]'s layer index went into two bytes that were already pad, so
+/// nothing about an entry needed a version. The pixel data is the reason: a v4
+/// file carries `width * height * channels * layers` texels and a v3 reader
+/// computes `width * height * channels`. Its length check
+/// (`data.len() < pixel_start + expected`) would PASS on the longer buffer,
+/// take the first layer, and load an atlas that draws every layer-0 glyph
+/// correctly and every other glyph from whatever cell coordinate landed on -
+/// a plausible-looking atlas, which is precisely what
+/// [`FontAtlas::from_bytes`]' magic and version exist to convert into a stop.
+///
+/// So the version is directed by CONTENT rather than by build: a file gets the
+/// version it needs. One layer is a v3 file an older build reads correctly;
+/// two or more is a v4 file an older build refuses.
+pub const ATLAS_VERSION_LAYERED: u32 = 4;
+
+/// **The most layers an atlas may declare**: WebGPU guarantees
+/// `maxTextureArrayLayers` of 256 on every adapter, and this repo pins no
+/// limits, so 256 is what a bake may assume without asking the device.
+///
+/// For scale, `(point size, style)` over the M3 type scale's 14 declared sizes
+/// and four styles is 56 layers - so the guarantee is not the binding
+/// constraint. Texture MEMORY is, because every layer of an array shares the
+/// array's dimensions ([`AtlasLayer`]).
+pub const MAX_ATLAS_LAYERS: usize = 256;
+
+/// **What one texture-array layer HOLDS**: a point size and a style.
+///
+/// # Why a layer is the pair, and not one axis or the other
+///
+/// The pinned grid ([`ATLAS_ROWS`]) is a per-LAYER budget now, so "what shares
+/// a texture with what" became a design decision instead of a capacity
+/// accident. It has two halves that pull opposite ways:
+///
+/// * **Point size is what must AGREE inside a layer.** A run mixing prose with
+///   an icon is the common case, and it costs nothing exactly when the icon's
+///   cells and the text's cells are in ONE layer - which is what the merged
+///   face ([`crate::font::ROBOTO_ASCII_MSYMBOLS`]) has always bought and what
+///   this keeps. So the merged vocabulary inside a layer is *text plus Private
+///   Use Area, at that size*.
+/// * **Style is what must DIFFER between layers.** A second face is 205 more
+///   cells and a layer holds 320, so two styles cannot share one; and they
+///   need not, because a run does not usually alternate weight per glyph.
+///
+/// The Private Use Area is deliberately NOT duplicated per style: an icon has
+/// no weight, the outlines would be identical, and 13 borrowed cells per style
+/// would buy a distinction no caller can make. A bold run containing an icon
+/// takes one layer change, which is the ordinary cost of any layer change and
+/// far rarer than text beside an icon.
+///
+/// # `size_px` is the bake's cell size, which is the point size it is FOR
+///
+/// [`FontAtlasBuilder::glyph_size`] - 48 for everything this repo ships. MSDF
+/// upscales cleanly and degrades on the way DOWN
+/// ([`FontAtlas::min_antialiased_font_size`]), so a per-size bake is an
+/// investment at the SMALL end; the number here is what a caller asks for when
+/// it wants the layer baked for its size.
+///
+/// # Every layer of one array shares the array's DIMENSIONS
+///
+/// That is a wgpu fact, not a choice here, and it is the real cost of the
+/// per-size axis: a 16px layer inside a 400x2000 array occupies its own
+/// 400x2000 of texture memory however few texels its cells cover. The grid is
+/// per-layer - each entry carries its own `atlas_x`/`atlas_y`, so nothing in
+/// the shader assumes a common cell size - which means a small-cell layer can
+/// pack far more cells into the same rectangle, but it cannot make the
+/// rectangle smaller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AtlasLayer {
+    /// The cell size this layer was baked at, in texels - the point size the
+    /// layer is for.
+    pub size_px: u16,
+    /// The cut its text cells are in. [`GlyphStyle::Regular`] also owns the
+    /// markers and both icon sets, which are style-invariant.
+    pub style: GlyphStyle,
+}
+
+impl AtlasLayer {
+    /// Packed size in a v4 atlas file: 2 + 1 + 1 reserved.
+    pub const PACKED_SIZE: usize = 4;
+
+    pub const fn new(size_px: u16, style: GlyphStyle) -> Self {
+        Self { size_px, style }
+    }
+
+    fn to_bytes(self) -> [u8; Self::PACKED_SIZE] {
+        let mut buf = [0u8; Self::PACKED_SIZE];
+        buf[0..2].copy_from_slice(&self.size_px.to_le_bytes());
+        buf[2] = self.style as u8;
+        buf
+    }
+
+    fn from_bytes(data: &[u8]) -> Result<Self, &'static str> {
+        if data.len() < Self::PACKED_SIZE {
+            return Err("atlas layer table entry too short");
+        }
+        // Checked rather than punned, for `SetMetrics::from_bytes`' reason: a
+        // file is untrusted input, and a style this build has never heard of
+        // must be a clean refusal instead of a transmute.
+        let Some(style) = GlyphStyle::try_from_ordinal(data[2]) else {
+            return Err(
+                "atlas names a glyph style this build does not have - it was baked by a newer \
+                 libmsdf; update, or re-bake with this one",
+            );
+        };
+        Ok(Self { size_px: u16::from_le_bytes([data[0], data[1]]), style })
+    }
+}
+
+impl core::fmt::Display for AtlasLayer {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}px {:?}", self.size_px, self.style)
+    }
+}
+
+/// **A layer this atlas does not have** - what [`FontAtlas::layer_index`]
+/// answers with instead of a substitute.
+///
+/// Layer 0 is always *a* layer, so falling back to it would always "work" and
+/// would always be wrong: 48px regular cells where the caller asked for 16px
+/// bold is upright text where the document says emphasis, at a size nobody
+/// asked for. That is the same wrong-render-that-looks-right
+/// [`StyledGlyphError`] exists to prevent, one axis over, and it is refused
+/// the same way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LayerNotBaked(pub AtlasLayer);
+
+impl core::fmt::Display for LayerNotBaked {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "this atlas has no {} layer - bake one, or ask for a layer it has; layer 0 is not a \
+             substitute for a size or a style the caller named",
+            self.0
+        )
+    }
+}
 
 /// Fixed part of the header, before the [`SetMetrics`] table: magic, version,
 /// width, height, glyph count, channels, set count.
@@ -275,7 +423,9 @@ pub struct FontAtlas {
     pub height: u32,
     /// Number of channels (3 = MSDF, 4 = MTSDF)
     pub channels: u32,
-    /// Raw pixel data: width * height * channels bytes, row-major
+    /// Raw pixel data: `layers.len() * width * height * channels` bytes,
+    /// LAYER-major and row-major within a layer - layer `n` starts at
+    /// [`FontAtlas::layer_offset`].
     pub pixel_data: Vec<u8>,
     /// **Per-glyph entries, ordered by glyph id** — see
     /// [`FontAtlas::get_glyph`] for why that specific order, and
@@ -289,6 +439,14 @@ pub struct FontAtlas {
     /// appends), which has no face to measure. A BAKED atlas always has one:
     /// [`FontAtlas::from_bytes`] refuses a file without it.
     pub sets: Vec<SetMetrics>,
+    /// **What each texture-array layer holds**, indexed by layer - so
+    /// `layers[e.layer]` is the `(point size, style)` of the cell `e` names.
+    ///
+    /// NEVER empty: an atlas has at least one layer, and a file written before
+    /// layers existed declares exactly the one it always had. See
+    /// [`AtlasLayer`] for what a layer is and [`FontAtlas::layer_index`] for
+    /// the lookup that goes the other way.
+    pub layers: Vec<AtlasLayer>,
 }
 
 impl FontAtlas {
@@ -296,6 +454,60 @@ impl FontAtlas {
     /// cells from - and for every set of a runtime-populated atlas.
     pub fn set_metrics(&self, set: GlyphSet) -> Option<&SetMetrics> {
         self.sets.iter().find(|m| m.set == set)
+    }
+
+    /// **Which layer holds `(point size, style)`**, or a refusal.
+    ///
+    /// The one call a caller makes to find out whether an atlas can serve the
+    /// size and cut it wants, and it never substitutes - see [`LayerNotBaked`]
+    /// for why layer 0 is not an acceptable answer to a question about layer
+    /// 3.
+    ///
+    /// A caller that already has a [`GlyphEntry`] does not need this: the
+    /// entry carries its own [`GlyphEntry::layer`], which is what the GPU
+    /// table uploads. This is for the question asked BEFORE a lookup.
+    pub fn layer_index(&self, layer: AtlasLayer) -> Result<u16, LayerNotBaked> {
+        self.layers
+            .iter()
+            .position(|&l| l == layer)
+            .map(|i| i as u16)
+            .ok_or(LayerNotBaked(layer))
+    }
+
+    /// How many texture-array layers this atlas needs. At least 1.
+    pub fn layer_count(&self) -> u32 {
+        self.layers.len().max(1) as u32
+    }
+
+    /// Byte offset of one layer's pixels inside [`FontAtlas::pixel_data`].
+    ///
+    /// The ONE place layer-major addressing is written down. Everything that
+    /// reads a texel - [`FontAtlas::cell_texels`], the RGBA expansion, the
+    /// per-layer upload - goes through it, so a layer stride cannot be
+    /// computed two ways that disagree.
+    pub fn layer_offset(&self, layer: u16) -> usize {
+        (layer as usize) * (self.width as usize) * (self.height as usize) * (self.channels as usize)
+    }
+
+    /// **One cell's texels**, rows top-down, `atlas_w * channels` bytes a row -
+    /// from the layer the entry names.
+    ///
+    /// Published rather than left to each caller because the layer is a second
+    /// term in an address that used to have one, and a reader that forgets it
+    /// gets plausible bytes from the wrong layer rather than an error. It is
+    /// also what the bake tests compare, so the comparison and the shader agree
+    /// about where a cell is by construction.
+    pub fn cell_texels(&self, glyph_id: u16) -> Option<Vec<u8>> {
+        let e = self.get_glyph(glyph_id)?;
+        let base = self.layer_offset(e.layer);
+        let row_len = (e.atlas_w as usize) * (self.channels as usize);
+        let mut out = Vec::with_capacity(row_len * e.atlas_h as usize);
+        for dy in 0..e.atlas_h as u32 {
+            let row = (e.atlas_y as u32 + dy) * self.width + e.atlas_x as u32;
+            let start = base + (row * self.channels) as usize;
+            out.extend_from_slice(self.pixel_data.get(start..start + row_len)?);
+        }
+        Some(out)
     }
 
     /// **The baseline of the atlas's TEXT cells**, as a fraction of the cell
@@ -363,10 +575,12 @@ impl FontAtlas {
     ///   rather than handing back the upright glyph that happens to sit at that
     ///   raw id.
     ///
-    /// That second rule matters more than it looks: a style's baked CELLS are
-    /// ~290 KiB gzipped and its face is 13 KiB, so generating styled cells on
-    /// demand is a serious option for a browser, and it needs no different
-    /// address than a baked one.
+    /// That second rule matters more than it looks: a style's baked cells and
+    /// the layer they sit in are ~300 KiB gzipped (measured: bold +301,840,
+    /// italic +342,707, on the merged 48px face) against a 13 KiB face, so
+    /// generating styled cells on demand is a serious option for a browser -
+    /// `gpu::MsdfCompute::generate_into_texture_layer` into that style's layer
+    /// - and it needs no different address than a baked one.
     pub fn carries_style(&self, style: GlyphStyle) -> bool {
         if !self.sets.is_empty() {
             return self.set_metrics(style.text_set()).is_some();
@@ -442,9 +656,16 @@ impl FontAtlas {
         out
     }
 
-    /// Expand the pixel data to RGBA8 (alpha = 255) for texture upload.
+    /// Expand the pixel data to RGBA8 (alpha = 255) for texture upload -
+    /// **every layer**, in layer order, which is the order
+    /// `GpuSdfRenderer::upload_msdf_atlas` writes them.
+    ///
+    /// The texel count is taken from `pixel_data` rather than from
+    /// `width * height` so that it follows the layer count without this
+    /// method having to multiply by it - one less place a layer stride is
+    /// written down.
     pub fn to_rgba_bytes(&self) -> Vec<u8> {
-        let texels = (self.width * self.height) as usize;
+        let texels = self.pixel_data.len() / (self.channels.max(1) as usize);
         let mut rgba = Vec::with_capacity(texels * 4);
         match self.channels {
             3 => {
@@ -469,7 +690,7 @@ impl FontAtlas {
 
     /// Serialize the atlas to bytes for embedding / baking to disk.
     ///
-    /// Format ([`ATLAS_MAGIC`], [`ATLAS_VERSION`]):
+    /// Format ([`ATLAS_MAGIC`]), at [`ATLAS_VERSION`] for one layer:
     /// ```text
     /// [4b magic "hbfa"][4b version]                      -- 8
     /// [4b width][4b height][4b num_glyphs][4b channels]  -- 16
@@ -478,20 +699,53 @@ impl FontAtlas {
     /// [GlyphEntry * num_glyphs]                          -- 32 bytes each
     /// [pixel_data]                                       -- width*height*channels bytes
     /// ```
+    ///
+    /// ...and at [`ATLAS_VERSION_LAYERED`] for more than one, which inserts a
+    /// layer count and the [`AtlasLayer`] table between the fixed header and
+    /// the sets, and multiplies the pixel data by the layer count:
+    /// ```text
+    /// [ ...the 28 byte header, version 4... ]
+    /// [4b layer_count]                                   -- 4   = 32 byte header
+    /// [AtlasLayer * layer_count]                         -- 4 bytes each
+    /// [SetMetrics * set_count]                           -- 36 bytes each
+    /// [GlyphEntry * num_glyphs]                          -- 32 bytes each
+    /// [pixel_data]                                       -- w*h*channels*layers bytes
+    /// ```
+    ///
+    /// **The version follows the CONTENT.** A single-layer atlas is written at
+    /// v3, byte for byte what it was before layers existed - which is why the
+    /// three committed artifacts still pass `bake_atlas --check` without being
+    /// re-baked. [`ATLAS_VERSION_LAYERED`] says why the multi-layer case
+    /// cannot share that version.
     pub fn to_bytes(&self) -> Vec<u8> {
+        let layered = self.layers.len() > 1;
+        let layer_table_size = if layered {
+            4 + self.layers.len() * AtlasLayer::PACKED_SIZE
+        } else {
+            0
+        };
         let sets_size = self.sets.len() * SetMetrics::PACKED_SIZE;
         let entries_size = self.glyphs.len() * GlyphEntry::PACKED_SIZE;
-        let total = ATLAS_HEADER_SIZE + sets_size + entries_size + self.pixel_data.len();
+        let total =
+            ATLAS_HEADER_SIZE + layer_table_size + sets_size + entries_size + self.pixel_data.len();
 
         let mut buf = Vec::with_capacity(total);
         buf.extend_from_slice(ATLAS_MAGIC);
-        buf.extend_from_slice(&ATLAS_VERSION.to_le_bytes());
+        buf.extend_from_slice(
+            &if layered { ATLAS_VERSION_LAYERED } else { ATLAS_VERSION }.to_le_bytes(),
+        );
         buf.extend_from_slice(&self.width.to_le_bytes());
         buf.extend_from_slice(&self.height.to_le_bytes());
         buf.extend_from_slice(&(self.glyphs.len() as u32).to_le_bytes());
         buf.extend_from_slice(&self.channels.to_le_bytes());
         buf.extend_from_slice(&(self.sets.len() as u32).to_le_bytes());
 
+        if layered {
+            buf.extend_from_slice(&(self.layers.len() as u32).to_le_bytes());
+            for layer in &self.layers {
+                buf.extend_from_slice(&layer.to_bytes());
+            }
+        }
         for set in &self.sets {
             buf.extend_from_slice(&set.to_bytes());
         }
@@ -529,9 +783,9 @@ impl FontAtlas {
             );
         }
         let version = u32::from_le_bytes(data[4..8].try_into().unwrap());
-        if version != ATLAS_VERSION {
+        if version != ATLAS_VERSION && version != ATLAS_VERSION_LAYERED {
             return Err(
-                "atlas version is not the one this build writes - re-bake it with this libmsdf's \
+                "atlas version is not one this build reads - re-bake it with this libmsdf's \
                  bake_atlas example",
             );
         }
@@ -542,13 +796,49 @@ impl FontAtlas {
         let channels = u32::from_le_bytes(data[20..24].try_into().unwrap());
         let set_count = u32::from_le_bytes(data[24..28].try_into().unwrap()) as usize;
 
-        let sets_end = ATLAS_HEADER_SIZE + set_count * SetMetrics::PACKED_SIZE;
+        // **The layer table, present only at v4.** A v3 file is single-layer
+        // by definition; its one layer is read off the cells below rather than
+        // guessed at, so the two paths converge on the same `layers` vector
+        // and nothing downstream has to ask which version it came from.
+        let (layer_count, layers_end) = if version == ATLAS_VERSION_LAYERED {
+            if data.len() < ATLAS_HEADER_SIZE + 4 {
+                return Err("atlas data too short for the layer count");
+            }
+            let n = u32::from_le_bytes(
+                data[ATLAS_HEADER_SIZE..ATLAS_HEADER_SIZE + 4].try_into().unwrap(),
+            ) as usize;
+            if n == 0 {
+                return Err("atlas declares zero layers - every atlas has at least one");
+            }
+            if n > MAX_ATLAS_LAYERS {
+                return Err(
+                    "atlas declares more layers than maxTextureArrayLayers guarantees (256)",
+                );
+            }
+            (n, ATLAS_HEADER_SIZE + 4 + n * AtlasLayer::PACKED_SIZE)
+        } else {
+            (1, ATLAS_HEADER_SIZE)
+        };
+        if data.len() < layers_end {
+            return Err("atlas data too short for the layer table");
+        }
+        let mut layers = Vec::with_capacity(layer_count);
+        if version == ATLAS_VERSION_LAYERED {
+            for i in 0..layer_count {
+                let offset = ATLAS_HEADER_SIZE + 4 + i * AtlasLayer::PACKED_SIZE;
+                layers.push(AtlasLayer::from_bytes(
+                    &data[offset..offset + AtlasLayer::PACKED_SIZE],
+                )?);
+            }
+        }
+
+        let sets_end = layers_end + set_count * SetMetrics::PACKED_SIZE;
         if data.len() < sets_end {
             return Err("atlas data too short for the set header");
         }
         let mut sets = Vec::with_capacity(set_count);
         for i in 0..set_count {
-            let offset = ATLAS_HEADER_SIZE + i * SetMetrics::PACKED_SIZE;
+            let offset = layers_end + i * SetMetrics::PACKED_SIZE;
             sets.push(SetMetrics::from_bytes(
                 &data[offset..offset + SetMetrics::PACKED_SIZE],
             )?);
@@ -587,8 +877,35 @@ impl FontAtlas {
         // about the texture.
         glyphs.sort_unstable_by_key(|e| e.glyph_id);
 
+        // **Every entry has to name a layer the file declares.** Checked, not
+        // trusted, for the reason the set counts are: an entry pointing past
+        // the table would sample a layer that does not exist, and a GPU array
+        // index out of range is a clamp on some drivers - which draws the
+        // wrong glyph rather than failing.
+        // No `debug_assert` here, deliberately: this is a fact about UNTRUSTED
+        // FILE INPUT, not a programming invariant, so it must be the same
+        // clean refusal in a debug build as in a release one.
+        if glyphs.iter().any(|e| e.layer as usize >= layer_count) {
+            return Err(
+                "an atlas entry names a layer the file does not declare - at v3 that means \
+                 non-zero bytes in what was pad, so the file was not written by any libmsdf",
+            );
+        }
+        // A v3 file's single layer, read off the cells: they all agree about
+        // the cell size (one bake, one `glyph_size`) and the STYLE of a cell
+        // is in its address, so nothing here is a guess. `Regular` for an
+        // atlas with no glyphs at all, which has no style to be wrong about.
+        if layers.is_empty() {
+            let size_px = glyphs.first().map_or(0, |e| e.atlas_h);
+            let style = glyphs
+                .first()
+                .map_or(GlyphStyle::Regular, |e| GlyphStyle::split_glyph_id(e.glyph_id).0);
+            layers.push(AtlasLayer::new(size_px, style));
+        }
+
         let pixel_start = entries_end;
-        let expected_pixels = (width * height * channels) as usize;
+        let expected_pixels = (width as usize) * (height as usize) * (channels as usize)
+            * layer_count;
         if data.len() < pixel_start + expected_pixels {
             return Err("atlas data too short for pixel data");
         }
@@ -602,18 +919,48 @@ impl FontAtlas {
             pixel_data,
             glyphs,
             sets,
+            layers,
         })
     }
 
     /// Build an atlas shell (no pixel data yet) for dynamic population via
-    /// the atlas manager + compute-MSDF path.
+    /// the atlas manager + compute-MSDF path. ONE layer - see
+    /// [`FontAtlas::empty_layered`] for more.
     pub fn empty(width: u32, height: u32, channels: u32) -> Self {
+        Self::empty_layered(width, height, channels, &[AtlasLayer::new(0, GlyphStyle::Regular)])
+    }
+
+    /// [`FontAtlas::empty`] with a declared layer table - the runtime shell
+    /// for a consumer generating cells into more than one layer
+    /// (`gpu::MsdfCompute` over a style face, filed under
+    /// [`GlyphStyle::styled_glyph_id`] with the layer set on the entry).
+    ///
+    /// A layer of `size_px: 0` means "not baked at a declared size", which is
+    /// what a runtime atlas is: its cells are generated at whatever size was
+    /// asked for. [`FontAtlas::layer_index`] will not match such a layer
+    /// against a real size, and that is correct - a caller asking for the 16px
+    /// layer of an atlas that has none should be refused.
+    pub fn empty_layered(
+        width: u32,
+        height: u32,
+        channels: u32,
+        layers: &[AtlasLayer],
+    ) -> Self {
+        let layers: Vec<AtlasLayer> = if layers.is_empty() {
+            vec![AtlasLayer::new(0, GlyphStyle::Regular)]
+        } else {
+            layers.to_vec()
+        };
         Self {
             width,
             height,
             channels,
-            pixel_data: vec![0; (width * height * channels) as usize],
+            pixel_data: vec![
+                0;
+                (width as usize) * (height as usize) * (channels as usize) * layers.len()
+            ],
             glyphs: Vec::new(),
+            layers,
             // No face was measured, so there is nothing to say. A consumer
             // that needs a baseline here gets `FALLBACK_BASELINE_FRAC` and
             // knows it is a fallback, rather than a plausible-looking number
@@ -872,8 +1219,8 @@ pub fn cap_height(face: &ttf_parser::Face) -> f64 {
 /// because a texture whose WIDTH changed would move every glyph's `u` in
 /// `sdf_render.wgsl`, exactly as a changing height moves every `v`.
 ///
-/// # This is the binding constraint on capacity, and it is a COST rather than a
-/// limit
+/// # This is the binding constraint on ONE LAYER's capacity, and it is a COST
+/// rather than a limit
 ///
 /// [`ATLAS_ROWS`] argues that 40 rows is the largest pin that fits the weakest
 /// target, which is true at 8 columns and reads as though the grid were full.
@@ -881,12 +1228,16 @@ pub fn cap_height(face: &ttf_parser::Face) -> f64 {
 /// uses 19% of the area the weakest target guarantees. **16 columns at the same
 /// 40 rows is 800x2000 - inside the same floor - and holds 640 cells.**
 ///
-/// That matters now because a [`GlyphStyle`] is 205 cells (191 declared
-/// codepoints plus 14 shaped forms) and only 96 are free, so emphasis does not
-/// fit and nothing about ROWS can make it. What widening costs is a one-time
-/// re-bake in which every glyph's `u` moves and every review fixture is
-/// re-blessed once - a decision for whoever owns the frames, which is why it is
-/// recorded here rather than taken.
+/// That used to be the only way emphasis could be baked: a [`GlyphStyle`] is
+/// 205 cells (191 declared codepoints plus 14 shaped forms), 96 were free, and
+/// nothing about ROWS could make room. **[`AtlasLayer`] retired that
+/// argument.** A style is a second LAYER, with its own 320 cells, so widening
+/// this buys nothing emphasis needs and still costs the one-time re-bake in
+/// which every glyph's `u` moves and every review fixture is re-blessed once.
+///
+/// What would still want columns is a wider vocabulary AT ONE SIZE AND CUT -
+/// a symbol set that outgrew 320 cells of regular text plus icons. That has
+/// not happened; the shipped layer is 224 of 320.
 pub const ATLAS_COLS: u32 = 8;
 
 /// **Rows of glyph cells the atlas is baked to, whether or not they are used**
@@ -913,7 +1264,9 @@ pub const ATLAS_COLS: u32 = 8;
 ///
 /// # Why 40, and what the budget is
 ///
-/// 40 rows x [`ATLAS_COLS`] = **320 cells**. At the shipped 48px cell that is
+/// 40 rows x [`ATLAS_COLS`] = **320 cells**, **per [`AtlasLayer`]**. The
+/// figures below describe the layer the shipped coverage is in; a style or a
+/// second point size is a second layer with its own 320, not a claim on these. At the shipped 48px cell that is
 /// `8 * 50 = 400` x `40 * 50 = 2000` px, inside the **2048** floor that
 /// `wgpu::Limits::downlevel_defaults()` and `downlevel_webgl2_defaults()` set
 /// for `max_texture_dimension_2d` (WebGPU's own default is 8192 and desktop /
@@ -943,10 +1296,14 @@ pub const ATLAS_COLS: u32 = 8;
 ///
 /// Raising it past 40 rows is not a packing decision — at 48px cells it puts
 /// the texture over 2048 and becomes a question about which GPUs we support.
+/// **And a texture ARRAY does not relax it**: every layer of an array shares
+/// the array's dimensions, so 2050px is over the floor whether one layer needs
+/// it or all of them do. Growth is layers, or columns; never rows.
 pub const ATLAS_ROWS: u32 = 40;
 
-/// Glyph cells one baked atlas holds: [`ATLAS_ROWS`] x [`ATLAS_COLS`].
-/// [`FontAtlasBuilder::build`] fails rather than silently growing past it.
+/// Glyph cells one baked atlas layer holds: [`ATLAS_ROWS`] x [`ATLAS_COLS`].
+/// [`FontAtlasBuilder::build`] fails rather than silently growing past it, and
+/// it checks PER LAYER - see [`AtlasLayer`] for what shares one.
 pub const fn atlas_capacity() -> usize {
     (ATLAS_ROWS * ATLAS_COLS) as usize
 }
@@ -1408,6 +1765,9 @@ impl FontAtlasBuilder {
             atlas_y: 0,
             atlas_w: gs as u16,
             atlas_h: gs as u16,
+            // Filled in by `build` once the cell is placed - this method bakes
+            // a cell, and which layer it lands in is the layout's business.
+            layer: 0,
             advance_x: {
                 let upem = face25.units_per_em() as f32;
                 face25
@@ -1516,15 +1876,55 @@ impl FontAtlasBuilder {
         let channels = 3u32;
 
         let atlas_w = ATLAS_COLS * padded;
-        let mut packer = ShelfPacker::new(atlas_w);
 
         struct Placed {
             cell: BakedGlyphCell,
+            layer: u16,
             atlas_x: u32,
             atlas_y: u32,
         }
 
         let order = self.cell_order();
+
+        // **The layer table, from the queue.** One layer per
+        // `(glyph_size, style)`, and a builder bakes at one size, so this is
+        // the styles present - in `GlyphStyle` order, which puts
+        // [`GlyphStyle::Regular`] at layer 0 whenever it is present at all.
+        //
+        // That is the regression bar in one line: an unstyled bake has exactly
+        // one layer, its packer is the packer it always was, and its pixel
+        // data is the same length at the same offsets. Adding a style adds a
+        // LAYER instead of competing for the 320 cells of this one, which is
+        // what unblocks a styled bake without moving a single existing `u`.
+        let layers: Vec<AtlasLayer> = {
+            let mut ls: Vec<AtlasLayer> = order
+                .iter()
+                .map(|k| AtlasLayer::new(self.glyph_size as u16, k.set().style()))
+                .collect();
+            ls.sort_unstable();
+            ls.dedup();
+            ls
+        };
+        if layers.len() > MAX_ATLAS_LAYERS {
+            return Err(format!(
+                "{} layers queued, but maxTextureArrayLayers guarantees only {MAX_ATLAS_LAYERS}",
+                layers.len()
+            ));
+        }
+        let layer_of = |key: &CellKey| -> u16 {
+            let want = AtlasLayer::new(self.glyph_size as u16, key.set().style());
+            layers
+                .iter()
+                .position(|&l| l == want)
+                .expect("every queued cell's layer is in the table built from those cells")
+                as u16
+        };
+
+        // One packer PER LAYER: a layer is its own texture rectangle with its
+        // own grid, so cell 0 of every layer is at the same coordinates and a
+        // layer's numbering cannot be perturbed by another layer's contents.
+        let mut packers: Vec<ShelfPacker> =
+            layers.iter().map(|_| ShelfPacker::new(atlas_w)).collect();
         let mut placed = Vec::with_capacity(self.queued_glyphs.len());
         for key in &order {
             let address = key.glyph_id();
@@ -1537,8 +1937,9 @@ impl FontAtlasBuilder {
                 .style_face(style)
                 .expect("checked above: every queued style has a registered face");
             let cell = self.bake_cell_of(face_data, raw, address)?;
-            let (x, y) = packer.pack(padded, padded);
-            placed.push(Placed { cell, atlas_x: x + 1, atlas_y: y + 1 });
+            let layer = layer_of(key);
+            let (x, y) = packers[layer as usize].pack(padded, padded);
+            placed.push(Placed { cell, layer, atlas_x: x + 1, atlas_y: y + 1 });
         }
 
         // **The set header, measured off the cells that were just baked** -
@@ -1598,28 +1999,44 @@ impl FontAtlasBuilder {
             sets
         };
 
-        if placed.len() > atlas_capacity() {
-            return Err(format!(
-                "{} glyphs queued, but the atlas is pinned at {} cells ({ATLAS_ROWS} rows x \
-                 {ATLAS_COLS} columns) - read ATLAS_COLS and then ATLAS_ROWS before raising \
-                 either; columns are the axis with headroom and rows are the one without",
-                placed.len(),
-                atlas_capacity()
-            ));
+        // **The pin is per LAYER now**, which is the whole point of the layer
+        // axis: 320 cells stopped being the atlas's budget and became one
+        // layer's.
+        for (i, layer) in layers.iter().enumerate() {
+            let n = placed.iter().filter(|p| p.layer as usize == i).count();
+            if n > atlas_capacity() {
+                return Err(format!(
+                    "layer {i} ({layer}) has {n} cells, but a layer is pinned at {} \
+                     ({ATLAS_ROWS} rows x {ATLAS_COLS} columns) - read ATLAS_COLS and then \
+                     ATLAS_ROWS before raising either; columns are the axis with headroom and \
+                     rows are the one without. A second STYLE is a second layer and does not \
+                     spend this budget; a wider vocabulary at one size does",
+                    atlas_capacity()
+                ));
+            }
         }
         // **Pinned, not fitted** — see [`ATLAS_ROWS`]. `used_height` is still the
         // floor for a degenerate bake with a huge cell, which cannot happen at
-        // the shipped 48px but is not worth being wrong about.
-        let atlas_h = packer.used_height().max(ATLAS_ROWS * padded).max(1);
-        let mut pixel_data = vec![0u8; (atlas_w * atlas_h * channels) as usize];
+        // the shipped 48px but is not worth being wrong about. Taken over every
+        // layer, because an array's layers share the array's dimensions.
+        let atlas_h = packers
+            .iter()
+            .map(|p| p.used_height())
+            .max()
+            .unwrap_or(0)
+            .max(ATLAS_ROWS * padded)
+            .max(1);
+        let layer_texels = (atlas_w as usize) * (atlas_h as usize) * (channels as usize);
+        let mut pixel_data = vec![0u8; layer_texels * layers.len()];
         let mut glyphs = Vec::with_capacity(placed.len());
 
         for p in &mut placed {
+            let layer_base = (p.layer as usize) * layer_texels;
             for row in 0..gs {
                 for col in 0..gs {
                     let src_idx = ((row * gs + col) * channels) as usize;
-                    let dst_idx =
-                        (((p.atlas_y + row) * atlas_w + p.atlas_x + col) * channels) as usize;
+                    let dst_idx = layer_base
+                        + (((p.atlas_y + row) * atlas_w + p.atlas_x + col) * channels) as usize;
                     if src_idx + 2 < p.cell.rgb.len() && dst_idx + 2 < pixel_data.len() {
                         pixel_data[dst_idx] = p.cell.rgb[src_idx];
                         pixel_data[dst_idx + 1] = p.cell.rgb[src_idx + 1];
@@ -1630,6 +2047,7 @@ impl FontAtlasBuilder {
             let mut entry = p.cell.entry;
             entry.atlas_x = p.atlas_x as u16;
             entry.atlas_y = p.atlas_y as u16;
+            entry.layer = p.layer;
             glyphs.push(entry);
         }
         // The table is the LOOKUP order; the cells above were the layout. Each
@@ -1644,6 +2062,7 @@ impl FontAtlasBuilder {
             pixel_data,
             glyphs,
             sets,
+            layers,
         })
     }
 
@@ -1734,6 +2153,7 @@ mod tests {
             atlas_y: 1,
             atlas_w: 48,
             atlas_h: 48,
+            layer: 0,
             advance_x: 0.5,
             baseline_row: 33.45,
             px_per_em: 36.923,
@@ -1747,15 +2167,37 @@ mod tests {
         assert!(err.contains("bake_atlas"), "the message must name the fix: {err}");
     }
 
-    /// A file whose version is not ours stops too, for the same reason.
+    /// A file whose version is neither of ours stops too, for the same reason.
+    ///
+    /// Written against [`ATLAS_VERSION_LAYERED`] rather than
+    /// [`ATLAS_VERSION`] because "one past what this build writes" is now two
+    /// numbers, and the one that must be refused is the one past the HIGHER.
     #[test]
     fn a_future_version_is_refused() {
         let mut buf = Vec::new();
         buf.extend_from_slice(ATLAS_MAGIC);
-        buf.extend_from_slice(&(ATLAS_VERSION + 1).to_le_bytes());
+        buf.extend_from_slice(&(ATLAS_VERSION_LAYERED + 1).to_le_bytes());
         buf.resize(ATLAS_HEADER_SIZE, 0);
-        let err = FontAtlas::from_bytes(&buf).expect_err("a v3 atlas must not load");
+        let err = FontAtlas::from_bytes(&buf).expect_err("a v5 atlas must not load");
         assert!(err.contains("version"), "{err}");
+    }
+
+    /// **Both versions this build reads are read, and nothing between them is
+    /// invented.** The pair is stated here so that adding a third is a change
+    /// to a test rather than a silent widening.
+    #[test]
+    fn the_two_versions_this_build_reads() {
+        assert_eq!((ATLAS_VERSION, ATLAS_VERSION_LAYERED), (3, 4));
+        for bad in [0u32, 1, 2, 5, u32::MAX] {
+            let mut buf = Vec::new();
+            buf.extend_from_slice(ATLAS_MAGIC);
+            buf.extend_from_slice(&bad.to_le_bytes());
+            buf.resize(ATLAS_HEADER_SIZE, 0);
+            assert!(
+                FontAtlas::from_bytes(&buf).is_err(),
+                "version {bad} must not load"
+            );
+        }
     }
 
     /// The set header survives a round trip, every field of it.
@@ -1768,6 +2210,7 @@ mod tests {
             atlas_y: 0,
             atlas_w: 4,
             atlas_h: 4,
+            layer: 0,
             advance_x: 0.5,
             baseline_row: 2.5,
             px_per_em: 3.0,
@@ -1886,7 +2329,7 @@ mod tests {
     fn empty_atlas_insert_entry() {
         let mut atlas = FontAtlas::empty(64, 64, 3);
         let e = GlyphEntry {
-            glyph_id: 7, atlas_x: 1, atlas_y: 1, atlas_w: 32, atlas_h: 32,
+            glyph_id: 7, atlas_x: 1, atlas_y: 1, atlas_w: 32, atlas_h: 32, layer: 0,
             advance_x: 0.5, baseline_row: 24.0, px_per_em: 24.6, x_margin: 4.8,
         };
         let idx = atlas.insert_entry(e);
@@ -1906,7 +2349,7 @@ mod tests {
     fn insert_entry_keeps_the_table_searchable_out_of_order() {
         let mut atlas = FontAtlas::empty(64, 64, 3);
         let entry = |glyph_id: u16| GlyphEntry {
-            glyph_id, atlas_x: 1, atlas_y: 1, atlas_w: 32, atlas_h: 32,
+            glyph_id, atlas_x: 1, atlas_y: 1, atlas_w: 32, atlas_h: 32, layer: 0,
             advance_x: glyph_id as f32 / 100.0, baseline_row: 24.0,
             px_per_em: 24.6, x_margin: 4.8,
         };

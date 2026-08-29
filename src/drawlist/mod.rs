@@ -1552,7 +1552,7 @@ mod tests {
             let gid = shaper.glyph_id_for_char(ch).unwrap();
             atlas.insert_entry(crate::font::GlyphEntry {
                 glyph_id: gid,
-                atlas_x: 1, atlas_y: 1, atlas_w: 48, atlas_h: 48,
+                atlas_x: 1, atlas_y: 1, atlas_w: 48, atlas_h: 48, layer: 0,
                 advance_x: 0.5, baseline_row: 36.0, px_per_em: 36.9, x_margin: 7.2,
             });
         }
@@ -1683,7 +1683,7 @@ mod tests {
             let gid = shaper.glyph_id_for_char(ch).unwrap();
             atlas.insert_entry(crate::font::GlyphEntry {
                 glyph_id: gid,
-                atlas_x: 1, atlas_y: 1, atlas_w: 48, atlas_h: 48,
+                atlas_x: 1, atlas_y: 1, atlas_w: 48, atlas_h: 48, layer: 0,
                 advance_x: 0.5, baseline_row: 36.0, px_per_em: 36.9, x_margin: 7.2,
             });
         }
@@ -2230,6 +2230,7 @@ mod tests {
             atlas_y: 651,
             atlas_w: 48,
             atlas_h: 48,
+            layer: 0,
             advance_x: 0.625,
             baseline_row: 33.45,
             px_per_em: 36.923077,

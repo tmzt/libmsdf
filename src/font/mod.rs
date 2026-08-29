@@ -20,10 +20,12 @@ pub mod packer;
 pub mod shaper;
 
 pub use atlas::{
-    ATLAS_COLS, ATLAS_HEADER_SIZE, ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, CAP_TOP_FRAC,
+    ATLAS_COLS, ATLAS_HEADER_SIZE, ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, ATLAS_VERSION_LAYERED,
+    AtlasLayer, CAP_TOP_FRAC,
     CELL_EM_RATIO, FALLBACK_BASELINE_FRAC, FALLBACK_CAP_HEIGHT_EM, FALLBACK_MAX_INK_DESCENT_EM,
     FontAtlas, FontAtlasBuilder,
-    GlyphProjection, SetMetrics, StyledGlyphError, atlas_capacity, cap_height, glyph_projection,
+    GlyphProjection, LayerNotBaked, MAX_ATLAS_LAYERS, SetMetrics, StyledGlyphError, atlas_capacity,
+    cap_height, glyph_projection,
 };
 pub use glyph_table::GlyphEntry;
 pub use manager::{AtlasManager, AtlasRegion};
@@ -435,13 +437,24 @@ impl GlyphSet {
 ///
 /// # Why this and not one more atlas
 ///
-/// A second atlas texture per style is the obvious alternative and it is a
-/// RENDERER change: another bind group, another sampler, another set of
-/// dimensions in `sdf_render.wgsl`, and a draw list that has to know which
-/// texture each glyph came from. The prefix keeps every one of those the same
-/// - the draw list already packs a 16-bit glyph id, and it packs a styled one
-/// without noticing. What it costs instead is CELLS, which is a budget
-/// question with a measured answer: see [`crate::ATLAS_ROWS`].
+/// A prefixed id and a second texture are not alternatives, and reading them
+/// as one was this doc's mistake. The prefix answers *which face does this
+/// glyph belong to*; a texture answers *where do its texels live*. Both are
+/// needed, and the prefix is what lets the second be cheap.
+///
+/// What was wrong here: a second texture per style was called *"a RENDERER
+/// change: another bind group, another sampler, another set of dimensions in
+/// `sdf_render.wgsl`, and a draw list that has to know which texture each
+/// glyph came from."* Measured, it is none of those. The atlas is sampled
+/// through an INDIRECTION already - the glyph table - so a texture-array layer
+/// index goes in the TABLE (`g1.w`, which was the constant zero and read
+/// nowhere) and the draw list keeps packing a bare 16-bit glyph id, never
+/// learning that textures are plural. See [`crate::AtlasLayer`].
+///
+/// So the cost is not CELLS after all. A style is a second LAYER with its own
+/// [`crate::ATLAS_ROWS`] x [`crate::ATLAS_COLS`] grid, which is what unblocked
+/// a styled bake: 224 + 205 + 205 cells do not fit one 320-cell grid and do fit
+/// three.
 ///
 /// # `BoldItalic` is addressable and unbaked, deliberately
 ///

@@ -55,13 +55,32 @@
 //! coordinates, and a frame that moves after a styled re-bake is a real
 //! finding.
 //!
-//! **No styled bake fits the pinned grid today**, and this tool will say so
-//! rather than truncate: the shipped coverage is 224 cells of 320 and a style
-//! is 205 (191 declared codepoints plus 14 shaped forms). The binding
-//! constraint is [`libmsdf::ATLAS_COLS`], not [`libmsdf::ATLAS_ROWS`] - the
-//! texture is 400x2000 inside a 2048 floor, and it is 8 columns wide because
-//! widening it moves every glyph's `u` and re-blesses every frame, which is a
-//! one-time cost rather than a limit. At 16 columns the same 40 rows hold 640.
+//! # `--style` fits now, because a style is a LAYER
+//!
+//! It did not when this flag was written: the shipped coverage is 224 cells of
+//! a 320-cell grid, a style is 205 (191 declared codepoints plus 14 shaped
+//! forms), and the grid was the whole atlas's budget. It is now one
+//! [`libmsdf::AtlasLayer`]'s budget - a layer is `(point size, style)` - so
+//! `--style bold --style italic` bakes 634 cells into three layers of 224, 205
+//! and 205, and the texture is the same 400x2000 it was.
+//!
+//! Two consequences for anyone running this:
+//!
+//! * **A styled atlas is written at [`libmsdf::ATLAS_VERSION_LAYERED`]**, and a
+//!   build that reads only [`libmsdf::ATLAS_VERSION`] refuses it by name. An
+//!   UNSTYLED bake is still v3, byte for byte what it was, which is why the
+//!   three committed atlases did not have to be re-baked for any of this.
+//! * **The consumer has to create its texture with the layer count.** wgpu
+//!   fixes an array's layers at creation, so
+//!   `GpuSdfRenderer::new_with_msdf_layers(.., atlas.layer_count())` is
+//!   required before a layered atlas will draw; `upload_msdf_atlas` uploads
+//!   every layer it is given and logs an error if the texture has fewer.
+//!
+//! MEASURED on the merged 48px face, gzip -9: the base atlas is 297,737 bytes,
+//! `--style bold` is 599,577 (+301,840) and `--style bold --style italic` is
+//! 942,284 (+342,707 for italic). Raw size is not the measure here - the
+//! texture is pinned, so a layer adds its whole 400x2000 rectangle whether or
+//! not the cells fill it, and most of that is zeros.
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {

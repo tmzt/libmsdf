@@ -317,6 +317,7 @@ fn a_runtime_appended_styled_cell_is_addressable() {
         atlas_y: 0,
         atlas_w: 16,
         atlas_h: 16,
+        layer: 0,
         advance_x: 0.536,
         baseline_row: 11.15,
         px_per_em: 12.3,
@@ -605,16 +606,14 @@ mod baked {
     }
 
     /// The texels of one cell, for comparing two bakes at the pixel level.
+    ///
+    /// **Delegated to the atlas rather than written out here**, because a cell
+    /// address gained a second term - the LAYER - and this used to compute the
+    /// first one only. A layer-blind read of a bold cell returns plausible
+    /// bytes from the regular layer instead of failing, so the comparison and
+    /// the shader have to agree about where a cell is by construction.
     fn cell_pixels(a: &FontAtlas, glyph_id: u16) -> Vec<u8> {
-        let e = a.get_glyph(glyph_id).expect("a cell for this glyph");
-        let mut out = Vec::new();
-        for dy in 0..e.atlas_h as u32 {
-            let row = (e.atlas_y as u32 + dy) * a.width + e.atlas_x as u32;
-            let start = (row * a.channels) as usize;
-            let len = (e.atlas_w as u32 * a.channels) as usize;
-            out.extend_from_slice(&a.pixel_data[start..start + len]);
-        }
-        out
+        a.cell_texels(glyph_id).expect("a cell for this glyph")
     }
 
     /// **Adding bold moved nothing** - not an entry, not a cell coordinate, not
@@ -625,6 +624,15 @@ mod baked {
         let (plain, styled) = (regular_only(), regular_and_bold());
         assert_eq!(plain.width, styled.width, "the texture width moved");
         assert_eq!(plain.height, styled.height, "the texture height moved");
+        // The style arrives as a LAYER, which is what keeps it from competing
+        // for the 320 cells the regular coverage is packed into.
+        assert_eq!(plain.layer_count(), 1);
+        assert_eq!(styled.layer_count(), 2);
+        assert_eq!(
+            plain.pixel_data,
+            styled.pixel_data[..styled.layer_offset(1)],
+            "layer 0's texels changed when bold was added"
+        );
         assert!(plain.glyphs.len() >= 96, "vacuity: the plain bake is nearly empty");
         assert!(styled.glyphs.len() > plain.glyphs.len() + 190, "bold did not arrive");
 

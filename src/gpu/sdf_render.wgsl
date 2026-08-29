@@ -97,12 +97,15 @@ struct GpuTexture {
 // binding 8 merged into uniforms (texture_bank)
 
 // MSDF atlas for high-quality text rendering
-@group(0) @binding(9)  var msdf_atlas: texture_2d<f32>;
+// A texture ARRAY: the layer is `(point size, style)` and it is selected per
+// GLYPH, from `g1.w` of the table below - never from the draw list, which still
+// packs a bare 16-bit glyph id and does not know textures are plural.
+@group(0) @binding(9)  var msdf_atlas: texture_2d_array<f32>;
 @group(0) @binding(10) var msdf_sampler: sampler;
 
 // Per-glyph atlas lookup: 2 × vec4<u32> per entry
 // g0 = [glyph_id, atlas_xy_packed, atlas_wh_packed, advance_x_bits]
-// g1 = [baseline_row_bits, px_per_em_bits, x_margin_bits, 0]
+// g1 = [baseline_row_bits, px_per_em_bits, x_margin_bits, atlas_layer]
 @group(0) @binding(11) var<storage, read> glyph_table: array<vec4<u32>>;
 
 // Aux per-instance data: Bezier control points (C1.xy, C2.xy), a line's far
@@ -491,6 +494,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                     let baseline_row = bitcast<f32>(g1.x);
                     let px_per_em_atlas = bitcast<f32>(g1.y);
                     let x_margin = bitcast<f32>(g1.z);
+                    // Which array layer this cell lives in. Was the constant
+                    // 0 and read nowhere, so a table uploaded from an atlas
+                    // that has one layer selects layer 0 exactly as before.
+                    let atlas_layer = g1.w;
 
                     // Scale: atlas pixels per screen pixel.
                     // To avoid clipping, we map the entire line_h box to the entire atlas_gh cell.
@@ -527,8 +534,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                     let acy = (effective_pixel.y - gy) * scale;
 
                     // Sample within cell, MSDF masks via distance field
+                    // The layer bound is checked with the cell bounds, and
+                    // it SKIPS THE DRAW rather than clamping: a clamped array
+                    // index samples layer 0, which draws a real glyph from the
+                    // wrong cut at the wrong size - the wrong render that
+                    // looks right. Nothing at all is the honest failure, and
+                    // the CPU side refuses the mismatch before a frame
+                    // (`upload_msdf_atlas`). The advance is applied either way,
+                    // so a run's layout does not depend on it.
                     if acx >= 0.0 && acx < atlas_gw &&
-                       acy >= 0.0 && acy < atlas_gh {
+                       acy >= 0.0 && acy < atlas_gh &&
+                       atlas_layer < textureNumLayers(msdf_atlas) {
                         // Offset by 0.5 to sample from pixel centers and avoid edge bleed
                         let u = (atlas_gx + acx + 0.5) / atlas_dim.x;
                         let v = (atlas_gy + acy + 0.5) / atlas_dim.y;
@@ -539,7 +555,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                         // implicit-derivative sampling there is UB in
                         // WGSL. MSDF atlases are single-level, so LOD 0
                         // is exact and derivative-free.
-                        let sample = textureSampleLevel(msdf_atlas, msdf_sampler, vec2<f32>(u, v), 0.0);
+                        let sample = textureSampleLevel(msdf_atlas, msdf_sampler, vec2<f32>(u, v), atlas_layer, 0.0);
                         let sd = msdf_median(sample.r, sample.g, sample.b);
 
                         // Standard: sd > 0.5 is inside. (sd - 0.5) *
