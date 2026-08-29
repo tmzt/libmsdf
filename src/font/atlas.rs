@@ -940,6 +940,15 @@ impl FontAtlas {
     /// asked for. [`FontAtlas::layer_index`] will not match such a layer
     /// against a real size, and that is correct - a caller asking for the 16px
     /// layer of an atlas that has none should be refused.
+    ///
+    /// **A single-layer atlas serialized and reloaded comes back with its
+    /// size MEASURED**, not with the zero: a v3 file carries no layer table,
+    /// so [`FontAtlas::from_bytes`] reads the size off the cells. That is a
+    /// gain rather than a round-trip defect - the reloaded atlas says what its
+    /// cells actually are - but it does mean `empty` plus appends is not a
+    /// fixed point through the file, and `a_runtime_shell_gains_its_measured
+    /// _size_through_the_file` pins the behaviour so it cannot drift into
+    /// being one silently.
     pub fn empty_layered(
         width: u32,
         height: u32,

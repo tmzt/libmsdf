@@ -303,6 +303,35 @@ fn a_file_declaring_more_layers_than_the_guarantee_is_refused() {
     assert!(err.contains("256"), "{err}");
 }
 
+/// **A runtime shell gains its measured size through the file.**
+///
+/// `FontAtlas::empty` declares `size_px: 0` because nothing was baked at a
+/// declared size; a v3 file has no layer table, so the size is read off the
+/// cells on the way back in. Stated here because it is the one place a
+/// round trip is deliberately not a fixed point, and an undocumented
+/// not-a-fixed-point is how a "harmless" normalisation gets added later.
+#[test]
+fn a_runtime_shell_gains_its_measured_size_through_the_file() {
+    let mut atlas = FontAtlas::empty(64, 64, 3);
+    assert_eq!(atlas.layers, vec![AtlasLayer::new(0, GlyphStyle::Regular)]);
+    atlas.insert_entry(GlyphEntry {
+        glyph_id: 7,
+        atlas_x: 0,
+        atlas_y: 0,
+        atlas_w: 32,
+        atlas_h: 32,
+        layer: 0,
+        advance_x: 0.5,
+        baseline_row: 24.0,
+        px_per_em: 24.6,
+        x_margin: 4.8,
+    });
+    let back = FontAtlas::from_bytes(&atlas.to_bytes()).expect("a runtime shell serializes");
+    assert_eq!(back.layers, vec![AtlasLayer::new(32, GlyphStyle::Regular)]);
+    assert_eq!(back.glyphs, atlas.glyphs);
+    assert_eq!(back.pixel_data, atlas.pixel_data);
+}
+
 // ── the seam: one formula for where a cell is ───────────────────────────
 
 /// **A cell's texels come from the cell's OWN layer.**
