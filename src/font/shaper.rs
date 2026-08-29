@@ -272,6 +272,167 @@ impl TextShaper {
     }
 }
 
+/// **One shaper per [`crate::font::GlyphStyle`]**, and a refusal for a style it has no face
+/// for.
+///
+/// # Why a styled run cannot be shaped by the regular face
+///
+/// Emphasis is not a property a renderer can add to a shaped run. The bold
+/// letterforms live in a different FILE, with their own `cmap`, their own
+/// advances, their own kerning and their own ligatures - Roboto's italic `a`
+/// is a different letter shape, not a slanted one. So "shape this in bold"
+/// means "shape it with the bold face", and the glyph ids that come back are
+/// that face's, meaningless against the regular one.
+///
+/// # It hands back ADDRESSES, not the face's own ids
+///
+/// Every [`ShapedGlyph::glyph_id`] in a run from [`StyledShaper::shape`] has
+/// already been through [`crate::font::GlyphStyle::styled_glyph_id`], so it is an atlas
+/// address and [`crate::font::FontAtlas::get_glyph`] takes it directly. Two consequences
+/// worth being explicit about:
+///
+/// * Nothing downstream of shaping needs to learn about styles. The draw list
+///   packs a 16-bit glyph id and packs a styled one without noticing.
+/// * A regular run is bit-for-bit the run it was before this type existed
+///   ([`crate::font::GlyphStyle::Regular`] is prefix 0), so this cannot change what any
+///   existing caller draws.
+///
+/// [`ShapedRun::notdef_count`] still counts, because the placeholder is
+/// address 0 in every style.
+///
+/// # The refusal is the point of the type
+///
+/// [`StyledShaper::shape`] returns `Err` for a style with no face. It does not
+/// fall back to the regular one, for [`crate::font::msymbols_codepoint`]'s
+/// reason: upright text where the document said emphasis is a wrong render
+/// that looks like a correct one, and the only place the gap can still be
+/// reported is here.
+pub struct StyledShaper {
+    faces: Vec<(crate::font::GlyphStyle, TextShaper)>,
+}
+
+/// Why a styled shape came back empty: [`StyledShaper`] has no face for that
+/// style. Distinct from [`crate::font::StyledGlyphError`], which is the same
+/// question asked of an ATLAS - a caller can have the face and not the cells,
+/// or the cells and not the face, and the two are fixed in different places.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoFaceForStyle(pub crate::font::GlyphStyle);
+
+impl core::fmt::Display for NoFaceForStyle {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "no {:?} face is loaded - shaping with the regular one would draw upright text \
+             where the document said emphasis",
+            self.0
+        )
+    }
+}
+
+impl StyledShaper {
+    /// A shaper carrying only [`crate::font::GlyphStyle::Regular`], from an explicit face.
+    pub fn new(regular: Vec<u8>) -> Result<Self, &'static str> {
+        Ok(Self {
+            faces: vec![(crate::font::GlyphStyle::Regular, TextShaper::new(regular)?)],
+        })
+    }
+
+    /// The bundled answer: `regular` plus every style
+    /// [`crate::font::bundled_style_face`] ships a face for.
+    ///
+    /// `regular` is passed in rather than assumed because there are two of them
+    /// ([`crate::font::ROBOTO_REGULAR_ASCII`] and
+    /// [`crate::font::ROBOTO_ASCII_MSYMBOLS`]) and only the caller knows which
+    /// atlas it is drawing against. The style faces are the same for both -
+    /// they carry no icons at all, by [`crate::font::ROBOTO_BOLD_ASCII`]'s
+    /// argument.
+    pub fn bundled(regular: Vec<u8>) -> Result<Self, &'static str> {
+        let mut shaper = Self::new(regular)?;
+        for &style in crate::font::GlyphStyle::ALL {
+            if let Some(face) = crate::font::bundled_style_face(style) {
+                if style != crate::font::GlyphStyle::Regular {
+                    shaper = shaper.with_face(style, face.to_vec())?;
+                }
+            }
+        }
+        Ok(shaper)
+    }
+
+    /// Attach a face for `style`. Refuses a style that already has one rather
+    /// than picking a winner.
+    pub fn with_face(
+        mut self,
+        style: crate::font::GlyphStyle,
+        font_data: Vec<u8>,
+    ) -> Result<Self, &'static str> {
+        if self.carries(style) {
+            return Err("that style already has a face on this shaper");
+        }
+        self.faces.push((style, TextShaper::new(font_data)?));
+        Ok(self)
+    }
+
+    /// Whether a face is loaded for `style`. Asked BEFORE shaping by a caller
+    /// that wants to degrade deliberately rather than by accident.
+    pub fn carries(&self, style: crate::font::GlyphStyle) -> bool {
+        self.faces.iter().any(|(s, _)| *s == style)
+    }
+
+    /// Every style this shaper can set, in [`crate::font::GlyphStyle::ALL`]
+    /// order.
+    pub fn styles(&self) -> Vec<crate::font::GlyphStyle> {
+        crate::font::GlyphStyle::ALL
+            .iter()
+            .copied()
+            .filter(|&s| self.carries(s))
+            .collect()
+    }
+
+    /// The face for one style, for a caller that needs the plain
+    /// [`TextShaper`] API (coverage, grapheme boundaries, metrics).
+    pub fn face(&self, style: crate::font::GlyphStyle) -> Result<&TextShaper, NoFaceForStyle> {
+        self.faces
+            .iter()
+            .find(|(s, _)| *s == style)
+            .map(|(_, shaper)| shaper)
+            .ok_or(NoFaceForStyle(style))
+    }
+
+    /// **Shape `text` in `style`**, with atlas addresses for glyph ids.
+    ///
+    /// A glyph the face numbers above [`crate::font::MAX_RAW_GLYPH_ID`] cannot
+    /// be addressed, and becomes the placeholder (address 0) rather than
+    /// another style's cell - the same answer the shaper already gives for a
+    /// codepoint the face cannot draw, and countable the same way.
+    pub fn shape(
+        &self,
+        style: crate::font::GlyphStyle,
+        text: &str,
+    ) -> Result<ShapedRun, NoFaceForStyle> {
+        let mut run = self.face(style)?.shape(text);
+        for glyph in &mut run.glyphs {
+            glyph.glyph_id = style.styled_glyph_id(glyph.glyph_id).unwrap_or(0);
+        }
+        Ok(run)
+    }
+
+    /// **This codepoint, in this style**: the atlas address, or `None` when the
+    /// style's face does not cover it.
+    ///
+    /// The cmap form of [`StyledShaper::shape`], for a caller checking one
+    /// character rather than laying out a run.
+    pub fn glyph_id_for_char(
+        &self,
+        style: crate::font::GlyphStyle,
+        ch: char,
+    ) -> Result<Option<u16>, NoFaceForStyle> {
+        Ok(self
+            .face(style)?
+            .glyph_id_for_char(ch)
+            .and_then(|raw| style.styled_glyph_id(raw)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

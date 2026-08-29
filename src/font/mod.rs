@@ -23,13 +23,13 @@ pub use atlas::{
     ATLAS_COLS, ATLAS_HEADER_SIZE, ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, CAP_TOP_FRAC,
     CELL_EM_RATIO, FALLBACK_BASELINE_FRAC, FALLBACK_CAP_HEIGHT_EM, FALLBACK_MAX_INK_DESCENT_EM,
     FontAtlas, FontAtlasBuilder,
-    GlyphProjection, SetMetrics, atlas_capacity, cap_height, glyph_projection,
+    GlyphProjection, SetMetrics, StyledGlyphError, atlas_capacity, cap_height, glyph_projection,
 };
 pub use glyph_table::GlyphEntry;
 pub use manager::{AtlasManager, AtlasRegion};
 pub use outline::{Edge, EdgeKind, GlyphOutline, extract_outline};
 pub use packer::ShelfPacker;
-pub use shaper::{ShapedGlyph, ShapedRun, TextShaper};
+pub use shaper::{NoFaceForStyle, ShapedGlyph, ShapedRun, StyledShaper, TextShaper};
 
 /// **The TEXT coverage of the bundled faces, and there is exactly one of it.**
 ///
@@ -213,6 +213,31 @@ pub const MARKER_ARROW: char = '\u{F8F0}';
 /// vocabulary can grow for years without ever moving the arrowhead's cell.
 /// One set would have put them back on a shared numbering where a new icon
 /// shifts a marker.
+///
+/// # A STYLE is a set too, and every one of them sorts last
+///
+/// A second FACE - Roboto's bold cut - is a second vocabulary by exactly the
+/// argument above: its glyphs are not the regular face's glyphs, they are
+/// allocated by a different `cmap`, and a run has to be able to say which of
+/// the two it means. So bold text is [`GlyphSet::BoldText`] rather than a
+/// second kind of [`GlyphSet::Text`], and [`GlyphStyle`] is the axis that
+/// names the pairing.
+///
+/// Two consequences, and they are the reason this shape was chosen over a
+/// style FIELD beside the set:
+///
+/// * **Every styled set is declared after every unstyled one**, so a bake that
+///   adds bold appends: not one existing cell moves, by the same "growth in
+///   the last set" property the order already had. A style field between the
+///   set and the glyph id would have interleaved instead - bold Text before
+///   regular ShapedText - and renumbered the whole symbol half.
+/// * **The atlas file needed no new field.** [`SetMetrics`] already carries
+///   its set as an ordinal with room above [`GlyphSet::BorrowedIcons`], and
+///   already refuses an ordinal it does not know as "baked by a newer
+///   libmsdf" ([`atlas::SetMetrics`]). A style AXIS in the header would have
+///   widened the row, and widening the row is a format version - which every
+///   committed atlas in the workspace would have had to be re-baked for
+///   ([`ATLAS_VERSION`] says what that cost last time).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum GlyphSet {
@@ -236,6 +261,25 @@ pub enum GlyphSet {
     /// own codepoints, present only in the merged face. Last, because it is
     /// the one set whose glyph ids someone else allocates.
     BorrowedIcons = 5,
+
+    /// [`TEXT_RANGES`] through [`ROBOTO_BOLD_ASCII`]'s `cmap` — the same
+    /// coverage as [`GlyphSet::Text`], in the bold cut. See [`GlyphStyle`] for
+    /// why the STYLE is above the set in the order rather than beside it.
+    BoldText = 6,
+    /// What the shaper emits beyond `cmap` for the bold face. Its own layout
+    /// tables, so its own set — see [`GlyphStyle::shaped_set`].
+    BoldShapedText = 7,
+    /// [`TEXT_RANGES`] through [`ROBOTO_ITALIC_ASCII`]'s `cmap`.
+    ItalicText = 8,
+    /// The italic face's shaped superset.
+    ItalicShapedText = 9,
+    /// [`TEXT_RANGES`] in a bold italic face. **No such face is bundled** -
+    /// this is address space, not a bake, and an atlas that has no cells here
+    /// refuses the style ([`FontAtlas::styled_glyph`]) rather than drawing
+    /// bold. [`GlyphStyle::BoldItalic`] says why it is addressable anyway.
+    BoldItalicText = 10,
+    /// The bold italic face's shaped superset. Also unbaked.
+    BoldItalicShapedText = 11,
 }
 
 impl GlyphSet {
@@ -245,14 +289,54 @@ impl GlyphSet {
     /// variant is a COMPILE ERROR here, not a silently unreachable arm - the
     /// same reason [`CellKey`] can claim to be lossless.
     pub const fn from_ordinal(n: u8) -> Self {
+        match Self::try_from_ordinal(n) {
+            Some(set) => set,
+            None => {
+                panic!("no GlyphSet has this discriminant - a CellKey was built from raw bits")
+            }
+        }
+    }
+
+    /// The variant whose discriminant is `n`, or `None` when this build has no
+    /// such set.
+    ///
+    /// The fallible form exists for ONE caller: `SetMetrics::from_bytes`,
+    /// which reads the ordinal out of an untrusted file and has to refuse a
+    /// set baked by a newer libmsdf rather than panic on it. Everything else
+    /// gets the ordinal from a [`CellKey`] it just built and wants the
+    /// panicking form.
+    pub const fn try_from_ordinal(n: u8) -> Option<Self> {
         match n {
-            0 => GlyphSet::Placeholder,
-            1 => GlyphSet::Text,
-            2 => GlyphSet::ShapedText,
-            3 => GlyphSet::Markers,
-            4 => GlyphSet::OwnedIcons,
-            5 => GlyphSet::BorrowedIcons,
-            _ => panic!("no GlyphSet has this discriminant - a CellKey was built from raw bits"),
+            0 => Some(GlyphSet::Placeholder),
+            1 => Some(GlyphSet::Text),
+            2 => Some(GlyphSet::ShapedText),
+            3 => Some(GlyphSet::Markers),
+            4 => Some(GlyphSet::OwnedIcons),
+            5 => Some(GlyphSet::BorrowedIcons),
+            6 => Some(GlyphSet::BoldText),
+            7 => Some(GlyphSet::BoldShapedText),
+            8 => Some(GlyphSet::ItalicText),
+            9 => Some(GlyphSet::ItalicShapedText),
+            10 => Some(GlyphSet::BoldItalicText),
+            11 => Some(GlyphSet::BoldItalicShapedText),
+            _ => None,
+        }
+    }
+
+    /// **Which style's face this set was baked from.**
+    ///
+    /// [`GlyphStyle::Regular`] for every set that is not a styled one -
+    /// including [`GlyphSet::Markers`] and both icon sets, which are
+    /// style-INVARIANT rather than regular-by-default: they are geometry the
+    /// renderer reaches for and names an app asks for, and there is no bold
+    /// arrowhead ([`FontAtlasBuilder::add_styled_coverage`] queues text ranges
+    /// and nothing else).
+    pub const fn style(self) -> GlyphStyle {
+        match self {
+            GlyphSet::BoldText | GlyphSet::BoldShapedText => GlyphStyle::Bold,
+            GlyphSet::ItalicText | GlyphSet::ItalicShapedText => GlyphStyle::Italic,
+            GlyphSet::BoldItalicText | GlyphSet::BoldItalicShapedText => GlyphStyle::BoldItalic,
+            _ => GlyphStyle::Regular,
         }
     }
 }
@@ -266,9 +350,14 @@ impl GlyphSet {
 /// cannot drift from the join: they are the same number.
 ///
 /// **Lossless, and provably so.** A glyph id is a `u16`, and [`GlyphSet`] has
-/// six variants with explicit discriminants - three bits. Nineteen bits into
+/// twelve variants with explicit discriminants - four bits. Twenty bits into
 /// thirty-two, with [`CellKey::set`] and [`CellKey::glyph_id`] recovering both
 /// exactly; `a_key_round_trips_every_set_and_glyph_id` pins it at the extremes.
+///
+/// The glyph id half is the STYLED one ([`GlyphStyle::styled_glyph_id`]) for a
+/// cell from a style face, which is what keeps two faces' colliding raw ids
+/// apart in one atlas. It is still a `u16` and still the key the table is
+/// looked up by; only its top two bits have gained a meaning.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct CellKey(u32);
 
@@ -308,7 +397,172 @@ impl GlyphSet {
         GlyphSet::Markers,
         GlyphSet::OwnedIcons,
         GlyphSet::BorrowedIcons,
+        GlyphSet::BoldText,
+        GlyphSet::BoldShapedText,
+        GlyphSet::ItalicText,
+        GlyphSet::ItalicShapedText,
+        GlyphSet::BoldItalicText,
+        GlyphSet::BoldItalicShapedText,
     ];
+}
+
+/// **Which CUT of the face a run is set in** - the axis that lets one
+/// codepoint resolve to a bold glyph, and the one that lets an atlas say it
+/// cannot.
+///
+/// # A style is an ADDRESS, and the address is the glyph id's top two bits
+///
+/// The atlas is keyed by glyph id, and glyph ids are a FACE's private
+/// numbering: Roboto Regular's `a` and Roboto Bold's `a` are both some small
+/// integer, and nothing about either one says which face it came from. Two
+/// faces in one atlas therefore collide by construction, and the fix is the
+/// one Tim named - "font shapes derived from ttf and mapping to a prefixed
+/// glyphid": a styled glyph id is the raw id with the style PREFIXED into the
+/// bits above it ([`GlyphStyle::styled_glyph_id`]).
+///
+/// Two bits at the top of the `u16`, so:
+///
+/// * **[`GlyphStyle::Regular`] is prefix 0**, which means a regular styled
+///   glyph id *is* the raw glyph id and every lookup that exists today is
+///   bit-for-bit the lookup it was before this type existed. That is not a
+///   convenience, it is the regression bar: nothing that already draws may
+///   change, and the cheapest way to guarantee it is for the new address to
+///   pass through unchanged.
+/// * **[`MAX_RAW_GLYPH_ID`] is 16383**, which every face this repo bakes fits
+///   inside by two orders of magnitude (the bundled faces are ~230 glyphs).
+///   A face that did not fit is REFUSED - `styled_glyph_id` returns `None`
+///   rather than aliasing one face's glyph onto another's.
+///
+/// # Why this and not one more atlas
+///
+/// A second atlas texture per style is the obvious alternative and it is a
+/// RENDERER change: another bind group, another sampler, another set of
+/// dimensions in `sdf_render.wgsl`, and a draw list that has to know which
+/// texture each glyph came from. The prefix keeps every one of those the same
+/// - the draw list already packs a 16-bit glyph id, and it packs a styled one
+/// without noticing. What it costs instead is CELLS, which is a budget
+/// question with a measured answer: see [`crate::ATLAS_ROWS`].
+///
+/// # `BoldItalic` is addressable and unbaked, deliberately
+///
+/// No bold-italic face is bundled. It is still a variant, because markdown
+/// nests emphasis (`**bold with *italic* inside**`) and a consumer that meets
+/// that has to be able to ASK for the cut it wants. An address space missing
+/// the combination would force the caller to silently pick bold or italic -
+/// exactly the substitution [`FontAtlas::styled_glyph`] exists to refuse.
+/// Adding the face later is one `fonts/style.py` run; adding it to the address
+/// later would have been a renumbering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum GlyphStyle {
+    /// The cut every existing atlas, face and lookup is in. Prefix 0.
+    Regular = 0,
+    /// [`ROBOTO_BOLD_ASCII`] - heavier, for `**bold**`.
+    Bold = 1,
+    /// [`ROBOTO_ITALIC_ASCII`] - slanted, for `*italic*`.
+    Italic = 2,
+    /// Addressable, and no bundled face draws it. See the type's doc.
+    BoldItalic = 3,
+}
+
+/// **The widest raw glyph id a style can carry**: 14 bits, because
+/// [`GlyphStyle`]'s prefix takes the two above it.
+///
+/// A face with more glyphs than this cannot be addressed as a style, and
+/// [`GlyphStyle::styled_glyph_id`] says so with `None` instead of wrapping one
+/// face's glyph onto another's cell. For scale, the bundled faces carry ~230
+/// glyphs and all of Roboto Regular carries ~1300.
+pub const MAX_RAW_GLYPH_ID: u16 = (1 << 14) - 1;
+
+impl GlyphStyle {
+    /// Every style, in the order their cells are laid down.
+    pub const ALL: &'static [GlyphStyle] = &[
+        GlyphStyle::Regular,
+        GlyphStyle::Bold,
+        GlyphStyle::Italic,
+        GlyphStyle::BoldItalic,
+    ];
+
+    /// The variant whose discriminant is `n`, or `None`. Written as a match so
+    /// that a new style is a compile error here, for [`GlyphSet`]'s reason.
+    pub const fn try_from_ordinal(n: u8) -> Option<Self> {
+        match n {
+            0 => Some(GlyphStyle::Regular),
+            1 => Some(GlyphStyle::Bold),
+            2 => Some(GlyphStyle::Italic),
+            3 => Some(GlyphStyle::BoldItalic),
+            _ => None,
+        }
+    }
+
+    /// The set this style's declared [`TEXT_RANGES`] coverage is baked into.
+    pub const fn text_set(self) -> GlyphSet {
+        match self {
+            GlyphStyle::Regular => GlyphSet::Text,
+            GlyphStyle::Bold => GlyphSet::BoldText,
+            GlyphStyle::Italic => GlyphSet::ItalicText,
+            GlyphStyle::BoldItalic => GlyphSet::BoldItalicText,
+        }
+    }
+
+    /// The set this style's SHAPED superset is baked into - what its own
+    /// layout tables emit beyond `cmap`.
+    ///
+    /// **Every style needs one of these, and it is not the regular face's.**
+    /// [`GlyphSet::ShapedText`] exists because shaping escapes the cmap:
+    /// Roboto's `liga` folds `fi`/`fl`/`ffi`/`ffl`, and `lnum`/`pnum` (which
+    /// [`TextShaper`] enables by default) remap digits to glyphs no codepoint
+    /// names. A second face has its OWN `GSUB` and therefore its own answer -
+    /// a bold `fi` is a bold ligature glyph, at a glyph id that means
+    /// something else entirely in the regular face. Baking the regular
+    /// superset and hoping would put the placeholder box in the middle of
+    /// every bold word containing `fi`.
+    pub const fn shaped_set(self) -> GlyphSet {
+        match self {
+            GlyphStyle::Regular => GlyphSet::ShapedText,
+            GlyphStyle::Bold => GlyphSet::BoldShapedText,
+            GlyphStyle::Italic => GlyphSet::ItalicShapedText,
+            GlyphStyle::BoldItalic => GlyphSet::BoldItalicShapedText,
+        }
+    }
+
+    /// **The atlas address of `raw` in this style**, or `None` for a glyph id
+    /// too wide to prefix ([`MAX_RAW_GLYPH_ID`]).
+    ///
+    /// # Glyph 0 is glyph 0 in every style, and that is the point
+    ///
+    /// The placeholder box is style-INVARIANT: one glyph, no codepoint maps to
+    /// it, and [`GlyphSet::Placeholder`]'s doc already says there will never be
+    /// a second. So a bold run that meets a codepoint the bold face cannot
+    /// draw shapes to raw glyph 0, addresses cell 0, and draws the same box the
+    /// regular path draws - with no styled cell baked for it and no lookup
+    /// able to miss. The bundled style faces have no outline on `.notdef` at
+    /// all (`fonts/style.py`), which is what makes this a property of the bytes
+    /// rather than of this function.
+    ///
+    /// The map is therefore deliberately not injective across styles at zero,
+    /// and [`GlyphStyle::split_glyph_id`] answers `Regular` for it.
+    pub const fn styled_glyph_id(self, raw: u16) -> Option<u16> {
+        if raw > MAX_RAW_GLYPH_ID {
+            return None;
+        }
+        if raw == 0 {
+            return Some(0);
+        }
+        Some(((self as u16) << 14) | raw)
+    }
+
+    /// The style and raw glyph id a styled glyph id was built from - the
+    /// inverse of [`GlyphStyle::styled_glyph_id`], for a caller (or a test)
+    /// holding an address and asking what it means.
+    pub const fn split_glyph_id(styled: u16) -> (GlyphStyle, u16) {
+        match GlyphStyle::try_from_ordinal((styled >> 14) as u8) {
+            // Every two-bit value is a style, so this is total; the `match` is
+            // how that stays true when a fifth style cannot be added silently.
+            Some(style) => (style, styled & MAX_RAW_GLYPH_ID),
+            None => unreachable!(),
+        }
+    }
 }
 
 /// Bundled Roboto Regular, subset to [`TEXT_RANGES`] — printable ASCII plus
@@ -394,6 +648,58 @@ pub const ROBOTO_REGULAR_ASCII: &[u8] = include_bytes!("../../fonts/Roboto-Regul
 /// `fonts/LICENSE-MaterialSymbols.txt`.
 pub const ROBOTO_ASCII_MSYMBOLS: &[u8] =
     include_bytes!("../../fonts/Roboto-Regular-ascii-msymbols.ttf");
+
+/// **Roboto Bold**, subset to [`TEXT_RANGES`] - the same coverage the regular
+/// face declares, in the heavier cut, so `**bold**` resolves to outlines a type
+/// designer drew rather than to a synthesized weight.
+///
+/// Baked into [`GlyphSet::BoldText`] and addressed as
+/// [`GlyphStyle::Bold`]. Made by `fonts/style.py` from the SAME upstream drop
+/// as the regular face (Roboto v2.138, `roboto-android.zip`), which that script
+/// checks outline-for-outline rather than asserting - a bold cut from a
+/// different build passes every test in this repo and simply looks wrong beside
+/// the prose.
+///
+/// # What it does NOT carry, and why neither is an omission
+///
+/// * **No Private Use Area.** Markers and both icon vocabularies are
+///   style-invariant geometry; see [`GlyphSet::style`].
+/// * **No outline on glyph 0.** The placeholder is style-invariant too -
+///   [`GlyphStyle::styled_glyph_id`] addresses it as glyph 0 in every style,
+///   so a styled `.notdef` would be a cell nothing can reach.
+///
+/// 19,628 bytes; 13,084 gzipped. Roboto is (c) The Roboto Project Authors,
+/// licensed Apache-2.0 - see `fonts/LICENSE-Roboto.txt`.
+pub const ROBOTO_BOLD_ASCII: &[u8] = include_bytes!("../../fonts/Roboto-Bold-ascii.ttf");
+
+/// **Roboto Italic**, subset to [`TEXT_RANGES`] - everything
+/// [`ROBOTO_BOLD_ASCII`] says, in the slanted cut, for `*italic*`.
+///
+/// It is here because it is the same MECHANISM and not merely more bytes: one
+/// `fonts/style.py` run, one [`GlyphStyle`] variant, one pair of sets, and the
+/// bake path cannot tell the two apart. A true italic is also the reason to do
+/// this at all rather than shear the regular face - Roboto's italic `a` is a
+/// different letterform, not a slanted one, and a shear would have been a
+/// renderer feature that looks like typography from a distance.
+///
+/// 21,520 bytes; 14,833 gzipped.
+pub const ROBOTO_ITALIC_ASCII: &[u8] = include_bytes!("../../fonts/Roboto-Italic-ascii.ttf");
+
+/// The bundled face for `style`, or `None` for a style this build ships no
+/// face for ([`GlyphStyle::BoldItalic`]).
+///
+/// `None` is the missing-asset answer, exactly as it is in
+/// [`msymbols_codepoint`]: a caller that turns it into the regular face has
+/// defeated the reason this is fallible, and has drawn upright text where the
+/// document said emphasis.
+pub const fn bundled_style_face(style: GlyphStyle) -> Option<&'static [u8]> {
+    match style {
+        GlyphStyle::Regular => Some(ROBOTO_REGULAR_ASCII),
+        GlyphStyle::Bold => Some(ROBOTO_BOLD_ASCII),
+        GlyphStyle::Italic => Some(ROBOTO_ITALIC_ASCII),
+        GlyphStyle::BoldItalic => None,
+    }
+}
 
 /// The BORROWED icon half of [`ROBOTO_ASCII_MSYMBOLS`]: every declared
 /// Material Symbols name, and the codepoint Material draws it at.

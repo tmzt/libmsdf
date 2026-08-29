@@ -9,7 +9,7 @@
 //! The atlas packs glyphs into a single texture using shelf-based bin
 //! packing. Each glyph is rendered as a 3-channel (RGB) MSDF bitmap.
 
-use crate::font::{CellKey, GlyphSet};
+use crate::font::{CellKey, GlyphSet, GlyphStyle};
 use crate::font::glyph_table::GlyphEntry;
 #[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
 use crate::font::packer::ShelfPacker;
@@ -189,15 +189,21 @@ impl SetMetrics {
         let ordinal = u16::from_le_bytes([data[0], data[1]]);
         // Checked rather than punned: `GlyphSet::from_ordinal` PANICS on an
         // unknown discriminant, and a file is untrusted input. An atlas baked
-        // by a newer libmsdf with a seventh set must be a clean refusal here.
-        if ordinal > GlyphSet::BorrowedIcons as u16 {
+        // by a newer libmsdf with a set this build has never heard of must be
+        // a clean refusal here.
+        //
+        // **This is the extension point the styled sets used.** Growing
+        // `GlyphSet` past `BorrowedIcons` cost no format version precisely
+        // because an old reader lands here and stops with a message that names
+        // the fix, instead of misreading a bold cell as a text one.
+        let Some(set) = u8::try_from(ordinal).ok().and_then(GlyphSet::try_from_ordinal) else {
             return Err(
                 "atlas names a glyph set this build does not have - it was baked by a newer \
                  libmsdf; update, or re-bake with this one",
             );
-        }
+        };
         Ok(Self {
-            set: GlyphSet::from_ordinal(ordinal as u8),
+            set,
             glyph_count: u16::from_le_bytes([data[2], data[3]]),
             baseline_frac: f(4),
             px_per_em_frac: f(8),
@@ -208,6 +214,55 @@ impl SetMetrics {
             underline_thickness_em: f(28),
             ink_descent_em: f(32),
         })
+    }
+}
+
+/// **Why a styled lookup came back empty** - and the distinction is the
+/// reason [`FontAtlas::styled_glyph`] is fallible in the first place.
+///
+/// Three failures that a single `None` would have flattened into one, each
+/// with a different owner:
+///
+/// * [`StyledGlyphError::StyleNotBaked`] - an ASSET gap. The atlas was baked
+///   without that face, so no glyph in that style exists here. The caller
+///   reports it (Rule 28's shape); it must not draw the regular glyph, because
+///   upright text where the document says emphasis is a wrong render that
+///   looks like a correct one.
+/// * [`StyledGlyphError::NoCell`] - the style is here and this glyph of it is
+///   not. A codepoint outside [`crate::font::TEXT_RANGES`], or a bake that
+///   queued less than the face covers.
+/// * [`StyledGlyphError::NotARawGlyphId`] - the caller passed an id that is
+///   already an address ([`GlyphStyle::styled_glyph_id`]), or a face wider
+///   than [`crate::font::MAX_RAW_GLYPH_ID`]. A programming error rather than
+///   an asset one, and it is refused instead of being prefixed twice into
+///   whatever cell that lands on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StyledGlyphError {
+    /// This atlas carries no cells in that style at all.
+    StyleNotBaked(GlyphStyle),
+    /// The style is baked; that glyph of it is not.
+    NoCell(GlyphStyle, u16),
+    /// Not a raw glyph id: too wide to prefix, or already prefixed.
+    NotARawGlyphId(u16),
+}
+
+impl core::fmt::Display for StyledGlyphError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::StyleNotBaked(style) => write!(
+                f,
+                "this atlas was baked without {style:?} - re-bake it with that face, or report \
+                 the gap; drawing the regular glyph instead is a wrong render that looks right"
+            ),
+            Self::NoCell(style, gid) => {
+                write!(f, "{style:?} is baked here, but glyph {gid} of it has no cell")
+            }
+            Self::NotARawGlyphId(gid) => write!(
+                f,
+                "{gid} is not a raw glyph id - it is above MAX_RAW_GLYPH_ID, or it is already a \
+                 styled address and would be prefixed twice"
+            ),
+        }
     }
 }
 
@@ -286,6 +341,88 @@ impl FontAtlas {
     /// both come from the same instance.
     pub fn get_glyph(&self, glyph_id: u16) -> Option<&GlyphEntry> {
         self.glyph_table_index(glyph_id).map(|idx| &self.glyphs[idx])
+    }
+
+    /// **Does this atlas have cells in `style`?** Asked BEFORE a run is shaped,
+    /// by a caller for whom regular glyphs are the wrong answer.
+    ///
+    /// # A runtime atlas answers from its CELLS, because it has nothing else
+    ///
+    /// [`FontAtlas::empty`] carries no set header at all, so there is no row to
+    /// read. Two rules there, and the second is what keeps the compute-MSDF
+    /// path from being locked out of emphasis:
+    ///
+    /// * [`GlyphStyle::Regular`] is always carried. Everything that populates
+    ///   such an atlas starts from a regular face, and an atlas with no cells
+    ///   yet should answer "no cell" rather than "no style".
+    /// * Any other style is carried once a cell ADDRESSED in it has been
+    ///   appended ([`FontAtlas::insert_entry`]). A consumer generating bold
+    ///   glyphs at runtime - `gpu::MsdfCompute` over the bold face, filed under
+    ///   [`GlyphStyle::styled_glyph_id`] - is carrying bold, and the entries are
+    ///   the only evidence there is. Until it does, a bold lookup refuses
+    ///   rather than handing back the upright glyph that happens to sit at that
+    ///   raw id.
+    ///
+    /// That second rule matters more than it looks: a style's baked CELLS are
+    /// ~290 KiB gzipped and its face is 13 KiB, so generating styled cells on
+    /// demand is a serious option for a browser, and it needs no different
+    /// address than a baked one.
+    pub fn carries_style(&self, style: GlyphStyle) -> bool {
+        if !self.sets.is_empty() {
+            return self.set_metrics(style.text_set()).is_some();
+        }
+        style == GlyphStyle::Regular
+            || self
+                .glyphs
+                .iter()
+                .any(|e| GlyphStyle::split_glyph_id(e.glyph_id).0 == style)
+    }
+
+    /// **A glyph in a STYLE**: this raw glyph id, from that style's face, or a
+    /// refusal that says which half is missing.
+    ///
+    /// The one call a styled run makes, and the reason it returns a `Result`
+    /// rather than an `Option` is the whole point of the type: an atlas with no
+    /// bold cells must not answer a bold question with a regular glyph, and a
+    /// caller reading `None` would have no way to tell "this atlas has no bold"
+    /// from "bold has no such glyph" - the first is an asset gap to report, the
+    /// second is a codepoint outside coverage, and they are fixed in different
+    /// places.
+    ///
+    /// `raw_glyph_id` is the id the STYLE's own face shapes to - what
+    /// [`crate::font::StyledShaper`] hands back before prefixing, or
+    /// `ttf_parser`'s `glyph_index` on that face. Passing an already-prefixed
+    /// id is refused as [`StyledGlyphError::NotARawGlyphId`] rather than
+    /// silently double-prefixed.
+    ///
+    /// Exactly equivalent to [`FontAtlas::get_glyph`] for
+    /// [`GlyphStyle::Regular`], by construction - the prefix is zero - and
+    /// `regular_styled_lookup_is_the_plain_lookup` holds the two against each
+    /// other over every cell of the shipped atlas.
+    pub fn styled_glyph(
+        &self,
+        style: GlyphStyle,
+        raw_glyph_id: u16,
+    ) -> Result<&GlyphEntry, StyledGlyphError> {
+        if !self.carries_style(style) {
+            return Err(StyledGlyphError::StyleNotBaked(style));
+        }
+        let Some(addr) = style.styled_glyph_id(raw_glyph_id) else {
+            return Err(StyledGlyphError::NotARawGlyphId(raw_glyph_id));
+        };
+        self.get_glyph(addr)
+            .ok_or(StyledGlyphError::NoCell(style, raw_glyph_id))
+    }
+
+    /// Every style this atlas has text cells for, in cell order. For a
+    /// consumer deciding what it can offer, and for a report that says what a
+    /// committed artifact actually contains.
+    pub fn styles(&self) -> Vec<GlyphStyle> {
+        GlyphStyle::ALL
+            .iter()
+            .copied()
+            .filter(|&s| self.carries_style(s))
+            .collect()
     }
 
     /// Index of a glyph in the GPU glyph table (position in `glyphs`).
@@ -734,6 +871,22 @@ pub fn cap_height(face: &ttf_parser::Face) -> f64 {
 /// Columns of glyph cells. Fixed, for predictable shelf alignment — and
 /// because a texture whose WIDTH changed would move every glyph's `u` in
 /// `sdf_render.wgsl`, exactly as a changing height moves every `v`.
+///
+/// # This is the binding constraint on capacity, and it is a COST rather than a
+/// limit
+///
+/// [`ATLAS_ROWS`] argues that 40 rows is the largest pin that fits the weakest
+/// target, which is true at 8 columns and reads as though the grid were full.
+/// It is not: 8 x 50px is 400 texels of a 2048 floor, so the shipped texture
+/// uses 19% of the area the weakest target guarantees. **16 columns at the same
+/// 40 rows is 800x2000 - inside the same floor - and holds 640 cells.**
+///
+/// That matters now because a [`GlyphStyle`] is 205 cells (191 declared
+/// codepoints plus 14 shaped forms) and only 96 are free, so emphasis does not
+/// fit and nothing about ROWS can make it. What widening costs is a one-time
+/// re-bake in which every glyph's `u` moves and every review fixture is
+/// re-blessed once - a decision for whoever owns the frames, which is why it is
+/// recorded here rather than taken.
 pub const ATLAS_COLS: u32 = 8;
 
 /// **Rows of glyph cells the atlas is baked to, whether or not they are used**
@@ -819,6 +972,18 @@ pub struct FontAtlasBuilder {
     /// This is a QUEUE, not the layout: [`FontAtlasBuilder::cell_order`] sorts
     /// it.
     queued_glyphs: Vec<CellKey>,
+    /// **The face each STYLE's cells are baked from**, beyond the regular one
+    /// in `font_data`.
+    ///
+    /// A style is a second FACE, so its glyphs cannot be baked from the face
+    /// the builder was constructed with - and the bake has to be able to get
+    /// back to the right one, per cell, long after the queue was filled. The
+    /// styled glyph id says which ([`GlyphStyle::split_glyph_id`]), so this is
+    /// the table that turns that answer into bytes.
+    ///
+    /// Empty for every bake that exists today, which is what makes the styled
+    /// path unable to disturb them.
+    style_faces: Vec<(GlyphStyle, Vec<u8>)>,
 }
 
 impl FontAtlasBuilder {
@@ -832,7 +997,20 @@ impl FontAtlasBuilder {
             glyph_size,
             px_range,
             queued_glyphs: Vec::new(),
+            style_faces: Vec::new(),
         }
+    }
+
+    /// The face a style's cells are baked from: the builder's own for
+    /// [`GlyphStyle::Regular`], a registered one otherwise.
+    fn style_face(&self, style: GlyphStyle) -> Option<&[u8]> {
+        if style == GlyphStyle::Regular {
+            return Some(&self.font_data);
+        }
+        self.style_faces
+            .iter()
+            .find(|(s, _)| *s == style)
+            .map(|(_, data)| data.as_slice())
     }
 
     /// MSDF bitmap size per glyph cell.
@@ -865,8 +1043,22 @@ impl FontAtlasBuilder {
     }
 
     /// Queue all glyphs for a codepoint range (resolves via cmap) into `set`.
+    ///
+    /// **Through the face `set` belongs to**, which for a styled set is the
+    /// one registered by [`FontAtlasBuilder::add_styled_coverage`] and not the
+    /// builder's own. A codepoint is resolved by the cmap of the face that will
+    /// bake it, because that is the only face whose glyph ids mean anything.
     pub fn add_codepoint_range(&mut self, set: GlyphSet, start: char, end: char) {
-        let face = match ttf_parser::Face::parse(&self.font_data, 0) {
+        let style = set.style();
+        let Some(face_data) = self.style_face(style) else {
+            debug_assert!(
+                false,
+                "{set:?} was queued with no {style:?} face registered - \
+                 `add_styled_coverage` registers one, and without it this queues nothing"
+            );
+            return;
+        };
+        let face = match ttf_parser::Face::parse(face_data, 0) {
             Ok(f) => f,
             Err(_) => return,
         };
@@ -874,8 +1066,12 @@ impl FontAtlasBuilder {
         let mut gids = Vec::new();
         for cp in (start as u32)..=(end as u32) {
             if let Some(ch) = char::from_u32(cp) {
-                if let Some(gid) = face.glyph_index(ch) {
-                    gids.push(gid.0);
+                // The ADDRESS, not the face's own id: two faces number their
+                // glyphs independently and one atlas cannot hold both
+                // numberings. A face too wide to prefix contributes nothing
+                // rather than aliasing onto another style's cell.
+                if let Some(gid) = face.glyph_index(ch).and_then(|g| style.styled_glyph_id(g.0)) {
+                    gids.push(gid);
                 }
             }
         }
@@ -930,9 +1126,24 @@ impl FontAtlasBuilder {
     /// triples, for the three-glyph ligatures), interleaved into one string per
     /// leading character to keep it to ~100 shaping calls.
     pub fn add_shaped_ascii(&mut self) {
-        let Ok(shaper) = crate::font::shaper::TextShaper::new(self.font_data.clone()) else {
+        self.add_shaped_ascii_of(GlyphStyle::Regular);
+    }
+
+    /// [`FontAtlasBuilder::add_shaped_ascii`] for one style's face, into that
+    /// style's shaped set ([`GlyphStyle::shaped_set`]).
+    ///
+    /// The probe strings are the same; the face is not, and neither are the
+    /// glyph ids that come back. See `shaped_set`'s doc for why a second face
+    /// cannot borrow the first one's answer.
+    pub fn add_shaped_ascii_of(&mut self, style: GlyphStyle) {
+        let Some(face_data) = self.style_face(style) else {
+            debug_assert!(false, "no {style:?} face registered to shape with");
             return;
         };
+        let Ok(shaper) = crate::font::shaper::TextShaper::new(face_data.to_vec()) else {
+            return;
+        };
+        let set = style.shaped_set();
         let printable: Vec<char> = (0x20u8..=0x7e).map(|b| b as char).collect();
 
         let mut probes: Vec<String> = Vec::with_capacity(printable.len() + 2);
@@ -954,10 +1165,25 @@ impl FontAtlasBuilder {
         }
         probes.push(triples);
 
+        let mut queued: Vec<u16> = Vec::new();
         for probe in probes {
             for g in shaper.shape(&probe).glyphs {
-                self.add_glyph(GlyphSet::ShapedText, g.glyph_id);
+                // Raw glyph 0 is skipped rather than queued: the placeholder is
+                // style-invariant and is addressed as cell 0 in every style
+                // ([`GlyphStyle::styled_glyph_id`]), so queueing it here would
+                // ask `GlyphSet::Placeholder`'s one cell to belong to a styled
+                // set as well. (Full coverage means it never comes up for the
+                // bundled faces; a narrower face is where it would.)
+                if g.glyph_id == 0 {
+                    continue;
+                }
+                if let Some(addr) = style.styled_glyph_id(g.glyph_id) {
+                    queued.push(addr);
+                }
             }
+        }
+        for addr in queued {
+            self.add_glyph(set, addr);
         }
     }
 
@@ -1041,7 +1267,85 @@ impl FontAtlasBuilder {
         // reach it, and without a cell every uncovered character is back to
         // drawing nothing. Its own set, and the first one: one glyph, no way to
         // gain a second, so it is the one cell that can never be pushed along.
+        //
+        // It is also the one cell every STYLE shares
+        // ([`GlyphStyle::styled_glyph_id`]), which is why the styled queues
+        // below never add a second.
         self.add_glyph(GlyphSet::Placeholder, 0);
+    }
+
+    /// **Queue a second FACE as a style** - the declared text coverage, and
+    /// what that face's own shaper emits beyond it.
+    ///
+    /// This is the whole bake side of emphasis: `add_styled_coverage(Bold,
+    /// ROBOTO_BOLD_ASCII.to_vec())` beside [`add_shipped_coverage`], and the
+    /// atlas comes out with bold cells that a run addresses through
+    /// [`GlyphStyle::styled_glyph_id`].
+    ///
+    /// [`add_shipped_coverage`]: FontAtlasBuilder::add_shipped_coverage
+    ///
+    /// # It queues TEXT and nothing else
+    ///
+    /// No Private Use Area scan, in deliberate contrast to
+    /// [`add_shipped_coverage`]. Markers, our own icons and the borrowed
+    /// Material Symbols are style-INVARIANT (see [`GlyphSet::style`]): a bold
+    /// arrowhead is not a thing, and a second copy of `send` in a heavier
+    /// weight would be 13 cells spent on a distinction no caller can make. A
+    /// style face is prose, and prose is [`crate::font::TEXT_RANGES`].
+    ///
+    /// # Every cell it queues sorts AFTER every cell that already existed
+    ///
+    /// [`GlyphStyle::text_set`] and [`GlyphStyle::shaped_set`] are sets 6..=11,
+    /// declared after the unstyled ones, and cells are laid out in
+    /// `(set, glyph id)` order. So this is a pure append: an atlas re-baked with
+    /// a style is a strict superset of the same atlas without one, cell for
+    /// cell, and a frame that moves after adding bold is a real finding rather
+    /// than repacking noise. `a_styled_bake_appends` holds it against a bake.
+    ///
+    /// # It can refuse, and there are three ways
+    ///
+    /// The face does not parse; the style already has one (registering a second
+    /// would silently pick a winner for cells that are already queued); or the
+    /// style is [`GlyphStyle::Regular`], which is the builder's own face and
+    /// [`add_shipped_coverage`]'s job.
+    pub fn add_styled_coverage(
+        &mut self,
+        style: GlyphStyle,
+        font_data: Vec<u8>,
+    ) -> Result<(), String> {
+        if style == GlyphStyle::Regular {
+            return Err(
+                "GlyphStyle::Regular is the face this builder was constructed with - \
+                 add_shipped_coverage queues it"
+                    .into(),
+            );
+        }
+        if self.style_face(style).is_some() {
+            return Err(format!("{style:?} already has a face registered on this builder"));
+        }
+        ttf_parser::Face::parse(&font_data, 0).map_err(|e| format!("{style:?} face: {e}"))?;
+        self.style_faces.push((style, font_data));
+
+        for &(lo, hi) in crate::font::TEXT_RANGES {
+            self.add_codepoint_range(style.text_set(), lo, hi);
+        }
+        // ...and the superset ITS layout tables emit. A glyph already claimed
+        // by the text set stays there (`add_glyph` keeps the lowest set), so
+        // this contributes exactly that face's ligatures and GSUB forms.
+        self.add_shaped_ascii_of(style);
+        Ok(())
+    }
+
+    /// The styles this builder will bake cells for, in cell order.
+    pub fn styles(&self) -> Vec<GlyphStyle> {
+        let mut styles: Vec<GlyphStyle> = self
+            .queued_glyphs
+            .iter()
+            .map(|k| k.set().style())
+            .collect();
+        styles.sort_unstable();
+        styles.dedup();
+        styles
     }
 }
 
@@ -1059,12 +1363,29 @@ impl FontAtlasBuilder {
     /// Bake a single glyph cell via CPU msdfgen (the reference
     /// implementation; the compute-shader path is `gpu::MsdfCompute`).
     pub fn bake_cell(&self, glyph_id: u16) -> Result<BakedGlyphCell, String> {
+        self.bake_cell_of(&self.font_data, glyph_id, glyph_id)
+    }
+
+    /// [`FontAtlasBuilder::bake_cell`] from an explicit face, with the cell's
+    /// ADDRESS given separately from the glyph id that face knows.
+    ///
+    /// The two differ for a styled cell and only there: the outline and every
+    /// metric come from `raw_glyph_id` in `face_data`, and the entry is filed
+    /// under `address` ([`GlyphStyle::styled_glyph_id`]) so that two faces'
+    /// independent numberings cannot collide in one table.
+    fn bake_cell_of(
+        &self,
+        face_data: &[u8],
+        raw_glyph_id: u16,
+        address: u16,
+    ) -> Result<BakedGlyphCell, String> {
         use msdfgen::{Bitmap, FillRule, FontExt, Framing, MsdfGeneratorConfig, Rgb};
 
+        let glyph_id = raw_glyph_id;
         // ttf-parser 0.25 for metrics; 0.18 for msdfgen's FontExt.
-        let face25 = ttf_parser::Face::parse(&self.font_data, 0)
+        let face25 = ttf_parser::Face::parse(face_data, 0)
             .map_err(|e| format!("font parse error: {e}"))?;
-        let face18 = ttf_parser_018::Face::parse(&self.font_data, 0)
+        let face18 = ttf_parser_018::Face::parse(face_data, 0)
             .map_err(|e| format!("font parse error (v18): {e}"))?;
 
         let gs = self.glyph_size;
@@ -1082,7 +1403,7 @@ impl FontAtlasBuilder {
         // filled boxes once every shaped glyph — spaces included — is sampled.)
         let mut rgb = vec![0u8; (gs * gs * channels) as usize];
         let mut entry = GlyphEntry {
-            glyph_id,
+            glyph_id: address,
             atlas_x: 0,
             atlas_y: 0,
             atlas_w: gs as u16,
@@ -1160,6 +1481,36 @@ impl FontAtlasBuilder {
         let face25 = ttf_parser::Face::parse(&self.font_data, 0)
             .map_err(|e| format!("font parse error: {e}"))?;
 
+        // **One parsed face per style**, so the per-cell work below can ask
+        // which face a cell came from without re-parsing, and so a queue that
+        // names a style with no registered face stops HERE with a message
+        // rather than at an `expect` in the middle of a bake.
+        let mut styled: Vec<(GlyphStyle, ttf_parser::Face)> = Vec::new();
+        for (style, data) in &self.style_faces {
+            let face = ttf_parser::Face::parse(data, 0)
+                .map_err(|e| format!("{style:?} face parse error: {e}"))?;
+            styled.push((*style, face));
+        }
+        for style in self.styles() {
+            if self.style_face(style).is_none() {
+                return Err(format!(
+                    "{style:?} cells are queued but no {style:?} face is registered - \
+                     add_styled_coverage does both, and add_glyph on a styled set does neither"
+                ));
+            }
+        }
+        let face_of = |style: GlyphStyle| -> &ttf_parser::Face {
+            if style == GlyphStyle::Regular {
+                &face25
+            } else {
+                styled
+                    .iter()
+                    .find(|(s, _)| *s == style)
+                    .map(|(_, f)| f)
+                    .expect("checked above: every queued style has a registered face")
+            }
+        };
+
         let gs = self.glyph_size;
         let padded = gs + 2; // 1px padding on each side
         let channels = 3u32;
@@ -1176,8 +1527,16 @@ impl FontAtlasBuilder {
         let order = self.cell_order();
         let mut placed = Vec::with_capacity(self.queued_glyphs.len());
         for key in &order {
-            let glyph_id = key.glyph_id();
-            let cell = self.bake_cell(glyph_id)?;
+            let address = key.glyph_id();
+            // The SET says which face; the address says which glyph OF it. For
+            // every cell that exists today the two are the identity - regular
+            // sets, prefix 0 - which is what makes this the same bake it was.
+            let style = key.set().style();
+            let raw = GlyphStyle::split_glyph_id(address).1;
+            let face_data = self
+                .style_face(style)
+                .expect("checked above: every queued style has a registered face");
+            let cell = self.bake_cell_of(face_data, raw, address)?;
             let (x, y) = packer.pack(padded, padded);
             placed.push(Placed { cell, atlas_x: x + 1, atlas_y: y + 1 });
         }
@@ -1192,8 +1551,12 @@ impl FontAtlasBuilder {
         // baseline and the header would say so without any further change.
         // Reading it off the cells is what makes that true.
         let sets = {
-            let em = self.face_em_metrics(&face25);
-            let upem = face25.units_per_em() as f32;
+            // **Per SET, and therefore per FACE.** `SetMetrics`' doc already
+            // said this was the shape it wanted - "a set fed from a second face
+            // would land here with its own baseline and the header would say so
+            // without any further change" - and a styled bake is that second
+            // face. Bold's ascender, underline and ink depth are its own, and
+            // the header carries them per set with no format change at all.
             // **The deepest ink is measured from the OUTLINES, per set** -
             // `SetMetrics::ink_descent_em` has the numbers and the argument.
             // Taken from the same `glyf` bounding box `glyph_projection` lays
@@ -1202,8 +1565,10 @@ impl FontAtlasBuilder {
             // 0.0 is not below the baseline, so `min` passes over it, and a
             // set that is ALL whitespace reports 0.0, which is true of it.
             let ink_y_min_em = |key: &CellKey| {
-                face25
-                    .glyph_bounding_box(ttf_parser::GlyphId(key.glyph_id()))
+                let face = face_of(key.set().style());
+                let upem = face.units_per_em() as f32;
+                let raw = GlyphStyle::split_glyph_id(key.glyph_id()).1;
+                face.glyph_bounding_box(ttf_parser::GlyphId(raw))
                     .map_or(0.0, |bb| bb.y_min as f32 / upem)
             };
             let mut sets: Vec<SetMetrics> = Vec::new();
@@ -1226,7 +1591,7 @@ impl FontAtlasBuilder {
                         baseline_frac: frac,
                         px_per_em_frac: p.cell.entry.px_per_em / gs as f32,
                         ink_descent_em: ink_y_min_em(key),
-                        ..em
+                        ..self.face_em_metrics(face_of(key.set().style()))
                     }),
                 }
             }
@@ -1236,7 +1601,8 @@ impl FontAtlasBuilder {
         if placed.len() > atlas_capacity() {
             return Err(format!(
                 "{} glyphs queued, but the atlas is pinned at {} cells ({ATLAS_ROWS} rows x \
-                 {ATLAS_COLS} columns) - see ATLAS_ROWS before raising it",
+                 {ATLAS_COLS} columns) - read ATLAS_COLS and then ATLAS_ROWS before raising \
+                 either; columns are the axis with headroom and rows are the one without",
                 placed.len(),
                 atlas_capacity()
             ));

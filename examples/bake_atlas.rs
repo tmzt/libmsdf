@@ -5,6 +5,7 @@
 //! Usage:
 //! ```text
 //! cargo run -p libmsdf --example bake_atlas -- <font.ttf> <out.atlas> [glyph_size] [px_range]
+//!                                             [--style <bold|italic|bolditalic>[=<face.ttf>]]...
 //! ```
 //! With no arguments, bakes the bundled Roboto ASCII subset at 48px/6.0
 //! to `roboto-ascii-48.atlas` in the current directory — the shipped
@@ -44,10 +45,73 @@
 //! stable: the table is sorted by glyph id, so a new glyph takes its place
 //! among the others. Nothing outside a loaded atlas can see that - the GPU
 //! table and every index packed into a draw list come from the same instance.)
+//!
+//! # `--style`, and why it does not fit yet
+//!
+//! `--style bold` queues [`libmsdf::ROBOTO_BOLD_ASCII`] as
+//! [`libmsdf::GlyphStyle::Bold`]; `--style bold=<face.ttf>` queues a face of
+//! your own. Styled sets are declared after every unstyled one, so this is a
+//! pure append: every cell the shipped coverage lays down keeps its
+//! coordinates, and a frame that moves after a styled re-bake is a real
+//! finding.
+//!
+//! **No styled bake fits the pinned grid today**, and this tool will say so
+//! rather than truncate: the shipped coverage is 224 cells of 320 and a style
+//! is 205 (191 declared codepoints plus 14 shaped forms). The binding
+//! constraint is [`libmsdf::ATLAS_COLS`], not [`libmsdf::ATLAS_ROWS`] - the
+//! texture is 400x2000 inside a 2048 floor, and it is 8 columns wide because
+//! widening it moves every glyph's `u` and re-blesses every frame, which is a
+//! one-time cost rather than a limit. At 16 columns the same 40 rows hold 640.
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+
+    // `--style bold`, or `--style bold=<face.ttf>`. Parsed before the
+    // positionals so a style argument can never be taken for the font or the
+    // output path.
+    let styles: Vec<(libmsdf::GlyphStyle, Vec<u8>)> = args
+        .iter()
+        .zip(args.iter().skip(1))
+        .filter(|(flag, _)| *flag == "--style")
+        .map(|(_, spec)| {
+            let (name, path) = spec.split_once('=').map_or((spec.as_str(), None), |(n, p)| (n, Some(p)));
+            let style = match name.to_ascii_lowercase().as_str() {
+                "bold" => libmsdf::GlyphStyle::Bold,
+                "italic" => libmsdf::GlyphStyle::Italic,
+                "bolditalic" => libmsdf::GlyphStyle::BoldItalic,
+                other => panic!("--style takes bold, italic or bolditalic, not {other:?}"),
+            };
+            let data = match path {
+                Some(p) => std::fs::read(p).unwrap_or_else(|e| panic!("read style face {p}: {e}")),
+                // The bundled face, which is `None` for a style this build
+                // ships nothing for - a missing asset the caller must supply,
+                // never a substitution.
+                None => libmsdf::bundled_style_face(style)
+                    .unwrap_or_else(|| {
+                        panic!("no face is bundled for {style:?} - pass --style {name}=<face.ttf>")
+                    })
+                    .to_vec(),
+            };
+            (style, data)
+        })
+        .collect();
+    let args: Vec<String> = {
+        let mut positional = Vec::new();
+        let mut skip = false;
+        for a in &args {
+            if skip {
+                skip = false;
+                continue;
+            }
+            if a == "--style" {
+                skip = true;
+                continue;
+            }
+            positional.push(a.clone());
+        }
+        positional
+    };
 
     let (font_data, out_path) = if args.len() >= 3 {
         let data = std::fs::read(&args[1])
@@ -64,6 +128,11 @@ fn main() {
 
     let mut builder = libmsdf::FontAtlasBuilder::new(font_data, glyph_size, px_range);
     builder.add_shipped_coverage();
+    for (style, data) in styles {
+        builder
+            .add_styled_coverage(style, data)
+            .unwrap_or_else(|e| panic!("{e}"));
+    }
     let atlas = builder.build().expect("atlas bake failed");
     let bytes = atlas.to_bytes();
 
