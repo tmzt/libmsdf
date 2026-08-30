@@ -42,7 +42,7 @@ pub use font::{
     StyledGlyphError, StyledShaper, atlas_capacity, bundled_style_face,
     HIGHBAY_ICONS_BLOCK, MARKERS, MARKER_ARROW, MSYMBOLS_ICONS, OWNED_BLOCKS,
     ROBOTO_ASCII_MSYMBOLS, ROBOTO_BOLD_ASCII, ROBOTO_ITALIC_ASCII, ROBOTO_REGULAR_ASCII,
-    ShapedRun, TextShaper, highbay_codepoint,
+    ShapedRun, TEXT_RANGES, TextShaper, highbay_codepoint,
     msymbols_codepoint,
 };
 pub use gpu::{blur_params, BlurPass, GpuSdfRenderer, MsdfCompute};
