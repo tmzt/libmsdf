@@ -73,7 +73,11 @@ fn every_declared_codepoint_has_a_glyph_and_a_cell() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 95 + 96, "printable ASCII plus Latin-1 Supplement");
+    assert_eq!(
+        checked,
+        95 + 96 + 10,
+        "printable ASCII, Latin-1 Supplement, and the typographic ten"
+    );
 }
 
 /// The letters actually have INK. A cell can exist and be blank — that is what
@@ -156,10 +160,13 @@ fn glyph_zero_is_a_hollow_box() {
 #[test]
 fn uncovered_characters_resolve_to_the_placeholder_cell() {
     let (shaper, atlas) = (shaper(), atlas());
-    // A curly quote and an ellipsis (the authored-source case the old panic was
-    // written for), an em-dash, a CJK ideograph and an emoji (arbitrary runtime
-    // data, which is the case that broke it).
-    for ch in ['\u{201c}', '\u{2026}', '\u{2014}', '\u{597d}', '\u{1f389}'] {
+    // **These examples moved when `TEXT_RANGES` gained the typographic ten**,
+    // and what replaced them says why each is still outside coverage: an ARROW,
+    // which this tree's prose wants and the upstream drop does not define; a
+    // DAGGER, which the drop defines and the range list left out on purpose; a
+    // CJK ideograph and an emoji (arbitrary runtime data, which is the case
+    // that broke it).
+    for ch in ['\u{2192}', '\u{2020}', '\u{597d}', '\u{1f389}'] {
         let run = shaper.shape(ch.encode_utf8(&mut [0u8; 4]));
         assert_eq!(run.notdef_count(), 1, "{ch:?} unexpectedly covered");
         assert_eq!(run.glyphs[0].glyph_id, 0);
@@ -188,15 +195,15 @@ fn the_emitter_points_an_uncovered_run_at_the_placeholder() {
     let notdef_idx = atlas.glyph_table_index(0).expect("glyph 0 is in the table") as u32;
 
     let mut list = DrawList::new();
-    // An em-dash (uncovered) followed by an 'A' (covered).
-    list.push_shaped_text(&shaper.shape("\u{2014}A"), &atlas, [0.0, 0.0], 16.0, PX_RANGE, [1.0; 4]);
+    // An arrow (uncovered - see `TEXT_RANGES`) followed by an 'A' (covered).
+    list.push_shaped_text(&shaper.shape("\u{2192}A"), &atlas, [0.0, 0.0], 16.0, PX_RANGE, [1.0; 4]);
     let frame = list.lower();
     let SdfKind::MsdfText { char_start, char_count, .. } = list.instances[0].kind else {
         panic!("expected a text instance");
     };
     assert_eq!(char_count, 2);
     let packed = |i: u32| frame.char_buffer[(char_start + i) as usize] >> 16;
-    assert_eq!(packed(0), notdef_idx, "the em-dash was emitted as some other cell");
+    assert_eq!(packed(0), notdef_idx, "the arrow was emitted as some other cell");
 
     // Vacuity pin: the buffer is carrying real indices, not zeros. 'A' is a
     // covered glyph, so it must come back as its OWN cell and not as the
@@ -267,10 +274,49 @@ fn covers_still_says_no_for_an_uncovered_codepoint() {
     // Every kind of miss: an undeclared PUA codepoint, and ordinary text the
     // face cannot draw. Both answer `false` even though shaping either one
     // would now hand back a perfectly drawable box.
-    for ch in ['\u{e000}', '\u{f8ff}', '\u{201c}', '\u{2026}'] {
+    for ch in ['\u{e000}', '\u{f8ff}', '\u{2192}', '\u{2020}'] {
         assert!(!icons.covers(ch), "U+{:04X} should not be covered", ch as u32);
         assert_eq!(icons.shape(ch.encode_utf8(&mut [0u8; 4])).notdef_count(), 1);
     }
+}
+
+/// **The typographic ten have INK**, not just cells.
+///
+/// The widening's own vacuity pin. `every_declared_codepoint_has_a_glyph_and_a_cell`
+/// would pass on ten blank squares - which is precisely the failure being
+/// retired here, since a blank cell and an unbaked codepoint draw the same
+/// nothing. Every one of these has a visible mark, so every one of them is
+/// checked for one.
+#[test]
+fn the_typographic_ten_are_drawn_not_blank() {
+    let (shaper, atlas) = (shaper(), atlas());
+    let ten = [
+        ('\u{2013}', "en dash"),
+        ('\u{2014}', "em dash"),
+        ('\u{2018}', "left single quote"),
+        ('\u{2019}', "right single quote"),
+        ('\u{201c}', "left double quote"),
+        ('\u{201d}', "right double quote"),
+        ('\u{2022}', "bullet"),
+        ('\u{2026}', "ellipsis"),
+        ('\u{20ac}', "euro"),
+        ('\u{2122}', "trade mark"),
+    ];
+    for (ch, name) in ten {
+        let run = shaper.shape(ch.encode_utf8(&mut [0u8; 4]));
+        assert_eq!(run.notdef_count(), 0, "the {name} is not covered");
+        let gid = run.glyphs[0].glyph_id;
+        assert!(
+            cell_has_ink(&atlas, gid),
+            "the {name} (U+{:04X}, glyph {gid}) has a cell with no ink in it - it would \
+             draw the same nothing it drew before it was baked",
+            ch as u32
+        );
+    }
+    // ...and the set really is TEN, so a range edited in one place and not the
+    // other is caught here rather than by a missing character in a frame.
+    let declared: usize = TEXT_RANGES.iter().map(|&(a, b)| (b as usize) - (a as usize) + 1).sum();
+    assert_eq!(declared, 95 + 96 + 10, "TEXT_RANGES no longer declares the ten");
 }
 
 // ── the private-use carveout ────────────────────────────────────────────
@@ -349,10 +395,11 @@ fn control_characters_leave_no_glyph_and_no_width() {
     }
     // Vacuity pin: a NON-control character the face cannot draw is still kept
     // and still gets the box, so the rule above is about control characters
-    // rather than about `.notdef`.
-    let em_dash = shaper.shape("one\u{2014}two");
-    assert_eq!(em_dash.notdef_count(), 1);
-    assert_eq!(em_dash.glyphs.len(), 7);
+    // rather than about `.notdef`. (It was the em dash until that became a
+    // baked glyph; the arrow is uncovered for a reason `TEXT_RANGES` records.)
+    let arrow = shaper.shape("one\u{2192}two");
+    assert_eq!(arrow.notdef_count(), 1);
+    assert_eq!(arrow.glyphs.len(), 7);
 }
 
 /// Clusters still address the ORIGINAL string after a control character is
@@ -573,7 +620,7 @@ fn the_text_baseline_is_the_faces_cap_projection() {
 /// **Every cell agrees with its set's header.**
 ///
 /// This is the regression guard, and it is written over ALL cells on purpose:
-/// the underline bug was one cell in 211 disagreeing with the other 210, and
+/// the underline bug was one cell in 221 disagreeing with the other 220, and
 /// `atlas.glyphs.first()` happening to be that one. A whitespace cell used to
 /// carry `0.75 * cell` while every cell with ink carried 0.6969, and because a
 /// space draws nothing, no rendered frame could show it. Only a test that reads
@@ -742,4 +789,123 @@ fn every_baked_set_is_in_the_header() {
     // The plain face borrows nothing, so it has no BorrowedIcons cells - and
     // therefore no header entry for them. An absent set is `None`, not zero.
     assert_eq!(atlas.set_metrics(GlyphSet::BorrowedIcons), None);
+}
+
+// ── widening the ranges, for real (native + msdfgen) ────────────────────
+
+/// ```text
+/// CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm cargo test --features cpu-bake
+/// ```
+#[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
+mod baked {
+    use super::*;
+    use libmsdf::font::{GlyphEntry, OWNED_BLOCKS};
+
+    /// Small cells: this is a test about where ink LANDS, not about field
+    /// quality, and the property is scale-free. 48px would be a minute of
+    /// msdfgen for the same answer.
+    const GS: u32 = 16;
+    const PX: f64 = 2.0;
+
+    /// **The queue as it stood before the typographic ten** - every call
+    /// `FontAtlasBuilder::add_shipped_coverage` makes, with the text ranges cut
+    /// back to the two that predate the widening.
+    ///
+    /// Spelled out rather than driven off `TEXT_RANGES` on purpose: the point
+    /// of the test is to hold TODAY's coverage against a fixed earlier one, and
+    /// a "narrow" side computed from the same constant as the wide side would
+    /// widen along with it and stop measuring anything.
+    fn narrow(face: &[u8]) -> FontAtlas {
+        let mut b = FontAtlasBuilder::new(face.to_vec(), GS, PX);
+        b.add_codepoint_range(GlyphSet::Text, '\u{0020}', '\u{007E}');
+        b.add_codepoint_range(GlyphSet::Text, '\u{00A0}', '\u{00FF}');
+        b.add_shaped_ascii();
+        let (pua_lo, _) = PRIVATE_USE;
+        let (own_lo, _) = OWNED_BLOCKS;
+        let (icons_lo, icons_hi) = HIGHBAY_ICONS_BLOCK;
+        let (markers_lo, markers_hi) = MARKERS;
+        let borrowed_hi = char::from_u32(own_lo as u32 - 1).expect("U+F7FF is a scalar value");
+        b.add_codepoint_range(GlyphSet::BorrowedIcons, pua_lo, borrowed_hi);
+        b.add_codepoint_range(GlyphSet::Markers, markers_lo, markers_hi);
+        b.add_codepoint_range(GlyphSet::OwnedIcons, icons_lo, icons_hi);
+        b.add_glyph(GlyphSet::Placeholder, 0);
+        b.build().expect("the pre-widening coverage bakes")
+    }
+
+    fn wide(face: &[u8]) -> FontAtlas {
+        let mut b = FontAtlasBuilder::new(face.to_vec(), GS, PX);
+        b.add_shipped_coverage();
+        b.build().expect("the shipped coverage bakes")
+    }
+
+    /// Every texel of one glyph's cell, at whatever address the cell has.
+    fn cell(a: &FontAtlas, e: &GlyphEntry) -> Vec<u8> {
+        let row = (e.atlas_w as u32 * a.channels) as usize;
+        (0..e.atlas_h as u32)
+            .flat_map(|dy| {
+                let o = (((e.atlas_y as u32 + dy) * a.width + e.atlas_x as u32) * a.channels) as usize;
+                a.pixel_data[o..o + row].to_vec()
+            })
+            .collect()
+    }
+
+    /// **Widening `TEXT_RANGES` MOVES CELLS AND MOVES NO TEXEL.**
+    ///
+    /// This is the case Wave O's `a_styled_bake_moves_no_texel_of_layer_zero`
+    /// could not cover and the reason it is worth having both. A style APPENDS
+    /// - every existing cell keeps its address, so nothing about the atlas has
+    /// to be re-examined. A text codepoint INSERTS: it lands in `GlyphSet::Text`,
+    /// which is set 1, so every later set slides down by as many cells as were
+    /// added and every one of those glyphs gets a new `u`/`v`.
+    ///
+    /// What makes that safe is that an MSDF cell is baked from the OUTLINE
+    /// alone and blitted into whichever cell it lands in, so the ink is
+    /// bit-identical at the new address. Measured on the real 48px bake, the
+    /// widening moved 19 of 211 cells in the plain atlas and 32 of 224 in the
+    /// merged one, changed no texel of either, and left all 103 dumped frames
+    /// pixel-identical.
+    ///
+    /// Both halves are asserted, and the MOVE is asserted first: a build where
+    /// nothing moved would pass the texel half vacuously.
+    #[test]
+    fn widening_the_text_ranges_moved_cells_but_no_texel() {
+        for face in [ROBOTO_REGULAR_ASCII, ROBOTO_ASCII_MSYMBOLS] {
+            let (before, after) = (narrow(face), wide(face));
+            assert_eq!(
+                (before.width, before.height),
+                (after.width, after.height),
+                "the texture is pinned - widening coverage must not resize it"
+            );
+            assert_eq!(
+                after.glyphs.len(),
+                before.glyphs.len() + 10,
+                "the widening is not the ten cells TEXT_RANGES declares"
+            );
+
+            let mut moved = 0;
+            for e in &before.glyphs {
+                let now = after
+                    .get_glyph(e.glyph_id)
+                    .unwrap_or_else(|| panic!("glyph {} lost its cell", e.glyph_id));
+                if (e.atlas_x, e.atlas_y) != (now.atlas_x, now.atlas_y) {
+                    moved += 1;
+                }
+                // Everything about the entry EXCEPT its address is unchanged:
+                // same size, same advance, same baseline, same layer.
+                let (mut a, mut b) = (*e, *now);
+                a.atlas_x = 0;
+                a.atlas_y = 0;
+                b.atlas_x = 0;
+                b.atlas_y = 0;
+                assert_eq!(a, b, "glyph {} changed more than its address", e.glyph_id);
+                // ...and so is every texel of the cell, at the new address.
+                assert_eq!(cell(&before, e), cell(&after, now), "glyph {} changed ink", e.glyph_id);
+            }
+            assert!(
+                moved > 0,
+                "vacuity: no cell moved, so this is the APPEND case and proves nothing \
+                 about an INSERT"
+            );
+        }
+    }
 }

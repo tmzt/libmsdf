@@ -44,15 +44,102 @@ pub use shaper::{NoFaceForStyle, ShapedGlyph, ShapedRun, StyledShaper, TextShape
 /// its first element to keep it that way.)
 ///
 /// * `U+0020..=U+007E` printable ASCII.
-/// * `U+00A0..=U+00FF` **Latin-1 Supplement**, the widening: it is what a
+/// * `U+00A0..=U+00FF` **Latin-1 Supplement**, the first widening: it is what a
 ///   European name needs (`José`, `Müller`, `Ångström`), it is contiguous, and
 ///   it stops nowhere near [`PRIVATE_USE`].
+/// * **Ten typographic codepoints** — eight of General Punctuation, plus the
+///   euro and the trade mark — the second widening, and the one that retires a
+///   STANDING HAZARD rather than adding a nicety. See below.
 ///
 /// What is NOT here still has an answer, and it is a visible one: a codepoint
 /// outside these ranges shapes to glyph 0, which the bundled faces draw as a
 /// hollow box (see [`ROBOTO_REGULAR_ASCII`]). There is no scrubbing step
 /// between arbitrary text and this list, and no panic if text steps outside it.
-pub const TEXT_RANGES: &[(char, char)] = &[('\u{0020}', '\u{007E}'), ('\u{00A0}', '\u{00FF}')];
+///
+/// # The typographic ten, and why each one earns a cell
+///
+/// The project's own evaluation checklist carried a rule that read *"the baked
+/// font atlas is ASCII-only: an em-dash or curly quote renders as an INVISIBLE
+/// SPACE in the live UI"*. It was true, it cost this repo real time, and
+/// `deps/libpipeline/README_AGY.md` lost three em dashes to it. That rule
+/// existed only because these were unbaked; it is now a statement about a
+/// SMALLER set, and the atlas is the thing that says which.
+///
+/// The set is deliberately a LIST rather than the General Punctuation block:
+/// `U+2000..=U+206F` is 112 cells against the 96 that were free, and a cell is
+/// not free — MEASURED at 934 bytes of gzipped payload each (the ten cost the
+/// shipped atlas 9,343 bytes gzipped, 297,745 to 307,088), because the texture
+/// is pinned and its empty cells compress to almost nothing while an MSDF glyph
+/// does not.
+///
+/// * `U+2013..=U+2014` **en dash, em dash.** The em dash is the hazard named
+///   above, and the most-used non-ASCII character in this tree's prose by an
+///   order of magnitude (11,671 occurrences across 285 files when this was
+///   written). The en dash is one cell more and is the same author's next
+///   reach, for a range.
+/// * `U+2018..=U+2019` **single quotation marks.** The other half of the named
+///   hazard, and the half nobody types on purpose: every editor with smart
+///   quotes turns `don't` into `don’t` silently.
+/// * `U+201C..=U+201D` **double quotation marks.** Same, for quoted speech.
+/// * `U+2022` **bullet.** `libhbui`'s `markdown::BULLET` is the ASCII hyphen
+///   and its doc says why: *"a `U+2022` bullet would render as an INVISIBLE
+///   SPACE ... and both are somebody else's change."* This is that change; the
+///   substitution above it can now be un-substituted.
+/// * `U+2026` **horizontal ellipsis.** The truncation affordance. Every
+///   truncating path in this workspace writes one today (`agent/context.rs`,
+///   `agent/tools.rs`, `agent/transport.rs`), and any of that text reaching a
+///   drawn surface drew a hole.
+/// * `U+20AC` **euro sign.** Latin-1 gave us `¢ £ ¤ ¥` and stopped one short of
+///   the one a European actually types. This is the same argument the Latin-1
+///   widening was made on, and it is stronger, because a currency symbol
+///   arrives in a USER'S data — a project name, a form value — where we do not
+///   control the input and cannot ASCII-fold it by convention.
+/// * `U+2122` **trade mark sign.** `©` and `®` are baked and `™` was not; one
+///   cell closes a set that was already two-thirds present.
+///
+/// # What was considered and DROPPED
+///
+/// * `U+2020`/`U+2021` **daggers**, `U+2030` **per mille**, `U+2032`/`U+2033`
+///   **primes**, `U+2039`/`U+203A` **single angle quotes** — nine cells, zero
+///   occurrences anywhere in this tree, and each is the second level of an
+///   apparatus whose first level is already baked: the footnote marker of a
+///   document with no footnotes, the per-mille beside a baked `%`, the prime
+///   that everyone mistypes as the now-baked `’`, and the inner nesting of the
+///   `«»` Latin-1 already carries.
+/// * **Arrows** (`U+2190..=U+2194`, `U+21D2`) — WANTED and measured (876
+///   occurrences across 111 files, third behind the em dash and the ellipsis),
+///   and **not available**: Roboto v2.138's `roboto-android` drop, the build
+///   every glyph here comes from, does not define them. Taking them from
+///   another build is precisely what `fonts/widen.py`'s provenance check
+///   exists to prevent, and a substituted arrow would pass every test in this
+///   repo and look wrong beside the prose. An arrow wants to be drawn into
+///   [`HIGHBAY_ICONS_BLOCK`] by `fonts/icon.py`, where the geometry is ours.
+///
+/// # Adding to this list moves cells, and that is measured rather than assumed
+///
+/// A new TEXT codepoint lands in [`GlyphSet::Text`], which is set 1 — so every
+/// later set shifts by as many cells as were added, and this widening moved
+/// [`GlyphSet::ShapedText`], [`GlyphSet::Markers`] and both icon sets down by
+/// ten. What did NOT move is any glyph's TEXELS: an MSDF cell is baked from the
+/// outline alone and blitted into whatever cell it lands in, so the ink is
+/// bit-identical at a new address, and every rendered frame in the workspace
+/// was byte-identical across the re-bake. That is a MEASUREMENT, not a
+/// property — `no_baked_glyph_changed_a_texel_when_the_ranges_widened` in
+/// `tests/coverage.rs` is what keeps it one.
+pub const TEXT_RANGES: &[(char, char)] = &[
+    // Printable ASCII, and the Latin-1 Supplement widening.
+    ('\u{0020}', '\u{007E}'),
+    ('\u{00A0}', '\u{00FF}'),
+    // The typographic ten. Written as the tight pairs they are, never as the
+    // block they sit in - see the doc above for what each one buys.
+    ('\u{2013}', '\u{2014}'), // en dash, em dash
+    ('\u{2018}', '\u{2019}'), // single quotation marks
+    ('\u{201C}', '\u{201D}'), // double quotation marks
+    ('\u{2022}', '\u{2022}'), // bullet
+    ('\u{2026}', '\u{2026}'), // horizontal ellipsis
+    ('\u{20AC}', '\u{20AC}'), // euro sign
+    ('\u{2122}', '\u{2122}'), // trade mark sign
+];
 
 /// **The carveout our own glyphs live in**, and the reason [`TEXT_RANGES`] can
 /// grow without a codepoint audit.
@@ -198,7 +285,7 @@ pub const MARKER_ARROW: char = '\u{F8F0}';
 ///
 /// It also buys a property across the two bundled faces: the borrowed half is
 /// LAST, so [`ROBOTO_REGULAR_ASCII`] and [`ROBOTO_ASCII_MSYMBOLS`] bake to the
-/// same 211 cells in the same places, and the merged face simply appends its
+/// same 221 cells in the same places, and the merged face simply appends its
 /// 13 borrowed ones. Before this the merged bake shifted Latin-1 and the
 /// placeholder by 13 cells relative to the plain one, because a vendor's
 /// `U+E0xx` sorts below our `U+F8xx` in a codepoint scan.
@@ -453,7 +540,7 @@ impl GlyphSet {
 ///
 /// So the cost is not CELLS after all. A style is a second LAYER with its own
 /// [`crate::ATLAS_ROWS`] x [`crate::ATLAS_COLS`] grid, which is what unblocked
-/// a styled bake: 224 + 205 + 205 cells do not fit one 320-cell grid and do fit
+/// a styled bake: 234 + 215 + 215 cells do not fit one 320-cell grid and do fit
 /// three.
 ///
 /// # `BoldItalic` is addressable and unbaked, deliberately

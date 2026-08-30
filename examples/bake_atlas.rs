@@ -57,12 +57,12 @@
 //!
 //! # `--style` fits now, because a style is a LAYER
 //!
-//! It did not when this flag was written: the shipped coverage is 224 cells of
-//! a 320-cell grid, a style is 205 (191 declared codepoints plus 14 shaped
+//! It did not when this flag was written: the shipped coverage is 234 cells of
+//! a 320-cell grid, a style is 215 (201 declared codepoints plus 14 shaped
 //! forms), and the grid was the whole atlas's budget. It is now one
 //! [`libmsdf::AtlasLayer`]'s budget - a layer is `(point size, style)` - so
-//! `--style bold --style italic` bakes 634 cells into three layers of 224, 205
-//! and 205, and the texture is the same 400x2000 it was.
+//! `--style bold --style italic` bakes 664 cells into three layers of 234, 215
+//! and 215, and the texture is the same 400x2000 it was.
 //!
 //! Two consequences for anyone running this:
 //!
@@ -76,9 +76,10 @@
 //!   required before a layered atlas will draw; `upload_msdf_atlas` uploads
 //!   every layer it is given and logs an error if the texture has fewer.
 //!
-//! MEASURED on the merged 48px face, gzip -9: the base atlas is 297,737 bytes,
-//! `--style bold` is 599,577 (+301,840) and `--style bold --style italic` is
-//! 942,284 (+342,707 for italic). Raw size is not the measure here - the
+//! MEASURED on the merged 48px face, gzip -9 (2026-08-29, after the
+//! typographic ten): the base atlas is 307,088 bytes, `--style bold` is 625,105
+//! (+318,017) and `--style bold --style italic` is 985,000 (+359,895 for
+//! italic). Raw size is not the measure here - the
 //! texture is pinned, so a layer adds its whole 400x2000 rectangle whether or
 //! not the cells fill it, and most of that is zeros.
 

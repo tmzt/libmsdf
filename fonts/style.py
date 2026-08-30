@@ -56,7 +56,17 @@ from fontTools.ttLib import TTFont
 # what the regular face covers, so `bold` is never narrower than the prose it
 # emphasizes - `a_style_face_covers_the_declared_text_ranges` checks the two
 # against each other.
-TEXT_RANGES = [(0x0020, 0x007E), (0x00A0, 0x00FF)]
+TEXT_RANGES = [
+    (0x0020, 0x007E),  # printable ASCII
+    (0x00A0, 0x00FF),  # Latin-1 Supplement
+    (0x2013, 0x2014),  # en dash, em dash
+    (0x2018, 0x2019),  # single quotation marks
+    (0x201C, 0x201D),  # double quotation marks
+    (0x2022, 0x2022),  # bullet
+    (0x2026, 0x2026),  # horizontal ellipsis
+    (0x20AC, 0x20AC),  # euro sign
+    (0x2122, 0x2122),  # trade mark sign
+]
 
 
 def check_ascii_identical(base, src):

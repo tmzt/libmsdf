@@ -504,6 +504,15 @@ mod tests {
 ///
 /// Coverage and the box are checked against the REAL BAKED ATLAS in
 /// `tests/coverage.rs`; these only pin the shaper's half.
+///
+/// **The uncovered examples have moved once already.** A curly quote and an
+/// ellipsis were the two here until [`crate::font::TEXT_RANGES`] gained the
+/// typographic ten, and they are covered now - so what stands in for them is
+/// the ARROW, which this tree's own prose reaches for constantly and which the
+/// upstream drop every bundled glyph comes from does not define, and the
+/// DAGGER, which that drop does define and which the range list deliberately
+/// left out. Two different reasons to be uncovered, and the shaper owes them
+/// the same answer.
 #[cfg(test)]
 mod uncovered_text_shapes_to_the_placeholder {
     use super::TextShaper;
@@ -513,11 +522,11 @@ mod uncovered_text_shapes_to_the_placeholder {
     }
 
     /// The strings that used to abort a debug build. A user's name is the case
-    /// that mattered - a curly quote is a bug in a label, but `José` is a
+    /// that mattered - an uncovered arrow is a bug in a label, but `José` is a
     /// person, and neither one may take the frame down.
     #[test]
-    fn a_curly_quote_and_an_ellipsis_and_a_name_all_shape() {
-        for text in ["Script \u{201c}Chat\u{201d}", "clipped\u{2026}", "Jos\u{e9}"] {
+    fn an_arrow_and_a_dagger_and_a_name_all_shape() {
+        for text in ["Script \u{2192}Chat", "note\u{2020}", "Jos\u{e9}"] {
             let run = shaper().shape(text);
             assert_eq!(
                 run.glyphs.len(),
@@ -527,14 +536,22 @@ mod uncovered_text_shapes_to_the_placeholder {
         }
     }
 
-    /// ...and the count is right, which is what tells the two apart: the curly
-    /// quotes are outside coverage and get the box, the accented `e` is INSIDE
-    /// it now and must not.
+    /// ...and the count is right, which is what tells them apart: the arrow and
+    /// the dagger are outside coverage and get the box, while the accented `e`
+    /// and the typographic ten are INSIDE it and must not.
     #[test]
     fn only_the_uncovered_characters_become_the_box() {
-        assert_eq!(shaper().shape("Script \u{201c}Chat\u{201d}").notdef_count(), 2);
-        assert_eq!(shaper().shape("clipped\u{2026}").notdef_count(), 1);
+        assert_eq!(shaper().shape("Script \u{2192}Chat\u{2192}").notdef_count(), 2);
+        assert_eq!(shaper().shape("note\u{2020}").notdef_count(), 1);
         assert_eq!(shaper().shape("Jos\u{e9} M\u{fc}ller").notdef_count(), 0);
+        // The widening, from the shaper's side: every one of the ten resolves.
+        assert_eq!(
+            shaper()
+                .shape("\u{2013}\u{2014}\u{2018}\u{2019}\u{201c}\u{201d}\u{2022}\u{2026}\u{20ac}\u{2122}")
+                .notdef_count(),
+            0,
+            "a typographic character that used to draw an invisible box still does"
+        );
     }
 
     /// Vacuity pin: a run of plain ASCII has no placeholders at all, so the

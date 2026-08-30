@@ -87,7 +87,7 @@ pub const MAX_ATLAS_LAYERS: usize = 256;
 ///   face ([`crate::font::ROBOTO_ASCII_MSYMBOLS`]) has always bought and what
 ///   this keeps. So the merged vocabulary inside a layer is *text plus Private
 ///   Use Area, at that size*.
-/// * **Style is what must DIFFER between layers.** A second face is 205 more
+/// * **Style is what must DIFFER between layers.** A second face is 215 more
 ///   cells and a layer holds 320, so two styles cannot share one; and they
 ///   need not, because a run does not usually alternate weight per glyph.
 ///
@@ -1238,7 +1238,7 @@ pub fn cap_height(face: &ttf_parser::Face) -> f64 {
 /// 40 rows is 800x2000 - inside the same floor - and holds 640 cells.**
 ///
 /// That used to be the only way emphasis could be baked: a [`GlyphStyle`] is
-/// 205 cells (191 declared codepoints plus 14 shaped forms), 96 were free, and
+/// 215 cells (201 declared codepoints plus 14 shaped forms), 86 are free, and
 /// nothing about ROWS could make room. **[`AtlasLayer`] retired that
 /// argument.** A style is a second LAYER, with its own 320 cells, so widening
 /// this buys nothing emphasis needs and still costs the one-time re-bake in
@@ -1246,7 +1246,7 @@ pub fn cap_height(face: &ttf_parser::Face) -> f64 {
 ///
 /// What would still want columns is a wider vocabulary AT ONE SIZE AND CUT -
 /// a symbol set that outgrew 320 cells of regular text plus icons. That has
-/// not happened; the shipped layer is 224 of 320.
+/// not happened; the shipped layer is 234 of 320.
 pub const ATLAS_COLS: u32 = 8;
 
 /// **Rows of glyph cells the atlas is baked to, whether or not they are used**
@@ -1284,24 +1284,36 @@ pub const ATLAS_COLS: u32 = 8;
 /// weakest target — which is the point of paying the one-time cost: there is no
 /// second churn available under that ceiling.
 ///
-/// What is queued today (`add_shipped_coverage`, merged face, 2026-08-16):
+/// What is queued today (`add_shipped_coverage`, merged face, 2026-08-29):
 ///
 /// ```text
 ///   95  printable ASCII                        U+0020..U+007E
 ///   96  Latin-1 Supplement                     U+00A0..U+00FF
+///   10  the typographic ten                    dashes, quotes, bullet,
+///                                              ellipsis, euro, trade mark
 ///   14  the shaped-ASCII superset beyond cmap  (ligatures, GSUB forms)
 ///   18  SYMBOLS: 13 borrowed + 4 drawn + 1 marker
 ///    1  glyph 0, the placeholder box
 ///  ---
-///  224  of 320   (96 free; the plain face is 211, being 4 borrowed short)
+///  234  of 320   (86 free; the plain face is 221, being 13 borrowed short)
 /// ```
 ///
-/// The text side is closed — those ranges are declared in
-/// [`crate::font::TEXT_RANGES`] and are not going to grow again. Only the
-/// SYMBOL side grows, and Tim's estimate (2026-08-16) is **~16 symbol glyphs
-/// total** across icons and markers; we are at 18. So the 96 free cells are
-/// roughly five times the entire intended symbol budget, and a wave that needs
-/// to raise this number should first ask why the symbol set quintupled.
+/// **The text side was called closed here, and it was not.** That line said
+/// those ranges "are not going to grow again"; on 2026-08-29 they grew by ten,
+/// because the atlas being ASCII-and-Latin-1 was the sole reason the project's
+/// evaluation checklist had to carry a rule about em dashes rendering as
+/// invisible spaces. So this is what the budget is spent on rather than a
+/// prediction about what it will be: 191 declared text codepoints became 201,
+/// and [`crate::font::TEXT_RANGES`] argues each of the ten and names the nine
+/// it turned down.
+///
+/// The SYMBOL side grows on its own axis, and Tim's estimate (2026-08-16) is
+/// **~16 symbol glyphs total** across icons and markers; we are at 18. The 86
+/// free cells are still roughly five times the entire intended symbol budget,
+/// and a wave that needs to raise this number should first ask why the symbol
+/// set quintupled - or, if it is the text side asking again, what the last ten
+/// bought (`widening_the_text_ranges_moved_cells_but_no_texel` records what
+/// they cost: 320 raw bytes, 9,343 gzipped, and no moved texel).
 ///
 /// Raising it past 40 rows is not a packing decision — at 48px cells it puts
 /// the texture over 2048 and becomes a question about which GPUs we support.

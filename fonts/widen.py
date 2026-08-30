@@ -1,5 +1,5 @@
 #!/usr/bin/env -S uv run --quiet --with fonttools python3
-"""Widen a baked Highbay face to Latin-1 Supplement, and give glyph 0 a box.
+"""Widen a baked Highbay face to the declared text coverage, and give glyph 0 a box.
 
 **This is how `fonts/*.ttf` are made, and it is additive by construction.**
 The existing glyphs are never re-derived: the script COPIES new outlines into
@@ -20,6 +20,19 @@ advances - which is why the check is not a formality.)
     ./widen.py <base.ttf> <out.ttf> <roboto-android/Roboto-Regular.ttf>
 
 Run for both faces; see `../src/font/mod.rs` for what each one is.
+
+# It is IDEMPOTENT, which is what lets the coverage grow twice
+
+`TEXT_RANGES` below mirrors the Rust declaration, and the script appends only
+the glyphs the base face does not already carry. So re-running it after a
+widening adds the NEW block and touches nothing else: a face that has already
+shipped Latin-1 comes back with the same glyph ids for every one of those
+glyphs, and only the new codepoints land above them.
+
+That is the property the atlas needs, not just a convenience. Cells are placed
+in `(set, glyph id)` order, so a glyph id that moved would move a CELL, and the
+whole "a re-bake is a strict superset" claim in `add_shipped_coverage` would be
+false for the half of the face that had already been baked.
 """
 
 import sys
@@ -28,10 +41,41 @@ from fontTools.pens.recordingPen import RecordingPen
 from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables._g_l_y_f import Glyph, GlyphCoordinates, flagOnCurve
 
-# Latin-1 Supplement. The declared widening, and the only text range added:
-# it is what a European name needs, it is contiguous, and it stops nowhere
-# near the Private Use Area the icon half lives in.
-LATIN1 = range(0x00A0, 0x0100)
+# **The declared text coverage**, mirroring `../src/font/mod.rs`'s
+# `TEXT_RANGES` - the same mirror `style.py` keeps, and checked against the
+# Rust side by `a_style_face_covers_the_declared_text_ranges`. Printable ASCII
+# is in the list because the check below proves the base already draws it
+# identically; the script then adds only what is missing.
+TEXT_RANGES = [
+    (0x0020, 0x007E),  # printable ASCII
+    (0x00A0, 0x00FF),  # Latin-1 Supplement
+    (0x2013, 0x2014),  # en dash, em dash
+    (0x2018, 0x2019),  # single quotation marks
+    (0x201C, 0x201D),  # double quotation marks
+    (0x2022, 0x2022),  # bullet
+    (0x2026, 0x2026),  # horizontal ellipsis
+    (0x20AC, 0x20AC),  # euro sign
+    (0x2122, 0x2122),  # trade mark sign
+]
+
+# OS/2 `ulUnicodeRange` bits for the blocks the ranges above reach into, so a
+# widened face DECLARES what it covers rather than only carrying it. Nothing in
+# this repo reads these - the atlas asks the `cmap` - but a face that lies about
+# its coverage is a trap for any other tool that opens it.
+#
+# Bit numbers are the OS/2 spec's: 0..31 live in `ulUnicodeRange1`, 32..63 in
+# `ulUnicodeRange2`.
+OS2_RANGE_BITS = {
+    (0x00A0, 0x00FF): 1,   # Latin-1 Supplement
+    (0x2000, 0x206F): 31,  # General Punctuation
+    (0x20A0, 0x20CF): 33,  # Currency Symbols
+    (0x2100, 0x214F): 35,  # Letterlike Symbols
+}
+
+
+def declared_codepoints():
+    """Every codepoint `TEXT_RANGES` names, in order."""
+    return [cp for lo, hi in TEXT_RANGES for cp in range(lo, hi + 1)]
 
 
 def check_ascii_identical(base, src):
@@ -132,11 +176,31 @@ def main():
     check_ascii_identical(base, src)
 
     have = set(base.getGlyphOrder())
+    base_cmap = base.getBestCmap()
     src_cmap = src.getBestCmap()
-    wanted = [n for cp in LATIN1 if (n := src_cmap.get(cp))]
-    if len(wanted) != len(LATIN1):
-        sys.exit("source does not cover all of Latin-1 Supplement")
+    declared = declared_codepoints()
+    missing = [cp for cp in declared if cp not in src_cmap]
+    if missing:
+        sys.exit(f"source does not cover {len(missing)} declared codepoints: {missing[:8]}")
 
+    # **The closure is taken over the codepoints being ADDED, not over the whole
+    # declared coverage**, and the difference is 11 dead glyphs per run.
+    #
+    # `have` can only recognise a glyph by NAME, and a name is only reliable for
+    # a glyph some `cmap` points at: the upstream face's `post` table is format
+    # 3.0, so fontTools synthesises `glyphNNNNN` from the glyph INDEX for
+    # everything else - and the base's indices are not the source's. So the
+    # accent components of a Latin-1 composite the base ALREADY carries come
+    # back from `closure` under a name `have` has never seen, and get appended a
+    # second time: byte-identical duplicates that no `cmap` entry and no
+    # composite in the face refers to.
+    #
+    # Restricting the closure to codepoints the base cannot already draw removes
+    # the question. Anything reached from there is genuinely new, or is an
+    # AGL-named glyph (`period` under `ellipsis`) whose name DOES resolve. The
+    # first widening is unaffected - on an ASCII-only base every Latin-1
+    # codepoint is new, which is exactly the set that run used.
+    wanted = [src_cmap[cp] for cp in declared if cp not in base_cmap]
     added = [n for n in closure(src, wanted) if n not in have]
     order = base.getGlyphOrder() + added
     base.setGlyphOrder(order)
@@ -152,10 +216,14 @@ def main():
     base["glyf"][".notdef"] = tofu(src)
     base["hmtx"][".notdef"] = src["hmtx"][".notdef"]
 
+    # Only codepoints the base does not already name, for the same reason the
+    # glyph append is filtered: re-pointing an entry that already resolves is a
+    # no-op at best and, if the two faces ever disagreed, a silent substitution.
     for table in base["cmap"].tables:
         if table.isUnicode():
-            for cp in LATIN1:
-                table.cmap[cp] = src_cmap[cp]
+            for cp in declared:
+                if cp not in table.cmap:
+                    table.cmap[cp] = src_cmap[cp]
 
     os2 = base["OS/2"]
     os2.usFirstCharIndex = min(
@@ -164,10 +232,19 @@ def main():
     os2.usLastCharIndex = min(
         0xFFFF, max(cp for t in base["cmap"].tables if t.isUnicode() for cp in t.cmap)
     )
-    os2.ulUnicodeRange1 |= 1 << 1  # Latin-1 Supplement
+    for (blo, bhi), bit in OS2_RANGE_BITS.items():
+        if not any(blo <= cp <= bhi for cp in declared):
+            continue
+        if bit < 32:
+            os2.ulUnicodeRange1 |= 1 << bit
+        else:
+            os2.ulUnicodeRange2 |= 1 << (bit - 32)
 
     base.save(out_path)
-    print(f"{out_path}: {len(order)} glyphs (+{len(added)}), {len(wanted)} new codepoints")
+    print(
+        f"{out_path}: {len(order)} glyphs (+{len(added)}), "
+        f"{len(wanted)} codepoints added, {len(declared)} declared"
+    )
 
 
 if __name__ == "__main__":
