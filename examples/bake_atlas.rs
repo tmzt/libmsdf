@@ -30,7 +30,7 @@
 //! Both bundled faces carry the blocks this repo DRAWS
 //! ([`libmsdf::OWNED_BLOCKS`] — the edge markers and our own UI icons, as
 //! opposed to the Material Symbols it borrows), so the two bakes differ only
-//! by the borrowed cells - thirteen of them today, and they are baked LAST, so
+//! by the borrowed cells - eighteen of them today, and they are baked LAST, so
 //! the two atlases agree cell-for-cell everywhere else.
 //!
 //! Cells are laid out in the order [`libmsdf::GlyphSet`] declares -
@@ -57,11 +57,11 @@
 //!
 //! # `--style` fits now, because a style is a LAYER
 //!
-//! It did not when this flag was written: the shipped coverage is 234 cells of
+//! It did not when this flag was written: the shipped coverage is 239 cells of
 //! a 320-cell grid, a style is 215 (201 declared codepoints plus 14 shaped
 //! forms), and the grid was the whole atlas's budget. It is now one
 //! [`libmsdf::AtlasLayer`]'s budget - a layer is `(point size, style)` - so
-//! `--style bold --style italic` bakes 664 cells into three layers of 234, 215
+//! `--style bold --style italic` bakes 669 cells into three layers of 239, 215
 //! and 215, and the texture is the same 400x2000 it was.
 //!
 //! Two consequences for anyone running this:

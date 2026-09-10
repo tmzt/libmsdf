@@ -92,7 +92,7 @@ pub const MAX_ATLAS_LAYERS: usize = 256;
 ///   need not, because a run does not usually alternate weight per glyph.
 ///
 /// The Private Use Area is deliberately NOT duplicated per style: an icon has
-/// no weight, the outlines would be identical, and 13 borrowed cells per style
+/// no weight, the outlines would be identical, and 18 borrowed cells per style
 /// would buy a distinction no caller can make. A bold run containing an icon
 /// takes one layer change, which is the ordinary cost of any layer change and
 /// far rarer than text beside an icon.
@@ -1238,7 +1238,7 @@ pub fn cap_height(face: &ttf_parser::Face) -> f64 {
 /// 40 rows is 800x2000 - inside the same floor - and holds 640 cells.**
 ///
 /// That used to be the only way emphasis could be baked: a [`GlyphStyle`] is
-/// 215 cells (201 declared codepoints plus 14 shaped forms), 86 are free, and
+/// 215 cells (201 declared codepoints plus 14 shaped forms), 81 are free, and
 /// nothing about ROWS could make room. **[`AtlasLayer`] retired that
 /// argument.** A style is a second LAYER, with its own 320 cells, so widening
 /// this buys nothing emphasis needs and still costs the one-time re-bake in
@@ -1246,7 +1246,7 @@ pub fn cap_height(face: &ttf_parser::Face) -> f64 {
 ///
 /// What would still want columns is a wider vocabulary AT ONE SIZE AND CUT -
 /// a symbol set that outgrew 320 cells of regular text plus icons. That has
-/// not happened; the shipped layer is 234 of 320.
+/// not happened; the shipped layer is 239 of 320.
 pub const ATLAS_COLS: u32 = 8;
 
 /// **Rows of glyph cells the atlas is baked to, whether or not they are used**
@@ -1292,10 +1292,10 @@ pub const ATLAS_COLS: u32 = 8;
 ///   10  the typographic ten                    dashes, quotes, bullet,
 ///                                              ellipsis, euro, trade mark
 ///   14  the shaped-ASCII superset beyond cmap  (ligatures, GSUB forms)
-///   18  SYMBOLS: 13 borrowed + 4 drawn + 1 marker
+///   23  SYMBOLS: 18 borrowed + 4 drawn + 1 marker
 ///    1  glyph 0, the placeholder box
 ///  ---
-///  234  of 320   (86 free; the plain face is 221, being 13 borrowed short)
+///  239  of 320   (81 free; the plain face is 221, being 18 borrowed short)
 /// ```
 ///
 /// **The text side was called closed here, and it was not.** That line said
@@ -1308,7 +1308,7 @@ pub const ATLAS_COLS: u32 = 8;
 /// it turned down.
 ///
 /// The SYMBOL side grows on its own axis, and Tim's estimate (2026-08-16) is
-/// **~16 symbol glyphs total** across icons and markers; we are at 18. The 86
+/// **~16 symbol glyphs total** across icons and markers; we are at 23. The 81
 /// free cells are still roughly five times the entire intended symbol budget,
 /// and a wave that needs to raise this number should first ask why the symbol
 /// set quintupled - or, if it is the text side asking again, what the last ten
@@ -1668,7 +1668,7 @@ impl FontAtlasBuilder {
     /// [`add_shipped_coverage`]. Markers, our own icons and the borrowed
     /// Material Symbols are style-INVARIANT (see [`GlyphSet::style`]): a bold
     /// arrowhead is not a thing, and a second copy of `send` in a heavier
-    /// weight would be 13 cells spent on a distinction no caller can make. A
+    /// weight would be 18 cells spent on a distinction no caller can make. A
     /// style face is prose, and prose is [`crate::font::TEXT_RANGES`].
     ///
     /// # Every cell it queues sorts AFTER every cell that already existed

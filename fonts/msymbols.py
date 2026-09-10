@@ -17,14 +17,16 @@ difference between the two faces.
 
 # It reproduces the face that already shipped, and PROVES it
 
-The nine icons in `MSYMBOLS_ICONS` were merged in by an uncommitted script
-(`48c58da`), so the first job here is to be that script rather than a second
-one that merely looks similar. Every icon already in the base face is compared
-outline-for-outline and advance-for-advance against the source, and any
-difference aborts the run - the same provenance check `widen.py` makes against
-Roboto, and for the same reason: a face built half from one upstream build and
-half from another is a defect nobody would see until a glyph looked subtly
-wrong.
+The first nine of the eighteen icons in `MSYMBOLS_ICONS` were merged in by an
+uncommitted script (`48c58da`), so the first job here is to be that script
+rather than a second one that merely looks similar. (This one has run twice
+since, for four icons and then for five, and the shipped face's glyph ids show
+all three waves: 111..=119, 231..=234, 247..=251.) Every icon already in the
+base face is compared outline-for-outline and advance-for-advance against the
+source, and any difference aborts the run - the same provenance check
+`widen.py` makes against Roboto, and for the same reason: a face built half
+from one upstream build and half from another is a defect nobody would see
+until a glyph looked subtly wrong.
 
 Source: **the `variablefont/` asset of
 <https://github.com/google/material-design-icons>** - Material Symbols
@@ -40,6 +42,13 @@ legacy Material Icons aliases as well: `edit` answers to five codepoints, of
 which `U+F097` is the declared one). Taking the declared value is what keeps
 `MSYMBOLS_ICONS` a statement about a published catalogue rather than about
 whichever alias a scan happened to pick.
+
+`check` is the sharp case, because the alias is the one everybody remembers:
+the face draws it at both `U+E5CA` and `U+E668`, `U+E5CA` is the Material
+*Icons* codepoint, and the Material *Symbols* manifest declares NO name at
+`U+E5CA` at all. Both reach the same outline today, so taking the alias would
+have drawn the right tick under a codepoint the published catalogue does not
+use, and nothing here or downstream would have said so.
 
 # What is NOT here
 
@@ -60,7 +69,7 @@ from fontTools.varLib.instancer import instantiateVariableFont
 
 UPEM = 2048
 
-# The variable face's default location - the instance the shipped nine were
+# The variable face's default location - the instance every shipped icon was
 # taken at, and the one the provenance check below re-derives.
 LOCATION = {"FILL": 0, "GRAD": 0, "opsz": 24, "wght": 400}
 
@@ -72,8 +81,13 @@ LOCATION = {"FILL": 0, "GRAD": 0, "opsz": 24, "wght": 400}
 # missing-asset error for the caller to report rather than substitute.
 ICONS = [
     ("chat", 0xE0C9),
+    ("check", 0xE668),
+    ("chevron_left", 0xE5CB),
+    ("chevron_right", 0xE5CC),
     ("code", 0xE86F),
     ("edit", 0xF097),
+    ("expand_less", 0xE5CE),
+    ("expand_more", 0xE5CF),
     ("home", 0xE9B2),
     ("library_books", 0xE02F),
     ("menu", 0xE5D2),

@@ -162,7 +162,7 @@ pub const PRIVATE_USE: (char, char) = ('\u{E000}', '\u{F8FF}');
 /// one comparison: `cp >= U+F800`.
 ///
 /// Everything above this line is drawn in `fonts/` by a script in this repo;
-/// everything below is borrowed at some vendor's codepoints (the nine
+/// everything below is borrowed at some vendor's codepoints (the eighteen
 /// [`MSYMBOLS_ICONS`] top out at `U+F0D3`, more than two thousand codepoints
 /// clear). `owned_blocks_are_the_top_of_the_carveout` checks it rather than
 /// leaving it to memory.
@@ -211,8 +211,8 @@ pub const HIGHBAY_ICONS_BLOCK: (char, char) = ('\u{F800}', '\u{F8EF}');
 /// from [`MARKER_ARROW`]. Both halves of that matter:
 ///
 /// * **At the top**, because Material Symbols' codepoints are the vendor's and
-///   run far below here (the bundled nine top out at `U+F0D3`), so a borrowed
-///   icon and a drawn marker can never land on the same codepoint — checked by
+///   run far below here (the bundled eighteen top out at `U+F0D3`), so a
+///   borrowed icon and a drawn marker can never land on the same codepoint — checked by
 ///   `icons_sort_below_the_marker_block`, not by remembering.
 /// * **Upward**, so a marker added above every existing one never renumbers a
 ///   marker that has already shipped. Its atlas CELL is held still by a
@@ -271,10 +271,10 @@ pub const MARKER_ARROW: char = '\u{F8F0}';
 /// anyway — the key a cell is fetched by is a GLYPH ID, which is what the
 /// shaper hands back. Glyph ids are not ours either: re-merge Roboto with
 /// Material Symbols differently and every id moves (in the shipped merged face
-/// the borrowed icons are glyphs 111..=119 and 231..=234, two merge waves,
-/// with 107 Latin-1 glyphs sitting between them). The SET is the part of the
-/// order that is ours; the glyph id orders within it, and it does so
-/// append-only because every script in `fonts/` appends.
+/// the borrowed icons are glyphs 111..=119, 231..=234 and 247..=251, three
+/// merge waves, with 107 Latin-1 glyphs sitting between the first two). The
+/// SET is the part of the order that is ours; the glyph id orders within it,
+/// and it does so append-only because every script in `fonts/` appends.
 ///
 /// # The order runs most-fixed to most-fluid
 ///
@@ -286,7 +286,7 @@ pub const MARKER_ARROW: char = '\u{F8F0}';
 /// It also buys a property across the two bundled faces: the borrowed half is
 /// LAST, so [`ROBOTO_REGULAR_ASCII`] and [`ROBOTO_ASCII_MSYMBOLS`] bake to the
 /// same 221 cells in the same places, and the merged face simply appends its
-/// 13 borrowed ones. Before this the merged bake shifted Latin-1 and the
+/// 18 borrowed ones. Before this the merged bake shifted Latin-1 and the
 /// placeholder by 13 cells relative to the plain one, because a vendor's
 /// `U+E0xx` sorts below our `U+F8xx` in a codepoint scan.
 ///
@@ -540,7 +540,7 @@ impl GlyphSet {
 ///
 /// So the cost is not CELLS after all. A style is a second LAYER with its own
 /// [`crate::ATLAS_ROWS`] x [`crate::ATLAS_COLS`] grid, which is what unblocked
-/// a styled bake: 234 + 215 + 215 cells do not fit one 320-cell grid and do fit
+/// a styled bake: 239 + 215 + 215 cells do not fit one 320-cell grid and do fit
 /// three.
 ///
 /// # `BoldItalic` is addressable and unbaked, deliberately
@@ -734,7 +734,20 @@ pub const ROBOTO_REGULAR_ASCII: &[u8] = include_bytes!("../../fonts/Roboto-Regul
 /// menu U+E5D2   more_vert U+E5D4   send U+E163   chat U+E0C9   person U+F0D3
 /// home U+E9B2   search U+EF7A      library_books U+E02F        settings U+E8B8
 /// code U+E86F   edit U+F097        undo U+E166   redo U+E15A
+/// check U+E668  chevron_left U+E5CB             chevron_right U+E5CC
+/// expand_less U+E5CE              expand_more U+E5CF
 /// ```
+///
+/// The last five are the four chevrons and the tick, added 2026-09-09 because
+/// components in this workspace were drawing them as `<SdfLine>` strokes
+/// beside icons that came from the face, or leaving them out: `checkbox.tsx`
+/// composes the tick from two lines, `props_sheet.tsx` composes two chevrons
+/// from two more, and `genius_canvas.tsx` omits its chevron entirely. Each
+/// says in its own words that the manifest carries no such name, which was
+/// true and is the one reason a manifest gets widened rather than a shape
+/// substituted. See [`MSYMBOLS_ICONS`] for why the vertical chevrons are
+/// `expand_less`/`expand_more` rather than a `chevron_*` pair, and why `check`
+/// is `U+E668`.
 ///
 /// The merge is `fonts/msymbols.py`, which is additive and verifies every
 /// already-merged icon against the upstream build before appending a new one.
@@ -825,10 +838,32 @@ pub const fn bundled_style_face(style: GlyphStyle) -> Option<&'static [u8]> {
 /// five, of which `U+F097` is the published one. Taking the declared value is
 /// what keeps this a statement about a catalogue rather than about whichever
 /// alias a scan picked.
+///
+/// `check` is the case where that rule bites in the other direction, and it is
+/// worth naming because the wrong answer is the memorable one: the face draws
+/// it at both `U+E5CA` and `U+E668`, `U+E5CA` is the Material *Icons*
+/// codepoint everyone remembers, and the Material *Symbols* manifest declares
+/// no name at all at `U+E5CA` — `check` is `U+E668`. Both codepoints reach the
+/// same outline in today's face, so picking the alias would have drawn the
+/// right tick under a codepoint the published catalogue does not use.
+///
+/// # The four chevrons are not four `chevron_*` names
+///
+/// Material publishes `chevron_left`/`chevron_right` for W and E, and
+/// `expand_less`/`expand_more` for N and S. There is no `chevron_up` or
+/// `chevron_down` to reach for, and the asymmetry is Material's rather than an
+/// omission here: the vertical pair is named for what it does to a disclosure
+/// row, and it is the same chevron rotated. A caller wanting "the chevron
+/// pointing north" asks for `expand_less`.
 pub const MSYMBOLS_ICONS: &[(&str, char)] = &[
     ("chat", '\u{E0C9}'),
+    ("check", '\u{E668}'),
+    ("chevron_left", '\u{E5CB}'),
+    ("chevron_right", '\u{E5CC}'),
     ("code", '\u{E86F}'),
     ("edit", '\u{F097}'),
+    ("expand_less", '\u{E5CE}'),
+    ("expand_more", '\u{E5CF}'),
     ("home", '\u{E9B2}'),
     ("library_books", '\u{E02F}'),
     ("menu", '\u{E5D2}'),

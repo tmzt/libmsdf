@@ -39,8 +39,8 @@ use std::path::Path;
 const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
 
 use libmsdf::{
-    FontAtlas, HIGHBAY_ICONS, MARKERS, MARKER_ARROW, ROBOTO_REGULAR_ASCII, TextShaper,
-    highbay_codepoint,
+    FontAtlas, HIGHBAY_ICONS, MARKERS, MARKER_ARROW, MSYMBOLS_ICONS, ROBOTO_ASCII_MSYMBOLS,
+    ROBOTO_REGULAR_ASCII, TextShaper, highbay_codepoint, msymbols_codepoint,
 };
 
 /// The `ICONS = [...]` list out of `fonts/icon.py`, as `(name, codepoint)`.
@@ -48,11 +48,22 @@ use libmsdf::{
 /// Parsed rather than imported because one side is Python. The parse is
 /// deliberately narrow - it reads the bracketed block after `ICONS = [` and
 /// takes the first two fields of each tuple - so a change to the file's SHAPE
-/// fails loudly here instead of silently matching nothing. The
+/// fails loudly here instead of silently matching nothing (a codepoint that is
+/// not a bare `0x....` panics by name rather than being skipped). The
 /// `entries_were_actually_found` assertion below is the guard against a parse
 /// that quietly reads zero.
 fn baker_manifest() -> BTreeMap<String, u32> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts/icon.py");
+    icons_list("fonts/icon.py")
+}
+
+/// The `ICONS = [("name", 0x....), ...]` list out of one of `fonts/`'s bakers.
+///
+/// Two scripts declare a manifest in exactly this shape - `icon.py` for the
+/// glyphs this repo DRAWS and `msymbols.py` for the ones it BORROWS - and both
+/// are restated in Rust, so both need the same check. The parse stays narrow on
+/// purpose (see above); each caller has its own `*_were_actually_found` guard.
+fn icons_list(rel: &str) -> BTreeMap<String, u32> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
 
@@ -75,7 +86,11 @@ fn baker_manifest() -> BTreeMap<String, u32> {
             continue;
         };
         let name = name.trim().trim_matches('"').trim_matches('\'');
-        let code = code.trim();
+        // `icon.py`'s tuples carry a third field (the draw function), so the
+        // codepoint is bare there; `msymbols.py`'s are pairs, so the closing
+        // paren rides along on the last field. One `trim_end_matches` reads
+        // both, and anything else still reaches the `0x....` panic below.
+        let code = code.trim().trim_end_matches(')').trim();
         let Some(hex) = code.strip_prefix("0x").or_else(|| code.strip_prefix("0X")) else {
             panic!("{name}'s codepoint in icon.py is `{code}`, not the `0x....` this parse reads");
         };
@@ -274,4 +289,259 @@ fn every_name_rust_resolves_reaches_a_baked_cell() {
         broken.len(),
         broken.join("\n  ")
     );
+}
+
+// ── the BORROWED set: the same duplication, one file over ───────────────
+
+/// The `ICONS = [...]` list out of `fonts/msymbols.py`, as `(name, codepoint)`.
+///
+/// The borrowed manifest is stated twice for the same reason the drawn one is,
+/// and the codepoints are hand-maintained for a sharper reason: they are
+/// Material's DECLARED ones, not whichever alias the source face answers to.
+/// `check` is drawn at both `U+E5CA` and `U+E668` and only `U+E668` is
+/// published; `edit` answers to five and only `U+F097` is. So neither side can
+/// derive its value from the font, and nothing compiled either against the
+/// other until this.
+fn msymbols_manifest() -> BTreeMap<String, u32> {
+    icons_list("fonts/msymbols.py")
+}
+
+#[test]
+fn msymbols_entries_were_actually_found() {
+    let baked = msymbols_manifest();
+    assert!(
+        baked.len() >= 13,
+        "parsed only {} entries from msymbols.py - the parse broke, and every \
+         other borrowed-set test in this file would have passed by reading nothing",
+        baked.len()
+    );
+}
+
+/// **The merge script and Rust name the same icons at the same codepoints.**
+///
+/// Both directions, because the two failures are different and both are quiet.
+/// A name in Rust and not in `msymbols.py` resolves to a codepoint the merged
+/// face never received a glyph for, and the atlas draws an uncovered cell as a
+/// visible tofu box with no finding. A name in `msymbols.py` and not in Rust is
+/// quieter still: `msymbols_codepoint` answers `None`, which callers are told to
+/// report as a MISSING ASSET, so a forgotten line looks exactly like an icon
+/// nobody merged.
+#[test]
+fn the_borrowed_manifest_and_the_merge_script_agree() {
+    let baked = msymbols_manifest();
+    let mut wrong = Vec::new();
+    for &(name, ch) in MSYMBOLS_ICONS {
+        match baked.get(name) {
+            None => wrong.push(format!(
+                "`{name}` is in MSYMBOLS_ICONS and NOT in msymbols.py's ICONS - Rust \
+                 resolves it to U+{:04X}, which the merge never gave the face a glyph for",
+                ch as u32
+            )),
+            Some(&code) if code != ch as u32 => wrong.push(format!(
+                "`{name}` is U+{:04X} in Rust and U+{code:04X} in msymbols.py - one of \
+                 the two is not the codepoint Material declares",
+                ch as u32
+            )),
+            Some(_) => {}
+        }
+    }
+    for (name, code) in &baked {
+        if msymbols_codepoint(name).is_none() {
+            wrong.push(format!(
+                "`{name}` (U+{code:04X}) is merged into the face and unreachable from \
+                 Rust - `msymbols_codepoint` answers `None`, which reads as a missing asset"
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} borrowed icon(s) disagree between msymbols.py and Rust:\n  {}\n\n\
+         `fonts/msymbols.py`'s ICONS decides what is merged and where; \
+         `src/font/mod.rs`'s MSYMBOLS_ICONS restates it so a name can be resolved. \
+         Re-bake with the invocation in msymbols.py's header after fixing whichever \
+         is wrong.",
+        wrong.len(),
+        wrong.join("\n  ")
+    );
+}
+
+/// **A borrowed name reaches a glyph WITH AN OUTLINE**, in the face that ships
+/// it.
+///
+/// `covers` - the gate every icon call site is told to ask first - answers from
+/// the `cmap` alone, so it cannot tell a merged glyph from a `cmap` entry
+/// pointing at an empty one. That is not hypothetical for this set: the merge
+/// takes outlines from an upstream face by NAME and writes them under a
+/// codepoint, and a mapping written without its glyph would pass `covers`,
+/// shape without a notdef, and draw nothing at all - worse than the tofu box,
+/// because nothing is visible to notice.
+///
+/// The advance is checked with it: the borrowed set advances one em, which is
+/// what puts a Material icon and one of ours on the same pitch in a row
+/// (`highbay_icon_contract_holds` asserts our half against the same number).
+#[test]
+fn every_borrowed_name_has_an_outline_and_a_one_em_advance() {
+    let face = ttf_parser::Face::parse(ROBOTO_ASCII_MSYMBOLS, 0).expect("the merged face parses");
+    let upem = face.units_per_em();
+    let mut broken = Vec::new();
+    for &(name, ch) in MSYMBOLS_ICONS {
+        let Some(gid) = face.glyph_index(ch) else {
+            broken.push(format!("`{name}` (U+{:04X}) has NO GLYPH in the merged face", ch as u32));
+            continue;
+        };
+        match face.glyph_bounding_box(gid) {
+            None => broken.push(format!(
+                "`{name}` (U+{:04X}) is glyph {} and has NO OUTLINE - it would \
+                 shape cleanly and draw nothing",
+                ch as u32,
+                gid.0
+            )),
+            Some(bb) if bb.x_max <= bb.x_min || bb.y_max <= bb.y_min => broken.push(format!(
+                "`{name}` (U+{:04X}) has an empty bounding box {bb:?}",
+                ch as u32
+            )),
+            Some(_) => {}
+        }
+        match face.glyph_hor_advance(gid) {
+            Some(a) if a == upem => {}
+            other => broken.push(format!(
+                "`{name}` (U+{:04X}) advances {other:?}, not the one em ({upem}) the \
+                 set is placed on",
+                ch as u32
+            )),
+        }
+    }
+    assert!(broken.is_empty(), "{} borrowed icon(s):\n  {}", broken.len(), broken.join("\n  "));
+
+    // And the PLAIN face carries none of them - that is what "merged" means,
+    // and it is the vacuity pin for the loop above having read the right face.
+    let plain = ttf_parser::Face::parse(ROBOTO_REGULAR_ASCII, 0).expect("the plain face parses");
+    for &(name, ch) in MSYMBOLS_ICONS {
+        assert!(
+            plain.glyph_index(ch).is_none(),
+            "`{name}` (U+{:04X}) is in the PLAIN face - only the merged one borrows",
+            ch as u32
+        );
+    }
+}
+
+
+// ── and what the bake actually DRAWS ────────────────────────────────────
+
+/// **Render the borrowed set out to be READ**, at the sizes it is used at.
+///
+/// ```text
+/// LIBMSDF_DUMP=<dir> CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm \
+///   cargo test -p libmsdf --features cpu-bake --test icons_agree_with_the_baker
+/// ```
+///
+/// Nothing is asserted: the property here is "does `check` read as a bare tick
+/// and do the four chevrons point where their names say", and no threshold
+/// answers that. The tests above can tell that a glyph exists, has an outline
+/// and lands in a cell; a glyph that is present, inked and pointing the WRONG
+/// WAY passes every one of them.
+///
+/// It bakes rather than reading a fixture because `tests/fixtures` holds the
+/// PLAIN face's atlas and the borrowed half is only in the merged one - hence
+/// the `cpu-bake` gate. The rasteriser is `sdf_render.wgsl`'s case `8u`
+/// arithmetic on the CPU, exactly as `highbay_icons.rs`'s `dump_the_trio`
+/// reproduces it, and a 6x nearest-neighbour blow-up is written beside the 1:1
+/// frame because a 16px glyph cannot be judged at page scale.
+#[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
+#[test]
+fn dump_the_borrowed_set() {
+    use libmsdf::drawlist::{LINE_BOX_RATIO, screen_px_range};
+    use libmsdf::font::FontAtlasBuilder;
+
+    let Ok(dir) = std::env::var("LIBMSDF_DUMP") else { return };
+    std::fs::create_dir_all(&dir).unwrap();
+
+    const PX_RANGE: f32 = 6.0;
+    let mut b = FontAtlasBuilder::new(ROBOTO_ASCII_MSYMBOLS.to_vec(), 48, PX_RANGE as f64);
+    b.add_shipped_coverage();
+    let atlas = b.build().expect("the merged coverage bakes");
+    let shaper = TextShaper::new(ROBOTO_ASCII_MSYMBOLS.to_vec()).expect("the merged face parses");
+
+    const SIZES: [f32; 3] = [16.0, 28.0, 48.0];
+    const PAD: f32 = 10.0;
+    let col_w = SIZES.iter().cloned().fold(0.0f32, f32::max) * LINE_BOX_RATIO + PAD;
+    let w = (col_w * MSYMBOLS_ICONS.len() as f32 + PAD).ceil() as usize;
+    let h = (SIZES.iter().map(|s| s * LINE_BOX_RATIO + PAD).sum::<f32>() + PAD).ceil() as usize;
+    let mut img = vec![255u8; w * h];
+
+    let mut top = PAD;
+    for &size in &SIZES {
+        let line_h = size * LINE_BOX_RATIO;
+        for (i, &(_, ch)) in MSYMBOLS_ICONS.iter().enumerate() {
+            let run = shaper.shape(ch.encode_utf8(&mut [0u8; 4]));
+            let e = *atlas.get_glyph(run.glyphs[0].glyph_id).expect("a borrowed icon has a cell");
+            let scale = e.atlas_h as f32 / line_h;
+            let spr = screen_px_range(PX_RANGE, e.atlas_h as f32, size);
+            let (left, top_y) = (PAD + i as f32 * col_w, top);
+            for py in 0..h {
+                for px in 0..w {
+                    let acx = (px as f32 + 0.5 - left) * scale;
+                    let acy = (py as f32 + 0.5 - top_y) * scale;
+                    if acx < 0.0 || acy < 0.0 || acx >= e.atlas_w as f32 || acy >= e.atlas_h as f32
+                    {
+                        continue;
+                    }
+                    let sd = bilinear(&atlas, e.atlas_x as f32 + acx + 0.5, e.atlas_y as f32 + acy + 0.5);
+                    let a = (spr * (sd - 0.5) + 0.5).clamp(0.0, 1.0);
+                    let p = &mut img[py * w + px];
+                    *p = (*p as f32 * (1.0 - a)).round() as u8;
+                }
+            }
+        }
+        top += line_h + PAD;
+    }
+
+    write_gray(&format!("{dir}/msymbols-icons.png"), w, h, &img);
+    const Z: usize = 6;
+    let mut big = vec![0u8; w * Z * h * Z];
+    for y in 0..h * Z {
+        for x in 0..w * Z {
+            big[y * w * Z + x] = img[(y / Z) * w + x / Z];
+        }
+    }
+    write_gray(&format!("{dir}/msymbols-icons-zoom.png"), w * Z, h * Z, &big);
+    eprintln!(
+        "DUMPED {dir}/msymbols-icons.png (+ -zoom); columns are {}",
+        MSYMBOLS_ICONS.iter().map(|&(n, _)| n).collect::<Vec<_>>().join(" ")
+    );
+}
+
+/// Bilinear tap into the atlas in texel coordinates - `textureSampleLevel` with
+/// a linear sampler, as `highbay_icons.rs` and `text_fidelity.rs` reproduce it.
+#[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
+fn bilinear(a: &FontAtlas, u: f32, v: f32) -> f32 {
+    let texel = |x: i32, y: i32| {
+        let x = x.clamp(0, a.width as i32 - 1) as u32;
+        let y = y.clamp(0, a.height as i32 - 1) as u32;
+        let o = ((y * a.width + x) * a.channels) as usize;
+        [
+            a.pixel_data[o] as f32 / 255.0,
+            a.pixel_data[o + 1] as f32 / 255.0,
+            a.pixel_data[o + 2] as f32 / 255.0,
+        ]
+    };
+    let (fx, fy) = (u - 0.5, v - 0.5);
+    let (x0, y0) = (fx.floor() as i32, fy.floor() as i32);
+    let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+    let mut c = [0.0f32; 3];
+    for (i, ci) in c.iter_mut().enumerate() {
+        let t = texel(x0, y0)[i] * (1.0 - tx) + texel(x0 + 1, y0)[i] * tx;
+        let b = texel(x0, y0 + 1)[i] * (1.0 - tx) + texel(x0 + 1, y0 + 1)[i] * tx;
+        *ci = t * (1.0 - ty) + b * ty;
+    }
+    c[0].min(c[1]).max(c[0].max(c[1]).min(c[2]))
+}
+
+#[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
+fn write_gray(path: &str, w: usize, h: usize, data: &[u8]) {
+    let file = std::fs::File::create(path).unwrap();
+    let mut enc = png::Encoder::new(file, w as u32, h as u32);
+    enc.set_color(png::ColorType::Grayscale);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header().unwrap().write_image_data(data).unwrap();
 }

@@ -1,7 +1,7 @@
 //! **The atlas is a texture ARRAY, and a layer is `(point size, style)`.**
 //!
 //! Wave K put a style in the top two bits of the glyph id and then could not
-//! bake one: the shipped coverage is 234 cells of a 320-cell grid and a style
+//! bake one: the shipped coverage is 239 cells of a 320-cell grid and a style
 //! needs 215. The grid was the atlas's budget. It is now one LAYER's budget,
 //! selected per glyph from the glyph TABLE, and the four things that had to
 //! stay true are the four things this file checks:
@@ -11,7 +11,7 @@
 //!   `0` and was read nowhere - so a single-layer atlas is still written at
 //!   `ATLAS_VERSION`, and the committed fixture round-trips byte for byte.
 //! * **A styled bake fits.** `add_shipped_coverage` plus both bundled style
-//!   faces is 664 cells, which no single grid holds and three layers do.
+//!   faces is 669 cells, which no single grid holds and three layers do.
 //! * **A layer the atlas lacks is REFUSED**, never answered with layer 0 - the
 //!   same rule `StyledGlyphError` enforces one axis over, for the same reason.
 //! * **An older file loads, and a newer one is refused cleanly.**
@@ -379,7 +379,7 @@ mod baked {
     };
 
     /// Small cells and a small range: this is a test about LAYERS and cell
-    /// placement, not about field quality, and 664 cells of msdfgen at 48px
+    /// placement, not about field quality, and 669 cells of msdfgen at 48px
     /// would be a minute of it.
     const GS: u32 = 16;
     const PX_RANGE: f64 = 2.0;
@@ -401,7 +401,7 @@ mod baked {
     }
 
     /// **THE UNBLOCKING TEST.** The full shipped coverage plus both bundled
-    /// style faces is 664 cells. No single grid holds it - 320 is the pin, and
+    /// style faces is 669 cells. No single grid holds it - 320 is the pin, and
     /// `ATLAS_ROWS` cannot grow because 41 rows is 2050px against a 2048 floor.
     /// Three layers hold it with room in each, and the texture is the same
     /// rectangle it was.
