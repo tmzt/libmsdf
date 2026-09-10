@@ -2,6 +2,12 @@
 //! atlas bytes (`FontAtlas::to_bytes` format, loadable on wasm32 where the
 //! CPU msdfgen path doesn't exist).
 //!
+//! **Prefer `scripts/bake-atlases.py`**, which runs this for all three
+//! committed artifacts with the flags each one needs and reports the cell
+//! delta. Reach for the raw invocation below only for a one-off bake that is
+//! not a committed artifact - the flags are NOT interchangeable between the
+//! three, and getting them wrong produces a file that loads and draws.
+//!
 //! Usage:
 //! ```text
 //! cargo run -p libmsdf --example bake_atlas -- <font.ttf> <out.atlas> [glyph_size] [px_range]
@@ -24,8 +30,21 @@
 //! ```text
 //! cargo run -p libmsdf --features cpu-bake --example bake_atlas -- \
 //!     deps/libmsdf/fonts/Roboto-Regular-ascii-msymbols.ttf \
-//!     crates/libhbui/assets/roboto-msymbols-48.atlas 48 6.0
+//!     crates/libhbui/assets/roboto-msymbols-48.atlas 48 6.0 \
+//!     --style bold --style italic
 //! ```
+//!
+//! **THE TWO `--style` FLAGS ARE PART OF THAT COMMAND, and this paragraph
+//! carried it without them for as long as layers have existed.** The committed
+//! `libhbui` atlas is LAYERED - `(48, Regular)`, `(48, Bold)`, `(48, Italic)`,
+//! which is what `libhbui::surface::BAKED_STYLES` declares and
+//! `crates/libhbui/tests/emphasis.rs` holds it to. Running the command without
+//! them writes a perfectly valid single-layer v3 file 430 cells smaller, and
+//! every `**bold**` and `*italic*` run in the repo silently loses its cut. That
+//! is the same shape of defect as a stale atlas: the artifact still parses,
+//! still renders, and is wrong in a way no loader complains about. It is why
+//! `scripts/bake-atlases.py` exists and why it, not this comment, is the
+//! producer.
 //!
 //! Both bundled faces carry the blocks this repo DRAWS
 //! ([`libmsdf::OWNED_BLOCKS`] — the edge markers and our own UI icons, as
