@@ -514,9 +514,14 @@ fn the_builder_refuses_a_second_face_for_a_style() {
 /// **One style does not fit beside the shipped coverage in today's atlas**, and
 /// this is the measurement rather than an estimate.
 ///
-/// 239 cells are spoken for by the merged face and the grid holds 320, so 81
+/// 249 cells are spoken for by the merged face and the grid holds 320, so 71
 /// are free; a style is 215 (201 declared codepoints, 14 shaped forms beyond
-/// them). The binding constraint is `ATLAS_COLS`, not `ATLAS_ROWS`: the texture
+/// them). It was 239 until 2026-09-17, when `HIGHBAY_ICONS` gained the eight
+/// marks the navigation rail draws, and 247 until the main toolbar's `folder`
+/// and `plus` followed them - which is what this number is FOR: the
+/// headroom a coverage widening spends is invisible everywhere else, and one
+/// style still does not fit either way. The binding
+/// constraint is `ATLAS_COLS`, not `ATLAS_ROWS`: the texture
 /// is 400x2000 inside a 2048x2048 floor, so it is 8 columns wide because
 /// widening it moves every glyph's `u` and re-blesses every frame - a one-time
 /// cost, not a limit. At 16 columns the same 40 rows hold 640 cells.
@@ -533,7 +538,7 @@ fn a_style_does_not_fit_beside_the_shipped_coverage_today() {
         .expect("the bold face parses");
     let with_bold = builder.cell_order().len();
 
-    assert_eq!(shipped, 239, "the shipped coverage is not the 239 cells it was");
+    assert_eq!(shipped, 249, "the shipped coverage is not the 249 cells it was");
     assert_eq!(with_bold - shipped, 215, "a style is not the 215 cells it was");
     assert_eq!(atlas_capacity(), 320);
     assert!(

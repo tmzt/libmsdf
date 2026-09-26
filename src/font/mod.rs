@@ -917,7 +917,9 @@ pub fn msymbols_codepoint(name: &str) -> Option<char> {
 /// manifest for the borrowed set.
 ///
 /// ```text
-/// graph U+F800   props U+F801   table U+F802   screen U+F803
+/// graph  U+F800   props    U+F801   table   U+F802   screen  U+F803
+/// branch U+F804   database U+F805   form    U+F806   sparkle U+F807
+/// widget U+F808   device   U+F809   sitemap U+F80A   avatar  U+F80B
 /// ```
 ///
 /// These exist because the vocabulary Material publishes does not contain
@@ -931,6 +933,35 @@ pub fn msymbols_codepoint(name: &str) -> Option<char> {
 /// name, they sit two thousand codepoints clear of Material's, and
 /// [`msymbols_codepoint`] answers `None` for every one of them.
 ///
+/// The last eight (2026-09-17) are the navigation rail's marks — seven
+/// destinations plus `avatar`, the account control's, which is chrome rather
+/// than a destination. `avatar` is the one place the FILL axis mattered: this
+/// bake instances Material Symbols at FILL 0, so its `person` is an outlined
+/// ring and a hollow body where the rail draws a solid silhouette. Rendered
+/// both and compared rather than assumed, which is why `person` is not a
+/// near-miss this manifest could have adopted. The seven destination marks are
+/// the ones
+/// which `crates/highbay_ui/src/zui/rail.rs` draws as bezier strokes from a
+/// `match` on a destination enum, and which the AUTHORED rail can now name.
+/// Both still exist: `highbay_ui` is feature-gated, the zui shell keeps its own
+/// strokes, and the `ideroot` root cannot reach that crate at all. The same
+/// argument applies to every one: Material publishes nothing that MEANS a
+/// custom widget, an app's data store, a screen rendered as a form, an
+/// assisted-generation pane, or a commit ledger — `extension`, `storage`,
+/// `list_alt`, `auto_awesome` and `commit` each mean something adjacent, and
+/// adopting one would put a name in the codebase that says what the mark does
+/// not.
+///
+/// **`sitemap` and `device` are the two that look like names already here, and
+/// they are different MARKS.** `graph`'s nodes are filled discs on straight
+/// edges, drawn small for the toolbar; `sitemap`'s are outlined rounded
+/// squares joined through their own centres, which is what the rail draws at
+/// 24dp. `screen` is a LANDSCAPE frame; `device` is a portrait phone, and the
+/// aspect is the whole of what that mark says. Naming the rail's marks after
+/// the two already here would have been a vocabulary that drew the wrong
+/// picture, which is the failure this manifest's separation exists to prevent
+/// one level up.
+///
 /// The outlines are authored in `fonts/icon.py`, which is where the geometry
 /// is decided and where `table` and `props` record which proportions they take
 /// from `highbay_ui`'s since-retired `draw_table_glyph`/`draw_props_glyph`.
@@ -941,10 +972,20 @@ pub fn msymbols_codepoint(name: &str) -> Option<char> {
 /// alphabetically-placed codepoint would have renumbered a glyph that had
 /// already shipped.
 pub const HIGHBAY_ICONS: &[(&str, char)] = &[
+    ("avatar", '\u{F80B}'),
+    ("branch", '\u{F804}'),
+    ("database", '\u{F805}'),
+    ("device", '\u{F809}'),
+    ("folder", '\u{F80C}'),
+    ("form", '\u{F806}'),
     ("graph", '\u{F800}'),
+    ("plus", '\u{F80D}'),
     ("props", '\u{F801}'),
     ("screen", '\u{F803}'),
+    ("sitemap", '\u{F80A}'),
+    ("sparkle", '\u{F807}'),
     ("table", '\u{F802}'),
+    ("widget", '\u{F808}'),
 ];
 
 /// The codepoint the bundled faces draw the repo's own icon `name` at, or
