@@ -9,10 +9,10 @@
 //! The atlas packs glyphs into a single texture using shelf-based bin
 //! packing. Each glyph is rendered as a 3-channel (RGB) MSDF bitmap.
 
-use crate::font::{CellKey, GlyphSet, GlyphStyle};
 use crate::font::glyph_table::GlyphEntry;
 #[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
 use crate::font::packer::ShelfPacker;
+use crate::font::{CellKey, GlyphSet, GlyphStyle};
 
 /// **The first four bytes of a baked atlas.** `hbfa` - highbay font atlas.
 ///
@@ -152,7 +152,10 @@ impl AtlasLayer {
                  libmsdf; update, or re-bake with this one",
             );
         };
-        Ok(Self { size_px: u16::from_le_bytes([data[0], data[1]]), style })
+        Ok(Self {
+            size_px: u16::from_le_bytes([data[0], data[1]]),
+            style,
+        })
     }
 }
 
@@ -344,7 +347,10 @@ impl SetMetrics {
         // `GlyphSet` past `BorrowedIcons` cost no format version precisely
         // because an old reader lands here and stops with a message that names
         // the fix, instead of misreading a bold cell as a text one.
-        let Some(set) = u8::try_from(ordinal).ok().and_then(GlyphSet::try_from_ordinal) else {
+        let Some(set) = u8::try_from(ordinal)
+            .ok()
+            .and_then(GlyphSet::try_from_ordinal)
+        else {
             return Err(
                 "atlas names a glyph set this build does not have - it was baked by a newer \
                  libmsdf; update, or re-bake with this one",
@@ -403,7 +409,10 @@ impl core::fmt::Display for StyledGlyphError {
                  the gap; drawing the regular glyph instead is a wrong render that looks right"
             ),
             Self::NoCell(style, gid) => {
-                write!(f, "{style:?} is baked here, but glyph {gid} of it has no cell")
+                write!(
+                    f,
+                    "{style:?} is baked here, but glyph {gid} of it has no cell"
+                )
             }
             Self::NotARawGlyphId(gid) => write!(
                 f,
@@ -531,7 +540,8 @@ impl FontAtlas {
     /// declaration rather than a measurement
     /// ([`SetMetrics::ink_descent_em`] has the numbers).
     pub fn text_max_ink_descent_em(&self) -> Option<f32> {
-        self.set_metrics(GlyphSet::Text).map(SetMetrics::max_ink_descent_em)
+        self.set_metrics(GlyphSet::Text)
+            .map(SetMetrics::max_ink_descent_em)
     }
     /// Look up a glyph entry by glyph ID.
     ///
@@ -552,7 +562,8 @@ impl FontAtlas {
     /// ([`FontAtlas::glyph_table_u32s`]) and the index packed into a draw list
     /// both come from the same instance.
     pub fn get_glyph(&self, glyph_id: u16) -> Option<&GlyphEntry> {
-        self.glyph_table_index(glyph_id).map(|idx| &self.glyphs[idx])
+        self.glyph_table_index(glyph_id)
+            .map(|idx| &self.glyphs[idx])
     }
 
     /// **Does this atlas have cells in `style`?** Asked BEFORE a run is shaped,
@@ -732,7 +743,12 @@ impl FontAtlas {
         let mut buf = Vec::with_capacity(total);
         buf.extend_from_slice(ATLAS_MAGIC);
         buf.extend_from_slice(
-            &if layered { ATLAS_VERSION_LAYERED } else { ATLAS_VERSION }.to_le_bytes(),
+            &if layered {
+                ATLAS_VERSION_LAYERED
+            } else {
+                ATLAS_VERSION
+            }
+            .to_le_bytes(),
         );
         buf.extend_from_slice(&self.width.to_le_bytes());
         buf.extend_from_slice(&self.height.to_le_bytes());
@@ -805,7 +821,9 @@ impl FontAtlas {
                 return Err("atlas data too short for the layer count");
             }
             let n = u32::from_le_bytes(
-                data[ATLAS_HEADER_SIZE..ATLAS_HEADER_SIZE + 4].try_into().unwrap(),
+                data[ATLAS_HEADER_SIZE..ATLAS_HEADER_SIZE + 4]
+                    .try_into()
+                    .unwrap(),
             ) as usize;
             if n == 0 {
                 return Err("atlas declares zero layers - every atlas has at least one");
@@ -897,15 +915,15 @@ impl FontAtlas {
         // atlas with no glyphs at all, which has no style to be wrong about.
         if layers.is_empty() {
             let size_px = glyphs.first().map_or(0, |e| e.atlas_h);
-            let style = glyphs
-                .first()
-                .map_or(GlyphStyle::Regular, |e| GlyphStyle::split_glyph_id(e.glyph_id).0);
+            let style = glyphs.first().map_or(GlyphStyle::Regular, |e| {
+                GlyphStyle::split_glyph_id(e.glyph_id).0
+            });
             layers.push(AtlasLayer::new(size_px, style));
         }
 
         let pixel_start = entries_end;
-        let expected_pixels = (width as usize) * (height as usize) * (channels as usize)
-            * layer_count;
+        let expected_pixels =
+            (width as usize) * (height as usize) * (channels as usize) * layer_count;
         if data.len() < pixel_start + expected_pixels {
             return Err("atlas data too short for pixel data");
         }
@@ -927,7 +945,12 @@ impl FontAtlas {
     /// the atlas manager + compute-MSDF path. ONE layer - see
     /// [`FontAtlas::empty_layered`] for more.
     pub fn empty(width: u32, height: u32, channels: u32) -> Self {
-        Self::empty_layered(width, height, channels, &[AtlasLayer::new(0, GlyphStyle::Regular)])
+        Self::empty_layered(
+            width,
+            height,
+            channels,
+            &[AtlasLayer::new(0, GlyphStyle::Regular)],
+        )
     }
 
     /// [`FontAtlas::empty`] with a declared layer table - the runtime shell
@@ -949,12 +972,7 @@ impl FontAtlas {
     /// fixed point through the file, and `a_runtime_shell_gains_its_measured
     /// _size_through_the_file` pins the behaviour so it cannot drift into
     /// being one silently.
-    pub fn empty_layered(
-        width: u32,
-        height: u32,
-        channels: u32,
-        layers: &[AtlasLayer],
-    ) -> Self {
+    pub fn empty_layered(width: u32, height: u32, channels: u32, layers: &[AtlasLayer]) -> Self {
         let layers: Vec<AtlasLayer> = if layers.is_empty() {
             vec![AtlasLayer::new(0, GlyphStyle::Regular)]
         } else {
@@ -966,7 +984,10 @@ impl FontAtlas {
             channels,
             pixel_data: vec![
                 0;
-                (width as usize) * (height as usize) * (channels as usize) * layers.len()
+                (width as usize)
+                    * (height as usize)
+                    * (channels as usize)
+                    * layers.len()
             ],
             glyphs: Vec::new(),
             layers,
@@ -1414,7 +1435,11 @@ impl FontAtlasBuilder {
     /// "everything shaping emits".
     pub fn add_glyph(&mut self, set: GlyphSet, glyph_id: u16) {
         let key = CellKey::new(set, glyph_id);
-        match self.queued_glyphs.iter_mut().find(|k| k.glyph_id() == glyph_id) {
+        match self
+            .queued_glyphs
+            .iter_mut()
+            .find(|k| k.glyph_id() == glyph_id)
+        {
             Some(queued) => *queued = (*queued).min(key),
             None => self.queued_glyphs.push(key),
         }
@@ -1448,7 +1473,10 @@ impl FontAtlasBuilder {
                 // glyphs independently and one atlas cannot hold both
                 // numberings. A face too wide to prefix contributes nothing
                 // rather than aliasing onto another style's cell.
-                if let Some(gid) = face.glyph_index(ch).and_then(|g| style.styled_glyph_id(g.0)) {
+                if let Some(gid) = face
+                    .glyph_index(ch)
+                    .and_then(|g| style.styled_glyph_id(g.0))
+                {
                     gids.push(gid);
                 }
             }
@@ -1699,7 +1727,9 @@ impl FontAtlasBuilder {
             );
         }
         if self.style_face(style).is_some() {
-            return Err(format!("{style:?} already has a face registered on this builder"));
+            return Err(format!(
+                "{style:?} already has a face registered on this builder"
+            ));
         }
         ttf_parser::Face::parse(&font_data, 0).map_err(|e| format!("{style:?} face: {e}"))?;
         self.style_faces.push((style, font_data));
@@ -1716,11 +1746,8 @@ impl FontAtlasBuilder {
 
     /// The styles this builder will bake cells for, in cell order.
     pub fn styles(&self) -> Vec<GlyphStyle> {
-        let mut styles: Vec<GlyphStyle> = self
-            .queued_glyphs
-            .iter()
-            .map(|k| k.set().style())
-            .collect();
+        let mut styles: Vec<GlyphStyle> =
+            self.queued_glyphs.iter().map(|k| k.set().style()).collect();
         styles.sort_unstable();
         styles.dedup();
         styles
@@ -1761,8 +1788,8 @@ impl FontAtlasBuilder {
 
         let glyph_id = raw_glyph_id;
         // ttf-parser 0.25 for metrics; 0.18 for msdfgen's FontExt.
-        let face25 = ttf_parser::Face::parse(face_data, 0)
-            .map_err(|e| format!("font parse error: {e}"))?;
+        let face25 =
+            ttf_parser::Face::parse(face_data, 0).map_err(|e| format!("font parse error: {e}"))?;
         let face18 = ttf_parser_018::Face::parse(face_data, 0)
             .map_err(|e| format!("font parse error (v18): {e}"))?;
 
@@ -1960,7 +1987,12 @@ impl FontAtlasBuilder {
             let cell = self.bake_cell_of(face_data, raw, address)?;
             let layer = layer_of(key);
             let (x, y) = packers[layer as usize].pack(padded, padded);
-            placed.push(Placed { cell, layer, atlas_x: x + 1, atlas_y: y + 1 });
+            placed.push(Placed {
+                cell,
+                layer,
+                atlas_x: x + 1,
+                atlas_y: y + 1,
+            });
         }
 
         // **The set header, measured off the cells that were just baked** -
@@ -1999,7 +2031,8 @@ impl FontAtlasBuilder {
                 match sets.iter_mut().find(|m| m.set == key.set()) {
                     Some(m) => {
                         debug_assert_eq!(
-                            m.baseline_frac, frac,
+                            m.baseline_frac,
+                            frac,
                             "glyph {} disagrees with its own set's baseline - every cell of a set \
                              is projected from one face, so this is a bake bug, not a metric",
                             key.glyph_id()
@@ -2168,24 +2201,32 @@ mod tests {
         v1.extend_from_slice(&2000u32.to_le_bytes()); // height
         v1.extend_from_slice(&1u32.to_le_bytes()); // num_glyphs
         v1.extend_from_slice(&3u32.to_le_bytes()); // channels
-        v1.extend_from_slice(&GlyphEntry {
-            glyph_id: 0,
-            atlas_x: 1,
-            atlas_y: 1,
-            atlas_w: 48,
-            atlas_h: 48,
-            layer: 0,
-            advance_x: 0.5,
-            baseline_row: 33.45,
-            px_per_em: 36.923,
-            x_margin: 7.2,
-        }
-        .to_bytes());
+        v1.extend_from_slice(
+            &GlyphEntry {
+                glyph_id: 0,
+                atlas_x: 1,
+                atlas_y: 1,
+                atlas_w: 48,
+                atlas_h: 48,
+                layer: 0,
+                advance_x: 0.5,
+                baseline_row: 33.45,
+                px_per_em: 36.923,
+                x_margin: 7.2,
+            }
+            .to_bytes(),
+        );
         v1.resize(v1.len() + 400 * 2000 * 3, 0);
 
         let err = FontAtlas::from_bytes(&v1).expect_err("a v1 atlas must not load");
-        assert!(err.contains("hbfa"), "the message must name the magic: {err}");
-        assert!(err.contains("bake_atlas"), "the message must name the fix: {err}");
+        assert!(
+            err.contains("hbfa"),
+            "the message must name the magic: {err}"
+        );
+        assert!(
+            err.contains("bake_atlas"),
+            "the message must name the fix: {err}"
+        );
     }
 
     /// A file whose version is neither of ours stops too, for the same reason.
@@ -2350,14 +2391,25 @@ mod tests {
     fn empty_atlas_insert_entry() {
         let mut atlas = FontAtlas::empty(64, 64, 3);
         let e = GlyphEntry {
-            glyph_id: 7, atlas_x: 1, atlas_y: 1, atlas_w: 32, atlas_h: 32, layer: 0,
-            advance_x: 0.5, baseline_row: 24.0, px_per_em: 24.6, x_margin: 4.8,
+            glyph_id: 7,
+            atlas_x: 1,
+            atlas_y: 1,
+            atlas_w: 32,
+            atlas_h: 32,
+            layer: 0,
+            advance_x: 0.5,
+            baseline_row: 24.0,
+            px_per_em: 24.6,
+            x_margin: 4.8,
         };
         let idx = atlas.insert_entry(e);
         assert_eq!(idx, 0);
         assert_eq!(atlas.glyph_table_index(7), Some(0));
         // Replacement keeps the index.
-        let idx2 = atlas.insert_entry(GlyphEntry { advance_x: 0.6, ..e });
+        let idx2 = atlas.insert_entry(GlyphEntry {
+            advance_x: 0.6,
+            ..e
+        });
         assert_eq!(idx2, 0);
         assert_eq!(atlas.get_glyph(7).unwrap().advance_x, 0.6);
     }
@@ -2370,22 +2422,36 @@ mod tests {
     fn insert_entry_keeps_the_table_searchable_out_of_order() {
         let mut atlas = FontAtlas::empty(64, 64, 3);
         let entry = |glyph_id: u16| GlyphEntry {
-            glyph_id, atlas_x: 1, atlas_y: 1, atlas_w: 32, atlas_h: 32, layer: 0,
-            advance_x: glyph_id as f32 / 100.0, baseline_row: 24.0,
-            px_per_em: 24.6, x_margin: 4.8,
+            glyph_id,
+            atlas_x: 1,
+            atlas_y: 1,
+            atlas_w: 32,
+            atlas_h: 32,
+            layer: 0,
+            advance_x: glyph_id as f32 / 100.0,
+            baseline_row: 24.0,
+            px_per_em: 24.6,
+            x_margin: 4.8,
         };
         for gid in [90u16, 7, 300, 0, 41] {
             atlas.insert_entry(entry(gid));
         }
         let ids: Vec<u16> = atlas.glyphs.iter().map(|e| e.glyph_id).collect();
-        assert_eq!(ids, vec![0, 7, 41, 90, 300], "the table is not glyph-id ordered");
+        assert_eq!(
+            ids,
+            vec![0, 7, 41, 90, 300],
+            "the table is not glyph-id ordered"
+        );
         for gid in [0u16, 7, 41, 90, 300] {
             assert_eq!(atlas.get_glyph(gid).map(|e| e.glyph_id), Some(gid));
         }
         // ...and a glyph that was never inserted is still absent, rather than
         // matching the neighbour a bad search would land on.
         for gid in [1u16, 42, 89, 299, 301] {
-            assert!(atlas.get_glyph(gid).is_none(), "glyph {gid} was never inserted");
+            assert!(
+                atlas.get_glyph(gid).is_none(),
+                "glyph {gid} was never inserted"
+            );
         }
     }
 
@@ -2421,7 +2487,11 @@ mod tests {
         // And `a` is Text in both, not ShapedText: the lowest set wins.
         let order = forwards.cell_order();
         assert!(order.contains(&CellKey::new(GlyphSet::Text, gid('a'))));
-        assert!(!order.iter().any(|k| k.glyph_id() == gid('a') && k.set() == GlyphSet::ShapedText));
+        assert!(
+            !order
+                .iter()
+                .any(|k| k.glyph_id() == gid('a') && k.set() == GlyphSet::ShapedText)
+        );
     }
 
     /// **The payoff, on the queue: growth in a LATER set leaves an earlier
@@ -2438,8 +2508,13 @@ mod tests {
     /// font edit produces.
     #[test]
     fn a_later_set_never_moves_an_earlier_sets_cells() {
-        for face_bytes in [crate::font::ROBOTO_REGULAR_ASCII, crate::font::ROBOTO_ASCII_MSYMBOLS] {
-            let next_gid = ttf_parser::Face::parse(face_bytes, 0).unwrap().number_of_glyphs();
+        for face_bytes in [
+            crate::font::ROBOTO_REGULAR_ASCII,
+            crate::font::ROBOTO_ASCII_MSYMBOLS,
+        ] {
+            let next_gid = ttf_parser::Face::parse(face_bytes, 0)
+                .unwrap()
+                .number_of_glyphs();
 
             let mut before = FontAtlasBuilder::new(face_bytes.to_vec(), 48, 6.0);
             before.add_shipped_coverage();
@@ -2471,16 +2546,30 @@ mod tests {
             // by exactly one; the plain face has none, so there is nothing
             // after the new cell and nothing to shift.
             let later: Vec<_> = before[new_cell..].to_vec();
-            assert_eq!(after[new_cell + 1..], later[..], "a later set shifted by more than one");
+            assert_eq!(
+                after[new_cell + 1..],
+                later[..],
+                "a later set shifted by more than one"
+            );
             // Everything after the new cell belongs to a LATER set: it sorted
             // into its own set rather than onto the end of the queue.
             for key in &after[new_cell + 1..] {
                 let set = key.set();
-                assert!(set > GlyphSet::OwnedIcons, "a cell of set {set:?} sorted after an icon");
+                assert!(
+                    set > GlyphSet::OwnedIcons,
+                    "a cell of set {set:?} sorted after an icon"
+                );
             }
             if face_bytes == crate::font::ROBOTO_ASCII_MSYMBOLS {
-                assert!(!later.is_empty(), "the merged face should have borrowed cells after ours");
-                assert_ne!(after[new_cell..], before[new_cell..], "nothing moved at all");
+                assert!(
+                    !later.is_empty(),
+                    "the merged face should have borrowed cells after ours"
+                );
+                assert_ne!(
+                    after[new_cell..],
+                    before[new_cell..],
+                    "nothing moved at all"
+                );
                 // The sharp one: the merged face has borrowed cells AFTER ours,
                 // so a new icon must land in the middle of the atlas. Landing
                 // last would mean cells still follow the queue rather than the
@@ -2546,7 +2635,11 @@ mod tests {
         let after = bake(&['\u{F800}', '\u{F801}', '\u{F802}']);
 
         let (b, a) = (cells(&before), cells(&after));
-        assert_eq!(b.len() + 1, a.len(), "the second bake should have one more cell");
+        assert_eq!(
+            b.len() + 1,
+            a.len(),
+            "the second bake should have one more cell"
+        );
         for (glyph_id, cell) in &b {
             assert_eq!(
                 a.get(glyph_id),
@@ -2557,7 +2650,10 @@ mod tests {
         }
         // Vacuity, both halves. The new icon really is a new cell...
         let new_cell = a[&gid('\u{F802}')].0;
-        assert!(!b.values().any(|(xy, _)| *xy == new_cell), "the new icon reused a cell");
+        assert!(
+            !b.values().any(|(xy, _)| *xy == new_cell),
+            "the new icon reused a cell"
+        );
         // ...and this comparison can SEE a cell move: adding to an earlier set
         // (one more letter, in Text) shifts the marker and the icons.
         let mut widened = FontAtlasBuilder::new(roboto(), 32, 4.0);

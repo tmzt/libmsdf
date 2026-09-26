@@ -141,7 +141,12 @@ impl BlurPass {
             cache: None,
         });
 
-        Self { pipeline, layout, sampler, uniform_buffer }
+        Self {
+            pipeline,
+            layout,
+            sampler,
+            uniform_buffer,
+        }
     }
 
     /// Blur `backdrop` into `target`, compositing the sharp premultiplied
@@ -163,9 +168,20 @@ impl BlurPass {
         height: u32,
         radius_px: f32,
     ) {
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("blur_encoder") });
-        self.render_into(device, &mut encoder, queue, target, backdrop, overlay, width, height, radius_px);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("blur_encoder"),
+        });
+        self.render_into(
+            device,
+            &mut encoder,
+            queue,
+            target,
+            backdrop,
+            overlay,
+            width,
+            height,
+            radius_px,
+        );
         queue.submit(std::iter::once(encoder.finish()));
     }
 
@@ -184,17 +200,31 @@ impl BlurPass {
         height: u32,
         radius_px: f32,
     ) {
-        let uniforms = BlurUniforms { params: blur_params(width, height, radius_px) };
+        let uniforms = BlurUniforms {
+            params: blur_params(width, height, radius_px),
+        };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("blur_bg"),
             layout: &self.layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: self.uniform_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(backdrop) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(overlay) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(backdrop),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(overlay),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
             ],
         });
 
@@ -238,11 +268,21 @@ pub fn render_overlay_texture(
     let frame = list.lower();
     renderer.upload_chars(queue, &frame.char_buffer);
     renderer.upload_params(queue, &frame.param_bank);
-    let mut encoder = device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("overlay_encoder") });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("overlay_encoder"),
+    });
     renderer.render_full_scaled_clear_into(
-        &mut encoder, queue, target, width, height, scale,
-        &frame.draws, time_ms, &[0; 16], &[], None,
+        &mut encoder,
+        queue,
+        target,
+        width,
+        height,
+        scale,
+        &frame.draws,
+        time_ms,
+        &[0; 16],
+        &[],
+        None,
     );
     queue.submit(std::iter::once(encoder.finish()));
 }

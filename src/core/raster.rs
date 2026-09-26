@@ -8,11 +8,30 @@ pub trait Rasterizer {
 
     /// Draw a filled axis-aligned rectangle.
     #[allow(clippy::too_many_arguments)]
-    fn draw_rect(buf: &mut [u32], width: u32, height: u32, x: i32, y: i32, w: u32, h: u32, color: u32);
+    fn draw_rect(
+        buf: &mut [u32],
+        width: u32,
+        height: u32,
+        x: i32,
+        y: i32,
+        w: u32,
+        h: u32,
+        color: u32,
+    );
 
     /// Draw a filled rounded rectangle.
     #[allow(clippy::too_many_arguments)]
-    fn draw_rounded_rect(buf: &mut [u32], width: u32, height: u32, x: i32, y: i32, w: u32, h: u32, radius: u32, color: u32);
+    fn draw_rounded_rect(
+        buf: &mut [u32],
+        width: u32,
+        height: u32,
+        x: i32,
+        y: i32,
+        w: u32,
+        h: u32,
+        radius: u32,
+        color: u32,
+    );
 
     /// Draw a filled circle.
     #[allow(clippy::too_many_arguments)]
@@ -20,5 +39,14 @@ pub trait Rasterizer {
 
     /// Draw a line segment.
     #[allow(clippy::too_many_arguments)]
-    fn draw_line(buf: &mut [u32], width: u32, height: u32, x1: i32, y1: i32, x2: i32, y2: i32, color: u32);
+    fn draw_line(
+        buf: &mut [u32],
+        width: u32,
+        height: u32,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        color: u32,
+    );
 }

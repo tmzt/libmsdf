@@ -21,11 +21,9 @@ pub mod shaper;
 
 pub use atlas::{
     ATLAS_COLS, ATLAS_HEADER_SIZE, ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, ATLAS_VERSION_LAYERED,
-    AtlasLayer, CAP_TOP_FRAC,
-    CELL_EM_RATIO, FALLBACK_BASELINE_FRAC, FALLBACK_CAP_HEIGHT_EM, FALLBACK_MAX_INK_DESCENT_EM,
-    FontAtlas, FontAtlasBuilder,
-    GlyphProjection, LayerNotBaked, MAX_ATLAS_LAYERS, SetMetrics, StyledGlyphError, atlas_capacity,
-    cap_height, glyph_projection,
+    AtlasLayer, CAP_TOP_FRAC, CELL_EM_RATIO, FALLBACK_BASELINE_FRAC, FALLBACK_CAP_HEIGHT_EM,
+    FALLBACK_MAX_INK_DESCENT_EM, FontAtlas, FontAtlasBuilder, GlyphProjection, LayerNotBaked,
+    MAX_ATLAS_LAYERS, SetMetrics, StyledGlyphError, atlas_capacity, cap_height, glyph_projection,
 };
 pub use glyph_table::GlyphEntry;
 pub use manager::{AtlasManager, AtlasRegion};
@@ -474,7 +472,6 @@ impl CellKey {
         self.0
     }
 }
-
 
 impl GlyphSet {
     /// Every set, in cell order. Iterating this is how a caller walks the
@@ -1068,7 +1065,10 @@ mod cell_key_tests {
         by_bits.sort_unstable_by_key(|k| k.bits());
         let mut by_pair = keys.clone();
         by_pair.sort_unstable_by_key(|k| (k.set(), k.glyph_id()));
-        assert_eq!(by_bits, by_pair, "the packed order and the pair order differ");
+        assert_eq!(
+            by_bits, by_pair,
+            "the packed order and the pair order differ"
+        );
     }
 
     /// A glyph id can never reach into the set's bits - the guard that makes
@@ -1077,6 +1077,9 @@ mod cell_key_tests {
     fn the_widest_glyph_id_cannot_reach_the_set_bits() {
         let low = CellKey::new(GlyphSet::Placeholder, u16::MAX);
         let high = CellKey::new(GlyphSet::Text, 0);
-        assert!(low < high, "a maximal glyph id in one set outranked the next set");
+        assert!(
+            low < high,
+            "a maximal glyph id in one set outranked the next set"
+        );
     }
 }

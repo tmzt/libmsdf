@@ -16,7 +16,12 @@ pub struct GpuFont {
 }
 
 impl GpuFont {
-    pub const NONE: Self = Self { glyph_w: 0, glyph_h: 0, first_cp: 0, last_cp: 0 };
+    pub const NONE: Self = Self {
+        glyph_w: 0,
+        glyph_h: 0,
+        first_cp: 0,
+        last_cp: 0,
+    };
 
     pub fn new(glyph_w: u8, glyph_h: u8, first_cp: u8, last_cp: u8) -> Self {
         Self {
@@ -96,7 +101,10 @@ pub fn pack_strings(strings: &[String]) -> (Vec<u32>, Vec<StringOffset>) {
         for ch in s.bytes() {
             chars.push(ch as u32);
         }
-        offsets.push(StringOffset { start, len: chars.len() as u32 - start });
+        offsets.push(StringOffset {
+            start,
+            len: chars.len() as u32 - start,
+        });
     }
     (chars, offsets)
 }

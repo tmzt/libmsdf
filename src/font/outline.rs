@@ -109,7 +109,11 @@ impl OutlineSink {
     }
 
     fn push(&mut self, kind: EdgeKind, pts: [[f32; 2]; 4]) {
-        self.outline.edges.push(Edge { kind, color: COLOR_WHITE, pts });
+        self.outline.edges.push(Edge {
+            kind,
+            color: COLOR_WHITE,
+            pts,
+        });
     }
 
     fn end_contour(&mut self) {
@@ -173,7 +177,11 @@ pub fn extract_outline(face: &ttf_parser::Face, glyph_id: u16) -> Option<GlyphOu
 
 fn normalize(v: [f32; 2]) -> [f32; 2] {
     let len = (v[0] * v[0] + v[1] * v[1]).sqrt();
-    if len <= 0.0 { [0.0, 0.0] } else { [v[0] / len, v[1] / len] }
+    if len <= 0.0 {
+        [0.0, 0.0]
+    } else {
+        [v[0] / len, v[1] / len]
+    }
 }
 
 fn cross(a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -240,11 +248,7 @@ pub fn color_edges(outline: &mut GlyphOutline, angle_threshold: f32) {
                 for s in 0..m {
                     let from = corners[s];
                     let to = corners[(s + 1) % m];
-                    let span_len = if s + 1 == m {
-                        n - from + to
-                    } else {
-                        to - from
-                    };
+                    let span_len = if s + 1 == m { n - from + to } else { to - from };
                     let color = if s + 1 == m && m % 2 == 1 {
                         COLOR_CYAN
                     } else if s % 2 == 0 {
@@ -313,7 +317,11 @@ mod tests {
         // 'o' outer/inner contours are smooth curves → all white.
         let gid = face.glyph_index('o').unwrap().0;
         let outline = extract_outline(&face, gid).expect("o has an outline");
-        let white = outline.edges.iter().filter(|e| e.color == COLOR_WHITE).count();
+        let white = outline
+            .edges
+            .iter()
+            .filter(|e| e.color == COLOR_WHITE)
+            .count();
         assert!(
             white >= outline.edges.len() / 2,
             "smooth 'o' should be mostly white-colored edges ({white}/{})",

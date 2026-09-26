@@ -126,9 +126,16 @@ mod tests {
     #[test]
     fn glyph_entry_roundtrip() {
         let entry = GlyphEntry {
-            glyph_id: 42, atlas_x: 100, atlas_y: 200, atlas_w: 128, atlas_h: 128,
+            glyph_id: 42,
+            atlas_x: 100,
+            atlas_y: 200,
+            atlas_w: 128,
+            atlas_h: 128,
             layer: 3,
-            advance_x: 0.58, baseline_row: 80.0, px_per_em: 112.0, x_margin: 8.0,
+            advance_x: 0.58,
+            baseline_row: 80.0,
+            px_per_em: 112.0,
+            x_margin: 8.0,
         };
         let bytes = entry.to_bytes();
         let parsed = GlyphEntry::from_bytes(&bytes).unwrap();
@@ -138,9 +145,16 @@ mod tests {
     #[test]
     fn gpu_packing() {
         let entry = GlyphEntry {
-            glyph_id: 65, atlas_x: 10, atlas_y: 20, atlas_w: 128, atlas_h: 128,
+            glyph_id: 65,
+            atlas_x: 10,
+            atlas_y: 20,
+            atlas_w: 128,
+            atlas_h: 128,
             layer: 2,
-            advance_x: 0.6, baseline_row: 80.0, px_per_em: 112.0, x_margin: 8.0,
+            advance_x: 0.6,
+            baseline_row: 80.0,
+            px_per_em: 112.0,
+            x_margin: 8.0,
         };
         let packed = entry.to_gpu_u32s();
         assert_eq!(packed[0], 65);
@@ -157,13 +171,28 @@ mod tests {
     #[test]
     fn a_pre_layer_entry_is_layer_zero() {
         let entry = GlyphEntry {
-            glyph_id: 7, atlas_x: 1, atlas_y: 1, atlas_w: 48, atlas_h: 48,
+            glyph_id: 7,
+            atlas_x: 1,
+            atlas_y: 1,
+            atlas_w: 48,
+            atlas_h: 48,
             layer: 0,
-            advance_x: 0.5, baseline_row: 33.45, px_per_em: 36.923, x_margin: 7.2,
+            advance_x: 0.5,
+            baseline_row: 33.45,
+            px_per_em: 36.923,
+            x_margin: 7.2,
         };
         let bytes = entry.to_bytes();
-        assert_eq!(&bytes[10..12], &[0, 0], "layer 0 must write the old pad bytes");
+        assert_eq!(
+            &bytes[10..12],
+            &[0, 0],
+            "layer 0 must write the old pad bytes"
+        );
         assert_eq!(GlyphEntry::from_bytes(&bytes).unwrap().layer, 0);
-        assert_eq!(entry.to_gpu_u32s()[7], 0, "g1.w must still be 0 for layer 0");
+        assert_eq!(
+            entry.to_gpu_u32s()[7],
+            0,
+            "g1.w must still be 0 for layer 0"
+        );
     }
 }

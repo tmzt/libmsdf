@@ -114,7 +114,9 @@ fn main() {
         .zip(args.iter().skip(1))
         .filter(|(flag, _)| *flag == "--style")
         .map(|(_, spec)| {
-            let (name, path) = spec.split_once('=').map_or((spec.as_str(), None), |(n, p)| (n, Some(p)));
+            let (name, path) = spec
+                .split_once('=')
+                .map_or((spec.as_str(), None), |(n, p)| (n, Some(p)));
             let style = match name.to_ascii_lowercase().as_str() {
                 "bold" => libmsdf::GlyphStyle::Bold,
                 "italic" => libmsdf::GlyphStyle::Italic,
@@ -153,8 +155,7 @@ fn main() {
     };
 
     let (font_data, out_path) = if args.len() >= 3 {
-        let data = std::fs::read(&args[1])
-            .unwrap_or_else(|e| panic!("read font {}: {e}", args[1]));
+        let data = std::fs::read(&args[1]).unwrap_or_else(|e| panic!("read font {}: {e}", args[1]));
         (data, args[2].clone())
     } else {
         (
@@ -162,8 +163,14 @@ fn main() {
             "roboto-ascii-48.atlas".to_string(),
         )
     };
-    let glyph_size: u32 = args.get(3).map(|s| s.parse().expect("glyph_size")).unwrap_or(48);
-    let px_range: f64 = args.get(4).map(|s| s.parse().expect("px_range")).unwrap_or(6.0);
+    let glyph_size: u32 = args
+        .get(3)
+        .map(|s| s.parse().expect("glyph_size"))
+        .unwrap_or(48);
+    let px_range: f64 = args
+        .get(4)
+        .map(|s| s.parse().expect("px_range"))
+        .unwrap_or(6.0);
 
     let mut builder = libmsdf::FontAtlasBuilder::new(font_data, glyph_size, px_range);
     builder.add_shipped_coverage();

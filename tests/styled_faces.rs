@@ -147,7 +147,9 @@ fn every_bundled_face_fits_the_address_space() {
 fn a_styled_glyph_id_round_trips() {
     for &style in GlyphStyle::ALL {
         for raw in [1u16, 2, 66, 255, 256, 8191, 8192, MAX_RAW_GLYPH_ID] {
-            let addr = style.styled_glyph_id(raw).expect("inside the address space");
+            let addr = style
+                .styled_glyph_id(raw)
+                .expect("inside the address space");
             assert_eq!(
                 GlyphStyle::split_glyph_id(addr),
                 (style, raw),
@@ -178,7 +180,10 @@ fn a_glyph_id_too_wide_to_prefix_is_refused() {
 #[test]
 fn regular_addresses_are_the_glyph_ids_they_always_were() {
     let atlas = atlas();
-    assert!(atlas.glyphs.len() > 200, "vacuity: the fixture came back empty");
+    assert!(
+        atlas.glyphs.len() > 200,
+        "vacuity: the fixture came back empty"
+    );
     for entry in &atlas.glyphs {
         assert_eq!(
             GlyphStyle::Regular.styled_glyph_id(entry.glyph_id),
@@ -204,7 +209,11 @@ fn every_styled_set_sorts_after_every_unstyled_one() {
     let (styled, unstyled): (Vec<GlyphSet>, Vec<GlyphSet>) = GlyphSet::ALL
         .iter()
         .partition(|s| s.style() != GlyphStyle::Regular);
-    assert_eq!(unstyled.len(), 6, "the unstyled sets are not the six that shipped");
+    assert_eq!(
+        unstyled.len(),
+        6,
+        "the unstyled sets are not the six that shipped"
+    );
     assert_eq!(styled.len(), 6, "three styles, two sets each");
     for &u in &unstyled {
         for &s in &styled {
@@ -252,7 +261,10 @@ fn the_shipped_atlas_refuses_a_style_it_does_not_carry() {
         .expect("parses")
         .glyph_id_for_char('a')
         .expect("the face draws an 'a'");
-    assert!(atlas.get_glyph(a).is_some(), "vacuity: the fixture has no cell for 'a'");
+    assert!(
+        atlas.get_glyph(a).is_some(),
+        "vacuity: the fixture has no cell for 'a'"
+    );
 
     for style in [GlyphStyle::Bold, GlyphStyle::Italic, GlyphStyle::BoldItalic] {
         assert_eq!(
@@ -309,7 +321,10 @@ fn a_runtime_atlas_carries_only_the_regular_style() {
 fn a_runtime_appended_styled_cell_is_addressable() {
     let mut atlas = FontAtlas::empty(64, 64, 3);
     let address = GlyphStyle::Bold.styled_glyph_id(66).expect("addressable");
-    assert!(!atlas.carries_style(GlyphStyle::Bold), "nothing appended yet");
+    assert!(
+        !atlas.carries_style(GlyphStyle::Bold),
+        "nothing appended yet"
+    );
 
     atlas.insert_entry(libmsdf::GlyphEntry {
         glyph_id: address,
@@ -353,10 +368,16 @@ fn the_shaper_refuses_a_style_it_has_no_face_for() {
     );
     assert!(!shaper.carries(GlyphStyle::BoldItalic));
     assert_eq!(
-        shaper.shape(GlyphStyle::BoldItalic, "bold italic").unwrap_err(),
+        shaper
+            .shape(GlyphStyle::BoldItalic, "bold italic")
+            .unwrap_err(),
         libmsdf::font::NoFaceForStyle(GlyphStyle::BoldItalic)
     );
-    assert!(shaper.glyph_id_for_char(GlyphStyle::BoldItalic, 'a').is_err());
+    assert!(
+        shaper
+            .glyph_id_for_char(GlyphStyle::BoldItalic, 'a')
+            .is_err()
+    );
     assert!(bundled_style_face(GlyphStyle::BoldItalic).is_none());
 }
 
@@ -369,9 +390,17 @@ fn the_shaper_refuses_a_style_it_has_no_face_for() {
 fn a_regular_run_is_unchanged_by_going_through_the_styled_shaper() {
     let plain = TextShaper::new(ROBOTO_REGULAR_ASCII.to_vec()).expect("parses");
     let styled = styled_shaper();
-    for text in ["Hello", "AV", "fifty officiel", "Jos\u{e9} M\u{fc}ller", "0123 {{ x }}"] {
+    for text in [
+        "Hello",
+        "AV",
+        "fifty officiel",
+        "Jos\u{e9} M\u{fc}ller",
+        "0123 {{ x }}",
+    ] {
         let a = plain.shape(text);
-        let b = styled.shape(GlyphStyle::Regular, text).expect("regular is loaded");
+        let b = styled
+            .shape(GlyphStyle::Regular, text)
+            .expect("regular is loaded");
         assert_eq!(a.total_advance, b.total_advance, "{text:?} advance");
         assert_eq!(a.units_per_em, b.units_per_em);
         assert_eq!(a.glyphs.len(), b.glyphs.len(), "{text:?} glyph count");
@@ -393,11 +422,22 @@ fn a_bold_run_is_addressed_in_bolds_own_block() {
     let regular = shaper.shape(GlyphStyle::Regular, text).expect("loaded");
     let bold = shaper.shape(GlyphStyle::Bold, text).expect("loaded");
 
-    assert_eq!(regular.glyphs.len(), bold.glyphs.len(), "the same characters");
+    assert_eq!(
+        regular.glyphs.len(),
+        bold.glyphs.len(),
+        "the same characters"
+    );
     for g in &bold.glyphs {
         let (style, raw) = GlyphStyle::split_glyph_id(g.glyph_id);
-        assert_eq!(style, GlyphStyle::Bold, "a bold glyph is not in bold's block");
-        assert!(raw != 0, "bold shaped a covered character to the placeholder");
+        assert_eq!(
+            style,
+            GlyphStyle::Bold,
+            "a bold glyph is not in bold's block"
+        );
+        assert!(
+            raw != 0,
+            "bold shaped a covered character to the placeholder"
+        );
     }
     assert_ne!(
         regular.total_advance, bold.total_advance,
@@ -438,9 +478,8 @@ fn a_bold_ligature_is_a_bold_glyph() {
     // shaped set rather than a text one.
     let bold_face = shaper.face(GlyphStyle::Bold).expect("loaded");
     assert!(
-        (0x20u32..=0xFF).all(|cp| char::from_u32(cp)
-            .and_then(|c| bold_face.glyph_id_for_char(c))
-            != Some(b)),
+        (0x20u32..=0xFF)
+            .all(|cp| char::from_u32(cp).and_then(|c| bold_face.glyph_id_for_char(c)) != Some(b)),
         "the bold fi ligature is reachable through the cmap after all"
     );
 }
@@ -538,8 +577,15 @@ fn a_style_does_not_fit_beside_the_shipped_coverage_today() {
         .expect("the bold face parses");
     let with_bold = builder.cell_order().len();
 
-    assert_eq!(shipped, 249, "the shipped coverage is not the 249 cells it was");
-    assert_eq!(with_bold - shipped, 215, "a style is not the 215 cells it was");
+    assert_eq!(
+        shipped, 249,
+        "the shipped coverage is not the 249 cells it was"
+    );
+    assert_eq!(
+        with_bold - shipped,
+        215,
+        "a style is not the 215 cells it was"
+    );
     assert_eq!(atlas_capacity(), 320);
     assert!(
         with_bold > atlas_capacity(),
@@ -570,8 +616,14 @@ fn an_atlas_from_a_newer_libmsdf_is_refused() {
     }];
     let mut bytes = atlas.to_bytes();
     // The last set this build has, plus one: what a future libmsdf writes.
-    assert_eq!(bytes[libmsdf::ATLAS_HEADER_SIZE], GlyphSet::BoldItalicShapedText as u8);
-    assert!(FontAtlas::from_bytes(&bytes).is_ok(), "the set this build does have");
+    assert_eq!(
+        bytes[libmsdf::ATLAS_HEADER_SIZE],
+        GlyphSet::BoldItalicShapedText as u8
+    );
+    assert!(
+        FontAtlas::from_bytes(&bytes).is_ok(),
+        "the set this build does have"
+    );
     bytes[libmsdf::ATLAS_HEADER_SIZE] += 1;
     let err = FontAtlas::from_bytes(&bytes).expect_err("a newer set must not load");
     assert!(err.contains("newer libmsdf"), "{err}");
@@ -638,8 +690,14 @@ mod baked {
             styled.pixel_data[..styled.layer_offset(1)],
             "layer 0's texels changed when bold was added"
         );
-        assert!(plain.glyphs.len() >= 96, "vacuity: the plain bake is nearly empty");
-        assert!(styled.glyphs.len() > plain.glyphs.len() + 190, "bold did not arrive");
+        assert!(
+            plain.glyphs.len() >= 96,
+            "vacuity: the plain bake is nearly empty"
+        );
+        assert!(
+            styled.glyphs.len() > plain.glyphs.len() + 190,
+            "bold did not arrive"
+        );
 
         for entry in &plain.glyphs {
             let after = styled
@@ -711,7 +769,9 @@ mod baked {
     fn the_bold_set_carries_the_bold_faces_own_metrics() {
         let atlas = regular_and_bold();
         let text = atlas.set_metrics(GlyphSet::Text).expect("a Text set");
-        let bold = atlas.set_metrics(GlyphSet::BoldText).expect("a BoldText set");
+        let bold = atlas
+            .set_metrics(GlyphSet::BoldText)
+            .expect("a BoldText set");
 
         // The deepest ink of the bold face over the ranges its set was baked
         // from - measured off the outlines here, so this compares the header
@@ -753,9 +813,16 @@ mod baked {
         let atlas = regular_and_bold();
         let shaper = styled_shaper();
         let run = shaper
-            .shape(GlyphStyle::Bold, "The quick brown fox jumps over fifty officials")
+            .shape(
+                GlyphStyle::Bold,
+                "The quick brown fox jumps over fifty officials",
+            )
             .expect("loaded");
-        assert_eq!(run.notdef_count(), 0, "a covered character shaped to the box");
+        assert_eq!(
+            run.notdef_count(),
+            0,
+            "a covered character shaped to the box"
+        );
         for g in &run.glyphs {
             assert!(
                 atlas.get_glyph(g.glyph_id).is_some(),

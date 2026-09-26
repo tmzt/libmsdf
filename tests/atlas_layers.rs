@@ -43,7 +43,11 @@ fn atlas() -> FontAtlas {
 fn the_committed_atlas_round_trips_byte_for_byte() {
     let atlas = atlas();
     let out = atlas.to_bytes();
-    assert_eq!(out.len(), ATLAS_FIXTURE.len(), "the serialized length moved");
+    assert_eq!(
+        out.len(),
+        ATLAS_FIXTURE.len(),
+        "the serialized length moved"
+    );
     assert!(out == ATLAS_FIXTURE, "the serialized bytes moved");
     assert_eq!(
         u32::from_le_bytes(out[4..8].try_into().unwrap()),
@@ -60,11 +64,18 @@ fn the_committed_atlas_round_trips_byte_for_byte() {
 #[test]
 fn the_shipped_atlas_is_one_layer_of_48px_regular() {
     let atlas = atlas();
-    assert!(atlas.glyphs.len() > 200, "vacuity: the fixture came back empty");
+    assert!(
+        atlas.glyphs.len() > 200,
+        "vacuity: the fixture came back empty"
+    );
     assert_eq!(atlas.layers, vec![AtlasLayer::new(48, GlyphStyle::Regular)]);
     assert_eq!(atlas.layer_count(), 1);
     for e in &atlas.glyphs {
-        assert_eq!(e.layer, 0, "glyph {} claims a layer this atlas has not got", e.glyph_id);
+        assert_eq!(
+            e.layer, 0,
+            "glyph {} claims a layer this atlas has not got",
+            e.glyph_id
+        );
     }
     // ...and the pixel data is exactly one layer of it.
     assert_eq!(atlas.layer_offset(1), atlas.pixel_data.len());
@@ -82,7 +93,11 @@ fn the_layer_travels_in_the_glyph_table_and_the_draw_list_never_learns() {
     assert_eq!(table.len(), atlas.glyphs.len() * 8);
     for (i, e) in atlas.glyphs.iter().enumerate() {
         assert_eq!(table[i * 8], e.glyph_id as u32);
-        assert_eq!(table[i * 8 + 7], 0, "g1.w must still be 0 for a single-layer atlas");
+        assert_eq!(
+            table[i * 8 + 7],
+            0,
+            "g1.w must still be 0 for a single-layer atlas"
+        );
     }
 
     // ...and a cell in layer 3 says 3 there, with every other word untouched.
@@ -90,7 +105,11 @@ fn the_layer_travels_in_the_glyph_table_and_the_draw_list_never_learns() {
     let before = e.to_gpu_u32s();
     e.layer = 3;
     let after = e.to_gpu_u32s();
-    assert_eq!(&before[..7], &after[..7], "the layer perturbed another word");
+    assert_eq!(
+        &before[..7],
+        &after[..7],
+        "the layer perturbed another word"
+    );
     assert_eq!(after[7], 3);
 }
 
@@ -106,13 +125,16 @@ fn the_layer_travels_in_the_glyph_table_and_the_draw_list_never_learns() {
 #[test]
 fn a_layer_this_atlas_lacks_is_refused_rather_than_substituted() {
     let atlas = atlas();
-    assert_eq!(atlas.layer_index(AtlasLayer::new(48, GlyphStyle::Regular)), Ok(0));
+    assert_eq!(
+        atlas.layer_index(AtlasLayer::new(48, GlyphStyle::Regular)),
+        Ok(0)
+    );
 
     for missing in [
-        AtlasLayer::new(48, GlyphStyle::Bold),        // right size, wrong cut
+        AtlasLayer::new(48, GlyphStyle::Bold), // right size, wrong cut
         AtlasLayer::new(48, GlyphStyle::Italic),
         AtlasLayer::new(48, GlyphStyle::BoldItalic),
-        AtlasLayer::new(16, GlyphStyle::Regular),     // right cut, wrong size
+        AtlasLayer::new(16, GlyphStyle::Regular), // right cut, wrong size
         AtlasLayer::new(0, GlyphStyle::Regular),
     ] {
         assert_eq!(
@@ -124,7 +146,9 @@ fn a_layer_this_atlas_lacks_is_refused_rather_than_substituted() {
 
     // The message names the layer AND says that layer 0 is not a substitute,
     // because the whole failure mode is a caller quietly taking one.
-    let err = atlas.layer_index(AtlasLayer::new(16, GlyphStyle::Bold)).unwrap_err();
+    let err = atlas
+        .layer_index(AtlasLayer::new(16, GlyphStyle::Bold))
+        .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("16px"), "{msg}");
     assert!(msg.contains("Bold"), "{msg}");
@@ -153,7 +177,11 @@ fn text_and_the_private_use_area_share_a_layer_at_a_size() {
         GlyphSet::OwnedIcons,
         GlyphSet::BorrowedIcons,
     ] {
-        assert_eq!(at(set), text, "{set:?} would need a texture swap beside prose");
+        assert_eq!(
+            at(set),
+            text,
+            "{set:?} would need a texture swap beside prose"
+        );
     }
     // ...and no styled set joins them, because a style is what a layer is FOR.
     for set in [
@@ -199,8 +227,15 @@ fn a_style_carries_text_only_and_never_a_second_copy_of_the_icons() {
             })
             .count()
     };
-    assert!(icons(GlyphStyle::Regular) > 0, "vacuity: the merged face queued no icons");
-    assert_eq!(icons(GlyphStyle::Bold), 0, "the icons were duplicated into the bold layer");
+    assert!(
+        icons(GlyphStyle::Regular) > 0,
+        "vacuity: the merged face queued no icons"
+    );
+    assert_eq!(
+        icons(GlyphStyle::Bold),
+        0,
+        "the icons were duplicated into the bold layer"
+    );
 }
 
 // ── the file format ─────────────────────────────────────────────────────
@@ -251,8 +286,15 @@ fn a_layered_atlas_round_trips() {
     assert_eq!(back.glyphs, atlas.glyphs);
     assert_eq!(back.pixel_data, atlas.pixel_data);
     assert_eq!(back.layer_count(), 2);
-    assert_eq!(back.layer_index(AtlasLayer::new(4, GlyphStyle::Bold)), Ok(1));
-    assert_eq!(back.to_bytes(), bytes, "the round trip is not a fixed point");
+    assert_eq!(
+        back.layer_index(AtlasLayer::new(4, GlyphStyle::Bold)),
+        Ok(1)
+    );
+    assert_eq!(
+        back.to_bytes(),
+        bytes,
+        "the round trip is not a fixed point"
+    );
 }
 
 /// **A v4 file is refused by a build that reads only v3**, which is the whole
@@ -348,10 +390,22 @@ fn a_cells_texels_come_from_its_own_layer() {
     let regular_texels = atlas.cell_texels(66).expect("a cell for 66");
     let bold_texels = atlas.cell_texels(bold).expect("a cell for bold 66");
 
-    assert_eq!(atlas.get_glyph(66).unwrap().atlas_x, atlas.get_glyph(bold).unwrap().atlas_x);
-    assert_eq!(atlas.get_glyph(66).unwrap().atlas_y, atlas.get_glyph(bold).unwrap().atlas_y);
-    assert!(regular_texels.iter().all(|&b| b == 0x11), "layer 0 was not read");
-    assert!(bold_texels.iter().all(|&b| b == 0x99), "layer 1 was not read");
+    assert_eq!(
+        atlas.get_glyph(66).unwrap().atlas_x,
+        atlas.get_glyph(bold).unwrap().atlas_x
+    );
+    assert_eq!(
+        atlas.get_glyph(66).unwrap().atlas_y,
+        atlas.get_glyph(bold).unwrap().atlas_y
+    );
+    assert!(
+        regular_texels.iter().all(|&b| b == 0x11),
+        "layer 0 was not read"
+    );
+    assert!(
+        bold_texels.iter().all(|&b| b == 0x99),
+        "layer 1 was not read"
+    );
     assert_eq!(regular_texels.len(), 4 * 4 * 3);
 }
 
@@ -362,7 +416,10 @@ fn the_layer_stride_has_one_definition() {
     let atlas = two_layer_atlas();
     assert_eq!(atlas.layer_offset(0), 0);
     assert_eq!(atlas.layer_offset(1), 4 * 4 * 3);
-    assert_eq!(atlas.layer_offset(atlas.layer_count() as u16), atlas.pixel_data.len());
+    assert_eq!(
+        atlas.layer_offset(atlas.layer_count() as u16),
+        atlas.pixel_data.len()
+    );
 }
 
 // ── the bake, for real (native + msdfgen) ───────────────────────────────
@@ -397,7 +454,8 @@ mod baked {
             .expect("the bold face parses");
         b.add_styled_coverage(GlyphStyle::Italic, ROBOTO_ITALIC_ASCII.to_vec())
             .expect("the italic face parses");
-        b.build().expect("a styled bake fits now - that is the point of the wave")
+        b.build()
+            .expect("a styled bake fits now - that is the point of the wave")
     }
 
     /// **THE UNBLOCKING TEST.** The full shipped coverage plus both bundled
@@ -426,7 +484,11 @@ mod baked {
         // Every layer inside the pin, and every cell in the layer its STYLE
         // names - the style is in the address, so this checks the two agree.
         for (i, layer) in atlas.layers.iter().enumerate() {
-            let n = atlas.glyphs.iter().filter(|e| e.layer as usize == i).count();
+            let n = atlas
+                .glyphs
+                .iter()
+                .filter(|e| e.layer as usize == i)
+                .count();
             assert!(n <= atlas_capacity(), "layer {i} ({layer}) holds {n} cells");
             assert!(n > 0, "layer {i} ({layer}) is empty");
         }
@@ -441,10 +503,21 @@ mod baked {
                 e.layer
             );
         }
-        assert_eq!(atlas.layer_index(AtlasLayer::new(GS as u16, GlyphStyle::Bold)), Ok(1));
+        assert_eq!(
+            atlas.layer_index(AtlasLayer::new(GS as u16, GlyphStyle::Bold)),
+            Ok(1)
+        );
         // ...and the cut nothing was baked for is still refused, on both axes.
-        assert!(atlas.layer_index(AtlasLayer::new(GS as u16, GlyphStyle::BoldItalic)).is_err());
-        assert!(atlas.layer_index(AtlasLayer::new(48, GlyphStyle::Regular)).is_err());
+        assert!(
+            atlas
+                .layer_index(AtlasLayer::new(GS as u16, GlyphStyle::BoldItalic))
+                .is_err()
+        );
+        assert!(
+            atlas
+                .layer_index(AtlasLayer::new(48, GlyphStyle::Regular))
+                .is_err()
+        );
     }
 
     /// **Adding two styles moved nothing in layer 0** - not an entry, not a
@@ -475,7 +548,11 @@ mod baked {
         );
         // And the unstyled set headers are untouched: the styled sets are rows
         // added after them, not a re-measurement of them.
-        for set in [GlyphSet::Placeholder, GlyphSet::Text, GlyphSet::BorrowedIcons] {
+        for set in [
+            GlyphSet::Placeholder,
+            GlyphSet::Text,
+            GlyphSet::BorrowedIcons,
+        ] {
             assert_eq!(plain.set_metrics(set), styled.set_metrics(set), "{set:?}");
         }
     }
@@ -486,7 +563,10 @@ mod baked {
     fn a_styled_bake_round_trips_through_the_file() {
         let atlas = shipped_with_both_styles();
         let bytes = atlas.to_bytes();
-        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), ATLAS_VERSION_LAYERED);
+        assert_eq!(
+            u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
+            ATLAS_VERSION_LAYERED
+        );
         let back = FontAtlas::from_bytes(&bytes).expect("a styled atlas loads");
         assert_eq!(back.layers, atlas.layers);
         assert_eq!(back.glyphs, atlas.glyphs);
@@ -560,7 +640,13 @@ mod on_the_gpu {
 
     fn one_glyph(glyph_id: u16) -> ShapedRun {
         ShapedRun {
-            glyphs: vec![ShapedGlyph { glyph_id, x_advance: 1000, x_offset: 0, y_offset: 0, cluster: 0 }],
+            glyphs: vec![ShapedGlyph {
+                glyph_id,
+                x_advance: 1000,
+                x_offset: 0,
+                y_offset: 0,
+                cluster: 0,
+            }],
             total_advance: 1000,
             units_per_em: 1000,
         }
@@ -577,17 +663,39 @@ mod on_the_gpu {
             atlas.height,
             atlas.layer_count(),
         );
-        assert_eq!(renderer.msdf_atlas_layers(), 2, "the texture was not created with two layers");
+        assert_eq!(
+            renderer.msdf_atlas_layers(),
+            2,
+            "the texture was not created with two layers"
+        );
         renderer.upload_msdf_atlas(&queue, atlas.width, atlas.height, &atlas.to_rgba_bytes());
         renderer.upload_glyph_table(&queue, &atlas.glyph_table_u32s());
 
         let mut list = DrawList::new();
-        list.push_shaped_text(&one_glyph(1), &atlas, [0.0, 0.0], CELL as f32, PX_RANGE, [1.0; 4]);
-        list.push_shaped_text(&one_glyph(2), &atlas, [64.0, 0.0], CELL as f32, PX_RANGE, [1.0; 4]);
+        list.push_shaped_text(
+            &one_glyph(1),
+            &atlas,
+            [0.0, 0.0],
+            CELL as f32,
+            PX_RANGE,
+            [1.0; 4],
+        );
+        list.push_shaped_text(
+            &one_glyph(2),
+            &atlas,
+            [64.0, 0.0],
+            CELL as f32,
+            PX_RANGE,
+            [1.0; 4],
+        );
 
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("offscreen"),
-            size: wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: W,
+                height: H,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -622,7 +730,11 @@ mod on_the_gpu {
                     rows_per_image: None,
                 },
             },
-            wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: W,
+                height: H,
+                depth_or_array_layers: 1,
+            },
         );
         queue.submit(std::iter::once(enc.finish()));
 
@@ -654,7 +766,10 @@ mod on_the_gpu {
         // Middle of each glyph's cell.
         let layer0 = at(16, 16);
         let layer1 = at(80, 16);
-        assert_eq!(layer0, 0, "the layer-0 glyph drew ink from an all-outside field");
+        assert_eq!(
+            layer0, 0,
+            "the layer-0 glyph drew ink from an all-outside field"
+        );
         assert!(
             layer1 > 200,
             "the layer-1 glyph drew {layer1}, not the all-inside field of its own layer - the \

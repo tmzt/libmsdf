@@ -7,12 +7,12 @@
 //! the font still says what Rust assumes, against the bytes that ship rather
 //! than against a rebuild. This file is that something.
 
+use libmsdf::DrawList;
 use libmsdf::drawlist::{LINE_BOX_RATIO, X_MARGIN_FRAC};
 use libmsdf::font::{
-    FontAtlas, MARKERS, MARKER_ARROW, MSYMBOLS_ICONS, PRIVATE_USE, ROBOTO_ASCII_MSYMBOLS,
+    FontAtlas, MARKER_ARROW, MARKERS, MSYMBOLS_ICONS, PRIVATE_USE, ROBOTO_ASCII_MSYMBOLS,
     ROBOTO_REGULAR_ASCII, TextShaper,
 };
-use libmsdf::DrawList;
 
 const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
 const PX_RANGE: f32 = 6.0;
@@ -52,10 +52,20 @@ fn median_at(a: &FontAtlas, x: u32, y: u32) -> f32 {
 fn icons_sort_below_the_marker_block() {
     let (pua_lo, pua_hi) = PRIVATE_USE;
     let (m_lo, m_hi) = MARKERS;
-    assert!(m_lo >= pua_lo && m_hi <= pua_hi, "the marker block escapes the carveout");
-    assert!(m_hi == pua_hi, "markers are allocated from the TOP of the carveout down to m_lo");
+    assert!(
+        m_lo >= pua_lo && m_hi <= pua_hi,
+        "the marker block escapes the carveout"
+    );
+    assert!(
+        m_hi == pua_hi,
+        "markers are allocated from the TOP of the carveout down to m_lo"
+    );
     for &(name, cp) in MSYMBOLS_ICONS {
-        assert!(cp < m_lo, "icon {name:?} at U+{:04X} is inside the marker block", cp as u32);
+        assert!(
+            cp < m_lo,
+            "icon {name:?} at U+{:04X} is inside the marker block",
+            cp as u32
+        );
     }
     assert!(MARKER_ARROW >= m_lo && MARKER_ARROW <= m_hi);
 }
@@ -80,9 +90,15 @@ fn marker_contract_holds() {
         let upem = face.units_per_em();
         for cp in (MARKERS.0 as u32)..=(MARKERS.1 as u32) {
             let ch = char::from_u32(cp).unwrap();
-            let Some(gid) = face.glyph_index(ch) else { continue };
-            let bbox = face.glyph_bounding_box(gid).expect("a marker has an outline");
-            let advance = face.glyph_hor_advance(gid).expect("a marker has an advance") as i16;
+            let Some(gid) = face.glyph_index(ch) else {
+                continue;
+            };
+            let bbox = face
+                .glyph_bounding_box(gid)
+                .expect("a marker has an outline");
+            let advance = face
+                .glyph_hor_advance(gid)
+                .expect("a marker has an advance") as i16;
             assert_eq!(
                 (bbox.x_min, bbox.x_max),
                 (0, advance),
@@ -115,12 +131,17 @@ fn marker_contract_holds() {
 #[test]
 fn the_arrow_shapes_and_is_baked_with_ink() {
     let (shaper, atlas) = (shaper(), atlas());
-    assert!(shaper.covers(MARKER_ARROW), "the shipped face has no arrow glyph");
+    assert!(
+        shaper.covers(MARKER_ARROW),
+        "the shipped face has no arrow glyph"
+    );
     let run = marker_run(&shaper, MARKER_ARROW);
     assert_eq!(run.glyphs.len(), 1, "a marker is one glyph");
     assert_eq!(run.notdef_count(), 0);
     let gid = run.glyphs[0].glyph_id;
-    let e = *atlas.get_glyph(gid).expect("the bake has no cell for the arrow");
+    let e = *atlas
+        .get_glyph(gid)
+        .expect("the bake has no cell for the arrow");
     assert!(
         (0..e.atlas_h as u32)
             .flat_map(|dy| (0..e.atlas_w as u32).map(move |dx| (dx, dy)))
@@ -167,7 +188,10 @@ fn the_baked_arrow_cell_is_a_triangle_pointing_forward() {
         column_height(x1),
     );
     // Monotonically narrowing, which a diamond or a flipped field would not be.
-    let (mid, quarter) = (column_height((x0 + x1) / 2), column_height((3 * x0 + x1) / 4));
+    let (mid, quarter) = (
+        column_height((x0 + x1) / 2),
+        column_height((3 * x0 + x1) / 4),
+    );
     assert!(column_height(x0) >= quarter && quarter >= mid && mid >= column_height(x1));
 }
 
@@ -300,7 +324,11 @@ mod rendered {
 
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("marker-sweep"),
-            size: wgpu::Extent3d { width: WIDTH, height: HEIGHT, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: WIDTH,
+                height: HEIGHT,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -335,7 +363,11 @@ mod rendered {
                     rows_per_image: None,
                 },
             },
-            wgpu::Extent3d { width: WIDTH, height: HEIGHT, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: WIDTH,
+                height: HEIGHT,
+                depth_or_array_layers: 1,
+            },
         );
         queue.submit(std::iter::once(enc.finish()));
 
@@ -390,7 +422,10 @@ mod rendered {
                 let mut enc = png::Encoder::new(file, WIDTH, HEIGHT);
                 enc.set_color(png::ColorType::Rgba);
                 enc.set_depth(png::BitDepth::Eight);
-                enc.write_header().unwrap().write_image_data(&frame).unwrap();
+                enc.write_header()
+                    .unwrap()
+                    .write_image_data(&frame)
+                    .unwrap();
                 eprintln!("DUMPED {path}");
             }
         }
@@ -441,7 +476,10 @@ mod rendered {
                         lead = lead.max(along);
                     }
                 }
-                assert!(area > 1.0, "size {size} step {step}: no marker ink near the anchor");
+                assert!(
+                    area > 1.0,
+                    "size {size} step {step}: no marker ink near the anchor"
+                );
 
                 // **Where the ink's mass is.** A triangle's centroid sits two
                 // thirds of its height back from the apex, on its axis — so
@@ -481,7 +519,10 @@ mod rendered {
                 // straddles it. This is the half that would fail if the marker
                 // were anchored by its centre or its tail instead.
                 worst_lead = worst_lead.max(lead);
-                assert!(lead <= 1.0, "size {size} step {step}: ink runs {lead:.2}px past the anchor");
+                assert!(
+                    lead <= 1.0,
+                    "size {size} step {step}: ink runs {lead:.2}px past the anchor"
+                );
                 // Scale: a triangle `size` long and 0.8*size wide.
                 let expect_area = 0.4 * size * size;
                 assert!(

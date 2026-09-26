@@ -129,7 +129,10 @@ impl MsdfCompute {
             cache: None,
         });
 
-        Self { pipeline, bind_group_layout }
+        Self {
+            pipeline,
+            bind_group_layout,
+        }
     }
 
     /// Record a generation pass for one glyph cell into `encoder`. Buffer
@@ -190,9 +193,18 @@ impl MsdfCompute {
             label: Some("msdf_compute_bg"),
             layout: &self.bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: param_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: edge_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: out_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: param_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: edge_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: out_buffer.as_entire_binding(),
+                },
             ],
         });
 
@@ -207,7 +219,11 @@ impl MsdfCompute {
             pass.dispatch_workgroups(groups, groups, 1);
         }
 
-        MsdfCellBuffer { buffer: out_buffer, row_stride, cell }
+        MsdfCellBuffer {
+            buffer: out_buffer,
+            row_stride,
+            cell,
+        }
     }
 
     /// Generate one glyph cell into a GPU buffer (packed RGBA8, row-padded).
@@ -292,7 +308,11 @@ impl MsdfCompute {
                 origin: wgpu::Origin3d { x, y, z: layer },
                 aspect: wgpu::TextureAspect::All,
             },
-            wgpu::Extent3d { width: cell, height: cell, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: cell,
+                height: cell,
+                depth_or_array_layers: 1,
+            },
         );
         queue.submit(std::iter::once(encoder.finish()));
     }

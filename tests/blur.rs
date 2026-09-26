@@ -33,7 +33,11 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 fn tex_from_rgba(device: &wgpu::Device, queue: &wgpu::Queue, rgba: &[u8]) -> wgpu::Texture {
     let tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("blur-src"),
-        size: wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -49,8 +53,16 @@ fn tex_from_rgba(device: &wgpu::Device, queue: &wgpu::Queue, rgba: &[u8]) -> wgp
             aspect: wgpu::TextureAspect::All,
         },
         rgba,
-        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(W * 4), rows_per_image: Some(H) },
-        wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(W * 4),
+            rows_per_image: Some(H),
+        },
+        wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
     );
     tex
 }
@@ -58,7 +70,11 @@ fn tex_from_rgba(device: &wgpu::Device, queue: &wgpu::Queue, rgba: &[u8]) -> wgp
 fn target(device: &wgpu::Device) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("blur-target"),
-        size: wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -86,9 +102,17 @@ fn readback(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture) -> 
         },
         wgpu::TexelCopyBufferInfo {
             buffer: &buf,
-            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: None },
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: None,
+            },
         },
-        wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
+        wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
     );
     queue.submit(std::iter::once(enc.finish()));
 
@@ -154,13 +178,26 @@ fn blur_turns_a_hard_edge_into_a_gradient() {
 
     let mid = H / 2;
     // The far field is essentially untouched (local blur).
-    assert!(px(&img, 2, mid)[0] > 220, "far-left stays near-white: {:?}", px(&img, 2, mid));
-    assert!(px(&img, W - 3, mid)[0] < 35, "far-right stays near-black: {:?}", px(&img, W - 3, mid));
+    assert!(
+        px(&img, 2, mid)[0] > 220,
+        "far-left stays near-white: {:?}",
+        px(&img, 2, mid)
+    );
+    assert!(
+        px(&img, W - 3, mid)[0] < 35,
+        "far-right stays near-black: {:?}",
+        px(&img, W - 3, mid)
+    );
     // The boundary column band now holds intermediate greys — proof the hard
     // step got smeared into a gradient by a real sampling blur.
-    let boundary_intermediate = (W / 2 - 4..W / 2 + 4)
-        .any(|x| { let r = px(&img, x, mid)[0]; r > 40 && r < 215 });
-    assert!(boundary_intermediate, "the hard edge became a gradient (intermediate greys at the boundary)");
+    let boundary_intermediate = (W / 2 - 4..W / 2 + 4).any(|x| {
+        let r = px(&img, x, mid)[0];
+        r > 40 && r < 215
+    });
+    assert!(
+        boundary_intermediate,
+        "the hard edge became a gradient (intermediate greys at the boundary)"
+    );
 }
 
 #[test]
@@ -200,8 +237,14 @@ fn overlay_composites_crisp_over_the_blur() {
     let mid = H / 2;
     // Left: the opaque overlay wins (crisp red, no grey bleed).
     let left = px(&img, 4, mid);
-    assert!(left[0] > 220 && left[1] < 40 && left[2] < 40, "overlay is crisp red over the blur: {left:?}");
+    assert!(
+        left[0] > 220 && left[1] < 40 && left[2] < 40,
+        "overlay is crisp red over the blur: {left:?}"
+    );
     // Right: no overlay → the (blurred) grey backdrop shows through.
     let right = px(&img, W - 4, mid);
-    assert!((right[0] as i32 - 128).abs() < 24, "uncovered region keeps the backdrop: {right:?}");
+    assert!(
+        (right[0] as i32 - 128).abs() < 24,
+        "uncovered region keeps the backdrop: {right:?}"
+    );
 }

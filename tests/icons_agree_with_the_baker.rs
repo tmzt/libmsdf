@@ -39,7 +39,7 @@ use std::path::Path;
 const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
 
 use libmsdf::{
-    FontAtlas, HIGHBAY_ICONS, MARKERS, MARKER_ARROW, MSYMBOLS_ICONS, ROBOTO_ASCII_MSYMBOLS,
+    FontAtlas, HIGHBAY_ICONS, MARKER_ARROW, MARKERS, MSYMBOLS_ICONS, ROBOTO_ASCII_MSYMBOLS,
     ROBOTO_REGULAR_ASCII, TextShaper, highbay_codepoint, msymbols_codepoint,
 };
 
@@ -64,12 +64,15 @@ fn baker_manifest() -> BTreeMap<String, u32> {
 /// purpose (see above); each caller has its own `*_were_actually_found` guard.
 fn icons_list(rel: &str) -> BTreeMap<String, u32> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
 
-    let start = text
-        .find("\nICONS = [")
-        .unwrap_or_else(|| panic!("no `ICONS = [` in {} - the baker's manifest moved or was renamed", path.display()));
+    let start = text.find("\nICONS = [").unwrap_or_else(|| {
+        panic!(
+            "no `ICONS = [` in {} - the baker's manifest moved or was renamed",
+            path.display()
+        )
+    });
     let body = &text[start..];
     let end = body
         .find("\n]")
@@ -172,20 +175,27 @@ fn every_icon_the_baker_draws_is_one_rust_can_resolve() {
 /// "geometry the renderer reaches for itself".
 fn baked_markers() -> Vec<u32> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts/marker.py");
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let start = text.find("\nMARKERS = {").unwrap_or_else(|| {
-        panic!("no `MARKERS = {{` in {} - the baker's dict moved or was renamed", path.display())
+        panic!(
+            "no `MARKERS = {{` in {} - the baker's dict moved or was renamed",
+            path.display()
+        )
     });
     let body = &text[start..];
-    let end = body.find("\n}").unwrap_or_else(|| panic!("`MARKERS = {{` is never closed"));
+    let end = body
+        .find("\n}")
+        .unwrap_or_else(|| panic!("`MARKERS = {{` is never closed"));
     let mut out = Vec::new();
     for line in body[..end].lines() {
         let line = line.trim();
         let Some(hex) = line.strip_prefix("0x").or_else(|| line.strip_prefix("0X")) else {
             continue;
         };
-        let Some((digits, _)) = hex.split_once(':') else { continue };
+        let Some((digits, _)) = hex.split_once(':') else {
+            continue;
+        };
         if let Ok(v) = u32::from_str_radix(digits.trim(), 16) {
             out.push(v);
         }
@@ -219,7 +229,10 @@ fn every_marker_rust_names_is_one_the_baker_draws() {
         baked.contains(&arrow),
         "MARKER_ARROW is U+{arrow:04X} and marker.py bakes {:?} - Rust names a \
          cell the face never drew, which the atlas renders as a visible tofu box",
-        baked.iter().map(|c| format!("U+{c:04X}")).collect::<Vec<_>>()
+        baked
+            .iter()
+            .map(|c| format!("U+{c:04X}"))
+            .collect::<Vec<_>>()
     );
     for code in baked {
         assert!(
@@ -386,15 +399,17 @@ fn every_borrowed_name_has_an_outline_and_a_one_em_advance() {
     let mut broken = Vec::new();
     for &(name, ch) in MSYMBOLS_ICONS {
         let Some(gid) = face.glyph_index(ch) else {
-            broken.push(format!("`{name}` (U+{:04X}) has NO GLYPH in the merged face", ch as u32));
+            broken.push(format!(
+                "`{name}` (U+{:04X}) has NO GLYPH in the merged face",
+                ch as u32
+            ));
             continue;
         };
         match face.glyph_bounding_box(gid) {
             None => broken.push(format!(
                 "`{name}` (U+{:04X}) is glyph {} and has NO OUTLINE - it would \
                  shape cleanly and draw nothing",
-                ch as u32,
-                gid.0
+                ch as u32, gid.0
             )),
             Some(bb) if bb.x_max <= bb.x_min || bb.y_max <= bb.y_min => broken.push(format!(
                 "`{name}` (U+{:04X}) has an empty bounding box {bb:?}",
@@ -411,7 +426,12 @@ fn every_borrowed_name_has_an_outline_and_a_one_em_advance() {
             )),
         }
     }
-    assert!(broken.is_empty(), "{} borrowed icon(s):\n  {}", broken.len(), broken.join("\n  "));
+    assert!(
+        broken.is_empty(),
+        "{} borrowed icon(s):\n  {}",
+        broken.len(),
+        broken.join("\n  ")
+    );
 
     // And the PLAIN face carries none of them - that is what "merged" means,
     // and it is the vacuity pin for the loop above having read the right face.
@@ -424,7 +444,6 @@ fn every_borrowed_name_has_an_outline_and_a_one_em_advance() {
         );
     }
 }
-
 
 // ── and what the bake actually DRAWS ────────────────────────────────────
 
@@ -453,7 +472,9 @@ fn dump_the_borrowed_set() {
     use libmsdf::drawlist::{LINE_BOX_RATIO, screen_px_range};
     use libmsdf::font::FontAtlasBuilder;
 
-    let Ok(dir) = std::env::var("LIBMSDF_DUMP") else { return };
+    let Ok(dir) = std::env::var("LIBMSDF_DUMP") else {
+        return;
+    };
     std::fs::create_dir_all(&dir).unwrap();
 
     const PX_RANGE: f32 = 6.0;
@@ -474,7 +495,9 @@ fn dump_the_borrowed_set() {
         let line_h = size * LINE_BOX_RATIO;
         for (i, &(_, ch)) in MSYMBOLS_ICONS.iter().enumerate() {
             let run = shaper.shape(ch.encode_utf8(&mut [0u8; 4]));
-            let e = *atlas.get_glyph(run.glyphs[0].glyph_id).expect("a borrowed icon has a cell");
+            let e = *atlas
+                .get_glyph(run.glyphs[0].glyph_id)
+                .expect("a borrowed icon has a cell");
             let scale = e.atlas_h as f32 / line_h;
             let spr = screen_px_range(PX_RANGE, e.atlas_h as f32, size);
             let (left, top_y) = (PAD + i as f32 * col_w, top);
@@ -486,7 +509,11 @@ fn dump_the_borrowed_set() {
                     {
                         continue;
                     }
-                    let sd = bilinear(&atlas, e.atlas_x as f32 + acx + 0.5, e.atlas_y as f32 + acy + 0.5);
+                    let sd = bilinear(
+                        &atlas,
+                        e.atlas_x as f32 + acx + 0.5,
+                        e.atlas_y as f32 + acy + 0.5,
+                    );
                     let a = (spr * (sd - 0.5) + 0.5).clamp(0.0, 1.0);
                     let p = &mut img[py * w + px];
                     *p = (*p as f32 * (1.0 - a)).round() as u8;
@@ -504,10 +531,19 @@ fn dump_the_borrowed_set() {
             big[y * w * Z + x] = img[(y / Z) * w + x / Z];
         }
     }
-    write_gray(&format!("{dir}/msymbols-icons-zoom.png"), w * Z, h * Z, &big);
+    write_gray(
+        &format!("{dir}/msymbols-icons-zoom.png"),
+        w * Z,
+        h * Z,
+        &big,
+    );
     eprintln!(
         "DUMPED {dir}/msymbols-icons.png (+ -zoom); columns are {}",
-        MSYMBOLS_ICONS.iter().map(|&(n, _)| n).collect::<Vec<_>>().join(" ")
+        MSYMBOLS_ICONS
+            .iter()
+            .map(|&(n, _)| n)
+            .collect::<Vec<_>>()
+            .join(" ")
     );
 }
 

@@ -14,12 +14,13 @@ pub use frame::RenderFrame;
 pub use raster::Rasterizer;
 pub use sdf::{
     Anim, ClipRect, GpuTexture, SdfDrawCmd, any_animation_active, sd_box, sd_circle,
-    sd_cubic_stroke, sd_rounded_box, sd_segment, sdf_eval, sdf_eval_animated,
-    sdf_eval_with_params,
+    sd_cubic_stroke, sd_rounded_box, sd_segment, sdf_eval, sdf_eval_animated, sdf_eval_with_params,
 };
 pub use sdf::{
     CLIP_UNBOUNDED_EXTENT, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE,
     DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_SLAB, DRAW_TYPE_TEXT, DRAW_TYPE_TEXTURE,
     MAX_ANIMS, MAX_DRAW_CMDS, MAX_TEXTURES,
 };
-pub use text::{GpuFont, MAX_FONTS, StringOffset, pack_bitmap, pack_strings, truncate_str, wordwrap};
+pub use text::{
+    GpuFont, MAX_FONTS, StringOffset, pack_bitmap, pack_strings, truncate_str, wordwrap,
+};

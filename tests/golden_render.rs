@@ -57,7 +57,10 @@ fn scene(atlas: &FontAtlas) -> DrawList {
     });
     // Outline.
     list.push(SdfInstance {
-        kind: SdfKind::Outline { radius: 10.0, thickness: 3.0 },
+        kind: SdfKind::Outline {
+            radius: 10.0,
+            thickness: 3.0,
+        },
         position: [70.0, 200.0],
         size: [200.0, 120.0],
         color: [0.55, 0.75, 0.95, 1.0],
@@ -87,11 +90,25 @@ fn scene(atlas: &FontAtlas) -> DrawList {
     // MSDF text from the baked fixture atlas. PX_RANGE must match the bake or
     // the shader's screen-space alpha ramp is scaled wrong.
     let run = shaper.shape("Highbay MSDF");
-    list.push_shaped_text(&run, atlas, [80.0, 80.0], 42.0, PX_RANGE, [0.93, 0.93, 0.95, 1.0]);
+    list.push_shaped_text(
+        &run,
+        atlas,
+        [80.0, 80.0],
+        42.0,
+        PX_RANGE,
+        [0.93, 0.93, 0.95, 1.0],
+    );
     // Small text with hairlines (t/f crossbars, i dots) — the size band where a
     // wrong distance range eats sub-pixel strokes.
     let small = shaper.shape("tftlt: fifty little SDF outlines, effortlessly");
-    list.push_shaped_text(&small, atlas, [80.0, 132.0], 12.0, PX_RANGE, [0.75, 0.76, 0.80, 1.0]);
+    list.push_shaped_text(
+        &small,
+        atlas,
+        [80.0, 132.0],
+        12.0,
+        PX_RANGE,
+        [0.75, 0.76, 0.80, 1.0],
+    );
 
     list
 }
@@ -111,7 +128,11 @@ fn render_scene() -> Option<Vec<u8>> {
 
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("offscreen"),
-        size: wgpu::Extent3d { width: WIDTH, height: HEIGHT, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: WIDTH,
+            height: HEIGHT,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -150,7 +171,11 @@ fn render_scene() -> Option<Vec<u8>> {
                 rows_per_image: None,
             },
         },
-        wgpu::Extent3d { width: WIDTH, height: HEIGHT, depth_or_array_layers: 1 },
+        wgpu::Extent3d {
+            width: WIDTH,
+            height: HEIGHT,
+            depth_or_array_layers: 1,
+        },
     );
     queue.submit(std::iter::once(enc.finish()));
 
@@ -187,7 +212,11 @@ fn read_png(path: &str) -> Option<Vec<u8>> {
     let mut reader = decoder.read_info().ok()?;
     let mut buf = vec![0; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).ok()?;
-    assert_eq!((info.width, info.height), (WIDTH, HEIGHT), "golden size mismatch");
+    assert_eq!(
+        (info.width, info.height),
+        (WIDTH, HEIGHT),
+        "golden size mismatch"
+    );
     buf.truncate(info.buffer_size());
     Some(buf)
 }
@@ -206,19 +235,31 @@ fn golden_scene_renders() {
     };
     // Card interior is the dark card color, not clear-black.
     let (r, g, b) = px(400, 220);
-    assert!(b > r && b > 20, "card interior should be blue-ish dark: {:?}", (r, g, b));
+    assert!(
+        b > r && b > 20,
+        "card interior should be blue-ish dark: {:?}",
+        (r, g, b)
+    );
     // Circle center is orange.
     let (r, _g, b) = px(660, 140);
     assert!(r > 180 && b < 120, "circle center should be orange");
     // Text row has bright pixels.
     let text_row = (0..WIDTH).filter(|&x| px(x, 105).0 > 150).count();
-    assert!(text_row > 20, "headline row should have bright text pixels: {text_row}");
+    assert!(
+        text_row > 20,
+        "headline row should have bright text pixels: {text_row}"
+    );
     // Bézier arcs put ink between the card rows.
-    let arc_ink: usize = (0..WIDTH).filter(|&x| {
-        let (r, g, b) = px(x, 300);
-        r > 60 || g > 60 || b > 60
-    }).count();
-    assert!(arc_ink > 10, "arc band should contain stroke pixels: {arc_ink}");
+    let arc_ink: usize = (0..WIDTH)
+        .filter(|&x| {
+            let (r, g, b) = px(x, 300);
+            r > 60 || g > 60 || b > 60
+        })
+        .count();
+    assert!(
+        arc_ink > 10,
+        "arc band should contain stroke pixels: {arc_ink}"
+    );
 
     // Golden comparison (tolerance-based; BLESS regenerates).
     if std::env::var("LIBMSDF_BLESS").is_ok() {
@@ -236,7 +277,10 @@ fn golden_scene_renders() {
         .chunks_exact(4)
         .zip(golden.chunks_exact(4))
         .filter(|(a, b)| {
-            a.iter().zip(b.iter()).take(3).any(|(&x, &y)| x.abs_diff(y) > tolerance)
+            a.iter()
+                .zip(b.iter())
+                .take(3)
+                .any(|(&x, &y)| x.abs_diff(y) > tolerance)
         })
         .count();
     let total = (WIDTH * HEIGHT) as usize;

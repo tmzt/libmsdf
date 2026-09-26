@@ -297,7 +297,12 @@ pub fn lower_stream(
                 size: [box_w, line_box_h],
                 color,
                 // params.z = x_margin_frac so the shader can re-derive the pen origin
-                params: [DRAW_TYPE_MSDF_TEXT, px_range, x_margin_frac, f32::from_bits(packed_slot)],
+                params: [
+                    DRAW_TYPE_MSDF_TEXT,
+                    px_range,
+                    x_margin_frac,
+                    f32::from_bits(packed_slot),
+                ],
                 xform: [0.0; 4],
                 clip: SdfDrawCmd::NO_CLIP,
             });
@@ -309,9 +314,14 @@ pub fn lower_stream(
             opcode::OP_SET_CURSOR => {
                 if in_batch {
                     flush(
-                        &mut draws, batch_start_x, batch_y,
-                        batch_char_offset, batch_char_count, batch_total_advance,
-                        batch_color, batch_pictographic,
+                        &mut draws,
+                        batch_start_x,
+                        batch_y,
+                        batch_char_offset,
+                        batch_char_count,
+                        batch_total_advance,
+                        batch_color,
+                        batch_pictographic,
                     );
                     in_batch = false;
                 }
@@ -323,9 +333,14 @@ pub fn lower_stream(
             opcode::OP_SET_STYLE => {
                 if in_batch {
                     flush(
-                        &mut draws, batch_start_x, batch_y,
-                        batch_char_offset, batch_char_count, batch_total_advance,
-                        batch_color, batch_pictographic,
+                        &mut draws,
+                        batch_start_x,
+                        batch_y,
+                        batch_char_offset,
+                        batch_char_count,
+                        batch_total_advance,
+                        batch_color,
+                        batch_pictographic,
                     );
                     in_batch = false;
                 }
@@ -342,9 +357,14 @@ pub fn lower_stream(
                 // Flush if switching between MSDF and pictographic
                 if in_batch && batch_pictographic != is_pictographic {
                     flush(
-                        &mut draws, batch_start_x, batch_y,
-                        batch_char_offset, batch_char_count, batch_total_advance,
-                        batch_color, batch_pictographic,
+                        &mut draws,
+                        batch_start_x,
+                        batch_y,
+                        batch_char_offset,
+                        batch_char_count,
+                        batch_total_advance,
+                        batch_color,
+                        batch_pictographic,
                     );
                     in_batch = false;
                 }
@@ -365,10 +385,7 @@ pub fn lower_stream(
                     char_buffer.push(glyph_id as u32);
                 } else {
                     // MSDF: pack [glyph_table_index << 16 | advance_delta_biased]
-                    let gt_idx = glyph_id_to_table_index
-                        .get(&glyph_id)
-                        .copied()
-                        .unwrap_or(0);
+                    let gt_idx = glyph_id_to_table_index.get(&glyph_id).copied().unwrap_or(0);
                     let std_advance_norm = standard_advances.get(&glyph_id).copied().unwrap_or(0.5);
                     let std_advance_px = std_advance_norm * font_size;
                     let delta_px = advance as f32 - std_advance_px;
@@ -383,9 +400,14 @@ pub fn lower_stream(
             opcode::OP_DRAW_SHAPE => {
                 if in_batch {
                     flush(
-                        &mut draws, batch_start_x, batch_y,
-                        batch_char_offset, batch_char_count, batch_total_advance,
-                        batch_color, batch_pictographic,
+                        &mut draws,
+                        batch_start_x,
+                        batch_y,
+                        batch_char_offset,
+                        batch_char_count,
+                        batch_total_advance,
+                        batch_color,
+                        batch_pictographic,
                     );
                     in_batch = false;
                 }
@@ -407,13 +429,22 @@ pub fn lower_stream(
 
     if in_batch {
         flush(
-            &mut draws, batch_start_x, batch_y,
-            batch_char_offset, batch_char_count, batch_total_advance,
-            batch_color, batch_pictographic,
+            &mut draws,
+            batch_start_x,
+            batch_y,
+            batch_char_offset,
+            batch_char_count,
+            batch_total_advance,
+            batch_color,
+            batch_pictographic,
         );
     }
 
-    SdfFrame { draws, char_buffer, param_bank: Vec::new() }
+    SdfFrame {
+        draws,
+        char_buffer,
+        param_bank: Vec::new(),
+    }
 }
 
 #[cfg(test)]
@@ -484,7 +515,9 @@ mod tests {
     fn default_rendering_is_msdf() {
         let mut stream = CommandStream::default();
         // Style with font_index=1 (MSDF)
-        stream.styles.push(BankedStyle::with_font(0xFFFFFFFF, 0, 0, 0, 1));
+        stream
+            .styles
+            .push(BankedStyle::with_font(0xFFFFFFFF, 0, 0, 0, 1));
         stream.commands.push(Command32::set_style(0));
         stream.commands.push(Command32::set_cursor(10, 20));
         stream.commands.push(Command32::draw_glyph(8, 65)); // 'A'
@@ -496,7 +529,10 @@ mod tests {
 
         assert!(!frame.draws.is_empty());
         assert!(
-            frame.draws.iter().all(|d| d.draw_type() == DRAW_TYPE_MSDF_TEXT || d.draw_type() == DRAW_TYPE_BOX),
+            frame
+                .draws
+                .iter()
+                .all(|d| d.draw_type() == DRAW_TYPE_MSDF_TEXT || d.draw_type() == DRAW_TYPE_BOX),
             "default text should use MSDF (type 8), not bitmap (type 4)"
         );
     }
@@ -504,7 +540,13 @@ mod tests {
     #[test]
     fn pictographic_uses_bitmap() {
         let mut stream = CommandStream::default();
-        stream.styles.push(BankedStyle::with_font(0xFFFFFFFF, 0, 0, 0, FONT_INDEX_PICTOGRAPHIC));
+        stream.styles.push(BankedStyle::with_font(
+            0xFFFFFFFF,
+            0,
+            0,
+            0,
+            FONT_INDEX_PICTOGRAPHIC,
+        ));
         stream.commands.push(Command32::set_style(0));
         stream.commands.push(Command32::set_cursor(10, 20));
         stream.commands.push(Command32::draw_glyph(16, 0xFFFE)); // emoji glyph
@@ -518,8 +560,16 @@ mod tests {
     #[test]
     fn mixed_msdf_and_pictographic() {
         let mut stream = CommandStream::default();
-        stream.styles.push(BankedStyle::with_font(0xFFFFFFFF, 0, 0, 0, 1)); // MSDF
-        stream.styles.push(BankedStyle::with_font(0xFFFFFFFF, 0, 0, 0, FONT_INDEX_PICTOGRAPHIC)); // bitmap
+        stream
+            .styles
+            .push(BankedStyle::with_font(0xFFFFFFFF, 0, 0, 0, 1)); // MSDF
+        stream.styles.push(BankedStyle::with_font(
+            0xFFFFFFFF,
+            0,
+            0,
+            0,
+            FONT_INDEX_PICTOGRAPHIC,
+        )); // bitmap
 
         // MSDF text
         stream.commands.push(Command32::set_style(0));
@@ -534,9 +584,20 @@ mod tests {
         let adv_map = HashMap::from([(72u16, 0.5f32)]);
         let frame = lower_stream(&stream, &gid_map, &adv_map, 16.0, 4.0);
 
-        let msdf_count = frame.draws.iter().filter(|d| d.draw_type() == DRAW_TYPE_MSDF_TEXT).count();
-        let bitmap_count = frame.draws.iter().filter(|d| d.draw_type() == DRAW_TYPE_TEXT).count();
+        let msdf_count = frame
+            .draws
+            .iter()
+            .filter(|d| d.draw_type() == DRAW_TYPE_MSDF_TEXT)
+            .count();
+        let bitmap_count = frame
+            .draws
+            .iter()
+            .filter(|d| d.draw_type() == DRAW_TYPE_TEXT)
+            .count();
         assert_eq!(msdf_count, 1, "should have 1 MSDF draw");
-        assert_eq!(bitmap_count, 1, "should have 1 bitmap draw for pictographic");
+        assert_eq!(
+            bitmap_count, 1,
+            "should have 1 bitmap draw for pictographic"
+        );
     }
 }

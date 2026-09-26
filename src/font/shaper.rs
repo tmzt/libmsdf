@@ -67,8 +67,7 @@ pub struct TextShaper {
 impl TextShaper {
     /// Create a shaper from raw font file data (TTF/OTF).
     pub fn new(font_data: Vec<u8>) -> Result<Self, &'static str> {
-        let face = ttf_parser::Face::parse(&font_data, 0)
-            .map_err(|_| "failed to parse font")?;
+        let face = ttf_parser::Face::parse(&font_data, 0).map_err(|_| "failed to parse font")?;
         let units_per_em = face.units_per_em();
         Ok(Self {
             face_data: font_data,
@@ -89,7 +88,13 @@ impl TextShaper {
     ///
     /// Uses default left-to-right, Latin script settings and default features.
     pub fn shape(&self, text: &str) -> ShapedRun {
-        self.shape_with_options(text, rustybuzz::Direction::LeftToRight, None, None, &self.default_features)
+        self.shape_with_options(
+            text,
+            rustybuzz::Direction::LeftToRight,
+            None,
+            None,
+            &self.default_features,
+        )
     }
 
     /// Shape with explicit direction, script, language, and OpenType features.
@@ -115,9 +120,10 @@ impl TextShaper {
             buffer.set_language(l);
         }
 
-        let mut rb_features: Vec<rustybuzz::Feature> = features.iter().map(|&(tag, val)| {
-            rustybuzz::Feature::new(tag, val, ..)
-        }).collect();
+        let mut rb_features: Vec<rustybuzz::Feature> = features
+            .iter()
+            .map(|&(tag, val)| rustybuzz::Feature::new(tag, val, ..))
+            .collect();
 
         // Features MUST be sorted by tag for rustybuzz/HarfBuzz
         rb_features.sort_by_key(|f| f.tag);
@@ -541,7 +547,10 @@ mod uncovered_text_shapes_to_the_placeholder {
     /// and the typographic ten are INSIDE it and must not.
     #[test]
     fn only_the_uncovered_characters_become_the_box() {
-        assert_eq!(shaper().shape("Script \u{2192}Chat\u{2192}").notdef_count(), 2);
+        assert_eq!(
+            shaper().shape("Script \u{2192}Chat\u{2192}").notdef_count(),
+            2
+        );
         assert_eq!(shaper().shape("note\u{2020}").notdef_count(), 1);
         assert_eq!(shaper().shape("Jos\u{e9} M\u{fc}ller").notdef_count(), 0);
         // The widening, from the shaper's side: every one of the ten resolves.

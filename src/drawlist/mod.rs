@@ -13,9 +13,9 @@
 pub mod stream;
 
 use crate::core::sdf::{
-    ClipRect, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE,
-    DRAW_TYPE_LINE, DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_SLAB, DRAW_TYPE_SLAB_PC,
-    SdfDrawCmd, XFORM_RAISED,
+    ClipRect, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE,
+    DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_SLAB, DRAW_TYPE_SLAB_PC, SdfDrawCmd,
+    XFORM_RAISED,
 };
 use crate::font::atlas::FontAtlas;
 use crate::font::shaper::ShapedRun;
@@ -131,7 +131,12 @@ impl SdfKind {
     /// way it does not compile until someone answers for it.
     fn translate(&mut self, dx: f32, dy: f32) {
         match self {
-            SdfKind::BezierStroke { c1, c2, end, thickness: _ } => {
+            SdfKind::BezierStroke {
+                c1,
+                c2,
+                end,
+                thickness: _,
+            } => {
                 for point in [c1, c2, end] {
                     point[0] += dx;
                     point[1] += dy;
@@ -302,7 +307,14 @@ struct RotationTransform {
 }
 
 impl RotationTransform {
-    const IDENTITY: Self = Self { a: 1.0, b: 0.0, c: 0.0, d: 1.0, tx: 0.0, ty: 0.0 };
+    const IDENTITY: Self = Self {
+        a: 1.0,
+        b: 0.0,
+        c: 0.0,
+        d: 1.0,
+        tx: 0.0,
+        ty: 0.0,
+    };
 
     /// The transform for `rotation` about the absolute pivot `pivot`:
     /// `forward(v) = M * (v - pivot) + pivot`, expanded to affine form.
@@ -341,7 +353,10 @@ impl RotationTransform {
 
     /// Apply the forward transform to a point.
     fn apply(&self, v: [f32; 2]) -> [f32; 2] {
-        [self.a * v[0] + self.b * v[1] + self.tx, self.c * v[0] + self.d * v[1] + self.ty]
+        [
+            self.a * v[0] + self.b * v[1] + self.tx,
+            self.c * v[0] + self.d * v[1] + self.ty,
+        ]
     }
 }
 
@@ -357,7 +372,12 @@ impl RotationTransform {
 /// axis-aligned rect (only w/h can swap), so the bounding box of its four
 /// rotated corners **is** the rotated rect, bit-for-bit. For
 /// [`SdfRotate::Radians`] this is the usual looser AABB bound.
-pub fn rotate_rect(pos: [f32; 2], size: [f32; 2], rotation: SdfRotate, pivot: [f32; 2]) -> ([f32; 2], [f32; 2]) {
+pub fn rotate_rect(
+    pos: [f32; 2],
+    size: [f32; 2],
+    rotation: SdfRotate,
+    pivot: [f32; 2],
+) -> ([f32; 2], [f32; 2]) {
     let t = RotationTransform::about(rotation, pivot);
     let corners = [
         [pos[0], pos[1]],
@@ -481,7 +501,8 @@ impl DrawList {
     pub fn push(&mut self, instance: SdfInstance) {
         self.instance_transforms.push(self.active_transform());
         self.instance_elevation.push(Elevation::Flat);
-        self.instance_effects.push(self.active_effects.last().copied().unwrap_or_default());
+        self.instance_effects
+            .push(self.active_effects.last().copied().unwrap_or_default());
         self.instance_clips.push(self.active_clip());
         self.instances.push(instance);
     }
@@ -489,7 +510,10 @@ impl DrawList {
     /// The scissor in force right now — what an instance pushed at this moment
     /// will be bounded by. [`ClipRect::UNBOUNDED`] when no scope is open.
     pub fn active_clip(&self) -> ClipRect {
-        self.active_clips.last().copied().unwrap_or(ClipRect::UNBOUNDED)
+        self.active_clips
+            .last()
+            .copied()
+            .unwrap_or(ClipRect::UNBOUNDED)
     }
 
     /// The scissor instance `index` was pushed under, or `None` if it was
@@ -636,8 +660,10 @@ impl DrawList {
                 .iter()
                 .map(|&id| if id == 0 { 0 } else { id + transform_base }),
         );
-        self.instance_elevation.extend_from_slice(&other.instance_elevation);
-        self.instance_effects.extend_from_slice(&other.instance_effects);
+        self.instance_elevation
+            .extend_from_slice(&other.instance_elevation);
+        self.instance_effects
+            .extend_from_slice(&other.instance_effects);
         self.instance_clips.extend_from_slice(&other.instance_clips);
     }
 
@@ -748,7 +774,8 @@ impl DrawList {
             .map(|&id| self.transforms[(id - 1) as usize])
             .unwrap_or(RotationTransform::IDENTITY);
         let inner = RotationTransform::about(rotation, pivot);
-        self.transforms.push(RotationTransform::compose(&outer, &inner));
+        self.transforms
+            .push(RotationTransform::compose(&outer, &inner));
         self.active_transform.push(self.transforms.len() as u32);
     }
 
@@ -850,7 +877,12 @@ impl DrawList {
         color: [f32; 4],
     ) {
         self.push(SdfInstance {
-            kind: SdfKind::BezierStroke { c1, c2, end: p3, thickness },
+            kind: SdfKind::BezierStroke {
+                c1,
+                c2,
+                end: p3,
+                thickness,
+            },
             position: p0,
             size: [0.0, 0.0],
             color,
@@ -874,7 +906,12 @@ impl DrawList {
     ) {
         self.push_fill(
             SdfInstance {
-                kind: SdfKind::BezierStroke { c1, c2, end: p3, thickness },
+                kind: SdfKind::BezierStroke {
+                    c1,
+                    c2,
+                    end: p3,
+                    thickness,
+                },
                 position: p0,
                 size: [0.0, 0.0],
                 color,
@@ -1006,7 +1043,11 @@ impl DrawList {
         let box_w = total_advance + 2.0 * left_margin;
 
         self.push(SdfInstance {
-            kind: SdfKind::MsdfText { char_start, char_count: count, px_range },
+            kind: SdfKind::MsdfText {
+                char_start,
+                char_count: count,
+                px_range,
+            },
             // The shader recovers the pen origin via pos.x + margin.
             position: [pos[0] - left_margin, pos[1]],
             size: [box_w, line_box_h],
@@ -1102,7 +1143,10 @@ impl DrawList {
         // `scale = atlas_gh / line_h` and reads `acy = (py - line_y) * scale`,
         // so the baseline lands at `line_y + baseline_row / scale`. This is
         // that, solved for `line_y`.
-        let pos = [anchor[0] - size, anchor[1] - entry.baseline_row * line_h / cell_px];
+        let pos = [
+            anchor[0] - size,
+            anchor[1] - entry.baseline_row * line_h / cell_px,
+        ];
 
         let rotation = SdfRotate::Radians(angle_rad);
         self.push_rotate(rotation, anchor);
@@ -1256,9 +1300,11 @@ impl DrawList {
             let anim = inst.anim as f32;
             let (pos, size, params) = match inst.kind {
                 SdfKind::Box => (inst.position, inst.size, [DRAW_TYPE_BOX, 0.0, anim, 0.0]),
-                SdfKind::RoundedBox { radius } => {
-                    (inst.position, inst.size, [DRAW_TYPE_SLAB, radius, anim, 0.0])
-                }
+                SdfKind::RoundedBox { radius } => (
+                    inst.position,
+                    inst.size,
+                    [DRAW_TYPE_SLAB, radius, anim, 0.0],
+                ),
                 SdfKind::RoundedBoxPerCorner { radii } => {
                     let idx = param_bank.len() as u32;
                     param_bank.push(radii);
@@ -1270,7 +1316,11 @@ impl DrawList {
                 }
                 SdfKind::Circle => {
                     let radius = inst.size[0].min(inst.size[1]) * 0.5;
-                    (inst.position, inst.size, [DRAW_TYPE_CIRCLE, radius, anim, 0.0])
+                    (
+                        inst.position,
+                        inst.size,
+                        [DRAW_TYPE_CIRCLE, radius, anim, 0.0],
+                    )
                 }
                 SdfKind::Line { end, thickness } => {
                     // Same lowering shape as `BezierStroke` below: `pos` is the
@@ -1294,7 +1344,12 @@ impl DrawList {
                     // quirk inherited from upstream) — anim unsupported.
                     [DRAW_TYPE_OUTLINE, radius, thickness, 0.0],
                 ),
-                SdfKind::BezierStroke { c1, c2, end, thickness } => {
+                SdfKind::BezierStroke {
+                    c1,
+                    c2,
+                    end,
+                    thickness,
+                } => {
                     let idx = param_bank.len() as u32;
                     param_bank.push([c1[0], c1[1], c2[0], c2[1]]);
                     (
@@ -1303,16 +1358,30 @@ impl DrawList {
                         [DRAW_TYPE_BEZIER, thickness, anim, f32::from_bits(idx)],
                     )
                 }
-                SdfKind::MsdfText { char_start, char_count, px_range } => {
+                SdfKind::MsdfText {
+                    char_start,
+                    char_count,
+                    px_range,
+                } => {
                     let packed = (char_start << 16) | (char_count & 0xFFFF);
                     (
                         inst.position,
                         inst.size,
-                        [DRAW_TYPE_MSDF_TEXT, px_range, X_MARGIN_FRAC, f32::from_bits(packed)],
+                        [
+                            DRAW_TYPE_MSDF_TEXT,
+                            px_range,
+                            X_MARGIN_FRAC,
+                            f32::from_bits(packed),
+                        ],
                     )
                 }
             };
-            let xform = [transform as f32, elevation.to_wire(), effects.blur_radius.max(0.0), effects.alpha_ombre.clamp(0.0, 1.0)];
+            let xform = [
+                transform as f32,
+                elevation.to_wire(),
+                effects.blur_radius.max(0.0),
+                effects.alpha_ombre.clamp(0.0, 1.0),
+            ];
             draws.push(SdfDrawCmd {
                 pos,
                 size,
@@ -1363,7 +1432,14 @@ mod tests {
             color: [0.0, 1.0, 0.0, 1.0],
             anim: 2,
         });
-        list.push_bezier([0.0, 0.0], [10.0, 0.0], [20.0, 10.0], [30.0, 10.0], 3.0, [1.0; 4]);
+        list.push_bezier(
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [20.0, 10.0],
+            [30.0, 10.0],
+            3.0,
+            [1.0; 4],
+        );
 
         let frame = list.lower();
         assert_eq!(frame.draws.len(), 3);
@@ -1382,7 +1458,9 @@ mod tests {
     fn per_corner_slab_lowers_through_param_bank() {
         let mut list = DrawList::new();
         list.push(SdfInstance {
-            kind: SdfKind::RoundedBoxPerCorner { radii: [0.0, 16.0, 16.0, 0.0] },
+            kind: SdfKind::RoundedBoxPerCorner {
+                radii: [0.0, 16.0, 16.0, 0.0],
+            },
             position: [4.0, 8.0],
             size: [200.0, 400.0],
             color: [0.5; 4],
@@ -1419,10 +1497,26 @@ mod tests {
         list.push_fill(boxy(20.0), Elevation::Raised);
         let frame = list.lower();
 
-        assert_eq!(frame.draws[0].xform, [0.0, 0.0, 0.0, 0.0], "push says nothing, so it is flat");
-        assert_eq!(frame.draws[1].xform, [0.0, 0.0, 0.0, 0.0], "an explicit flat is the default");
-        assert_eq!(frame.draws[2].xform, [0.0, XFORM_RAISED, 0.0, 0.0], "raised is on the wire");
-        assert_eq!(Elevation::default(), Elevation::Flat, "and the default IS flat");
+        assert_eq!(
+            frame.draws[0].xform,
+            [0.0, 0.0, 0.0, 0.0],
+            "push says nothing, so it is flat"
+        );
+        assert_eq!(
+            frame.draws[1].xform,
+            [0.0, 0.0, 0.0, 0.0],
+            "an explicit flat is the default"
+        );
+        assert_eq!(
+            frame.draws[2].xform,
+            [0.0, XFORM_RAISED, 0.0, 0.0],
+            "raised is on the wire"
+        );
+        assert_eq!(
+            Elevation::default(),
+            Elevation::Flat,
+            "and the default IS flat"
+        );
         // Nothing but xform[1] moved: the three commands are otherwise the
         // same shape, and the rotate slot is untouched.
         for d in &frame.draws {
@@ -1437,7 +1531,10 @@ mod tests {
         list.push_fill(boxy(0.0), Elevation::Raised);
         list.push_rotate_end();
         let frame = list.lower();
-        assert_eq!(frame.draws[0].xform[0], 1.0, "the rotate id still lands in xform[0]");
+        assert_eq!(
+            frame.draws[0].xform[0], 1.0,
+            "the rotate id still lands in xform[0]"
+        );
         assert_eq!(frame.draws[0].xform[1], XFORM_RAISED);
     }
 
@@ -1451,12 +1548,29 @@ mod tests {
     #[test]
     fn a_bezier_declares_its_shadow_in_the_elevation_slot_like_everything_else() {
         let mut list = DrawList::new();
-        list.push_bezier([0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0], 2.0, [1.0; 4]);
-        list.push_bezier_shadowed([0.0, 9.0], [1.0, 9.0], [2.0, 9.0], [3.0, 9.0], 2.0, [1.0; 4]);
+        list.push_bezier(
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+            [3.0, 0.0],
+            2.0,
+            [1.0; 4],
+        );
+        list.push_bezier_shadowed(
+            [0.0, 9.0],
+            [1.0, 9.0],
+            [2.0, 9.0],
+            [3.0, 9.0],
+            2.0,
+            [1.0; 4],
+        );
         let frame = list.lower();
 
         assert_eq!(frame.draws[0].xform[1], 0.0, "a plain stroke casts nothing");
-        assert_eq!(frame.draws[1].xform[1], XFORM_RAISED, "a shadowed one declares it");
+        assert_eq!(
+            frame.draws[1].xform[1], XFORM_RAISED,
+            "a shadowed one declares it"
+        );
         // The param_bank index is unflagged in both: dense, and 0/1 rather
         // than 1 | 0x8000_0000.
         assert_eq!(frame.draws[0].params[3].to_bits(), 0);
@@ -1564,8 +1678,14 @@ mod tests {
         list.push_clip_end();
         list.push(box_at([3.0, 3.0])); // 3: unbounded again
 
-        let outer = ClipRect { min: [0.0, 0.0], max: [100.0, 100.0] };
-        let inner = ClipRect { min: [50.0, 50.0], max: [100.0, 100.0] };
+        let outer = ClipRect {
+            min: [0.0, 0.0],
+            max: [100.0, 100.0],
+        };
+        let inner = ClipRect {
+            min: [50.0, 50.0],
+            max: [100.0, 100.0],
+        };
         assert_eq!(list.instance_clip(0), Some(outer));
         assert_eq!(
             list.instance_clip(1),
@@ -1599,7 +1719,10 @@ mod tests {
 
         let clip = list.instance_clip(0).expect("clipped");
         assert!(clip.is_empty(), "no pixel is inside: {clip:?}");
-        assert!(clip.size()[0] >= 0.0 && clip.size()[1] >= 0.0, "and it is not inverted");
+        assert!(
+            clip.size()[0] >= 0.0 && clip.size()[1] >= 0.0,
+            "and it is not inverted"
+        );
         assert!(!clip.contains([51.0, 51.0]));
     }
 
@@ -1613,8 +1736,15 @@ mod tests {
             let gid = shaper.glyph_id_for_char(ch).unwrap();
             atlas.insert_entry(crate::font::GlyphEntry {
                 glyph_id: gid,
-                atlas_x: 1, atlas_y: 1, atlas_w: 48, atlas_h: 48, layer: 0,
-                advance_x: 0.5, baseline_row: 36.0, px_per_em: 36.9, x_margin: 7.2,
+                atlas_x: 1,
+                atlas_y: 1,
+                atlas_w: 48,
+                atlas_h: 48,
+                layer: 0,
+                advance_x: 0.5,
+                baseline_row: 36.0,
+                px_per_em: 36.9,
+                x_margin: 7.2,
             });
         }
 
@@ -1675,7 +1805,10 @@ mod tests {
         assert_eq!(a.param_bank, b.param_bank);
         assert_eq!(a.draws.len(), b.draws.len());
         for (x, y) in a.draws.iter().zip(&b.draws) {
-            assert_eq!(x.params, y.params, "a spliced draw disagrees with the direct one");
+            assert_eq!(
+                x.params, y.params,
+                "a spliced draw disagrees with the direct one"
+            );
             assert_eq!(x.pos, y.pos);
             assert_eq!(x.size, y.size);
             assert_eq!(x.xform, y.xform);
@@ -1744,8 +1877,15 @@ mod tests {
             let gid = shaper.glyph_id_for_char(ch).unwrap();
             atlas.insert_entry(crate::font::GlyphEntry {
                 glyph_id: gid,
-                atlas_x: 1, atlas_y: 1, atlas_w: 48, atlas_h: 48, layer: 0,
-                advance_x: 0.5, baseline_row: 36.0, px_per_em: 36.9, x_margin: 7.2,
+                atlas_x: 1,
+                atlas_y: 1,
+                atlas_w: 48,
+                atlas_h: 48,
+                layer: 0,
+                advance_x: 0.5,
+                baseline_row: 36.0,
+                px_per_em: 36.9,
+                x_margin: 7.2,
             });
         }
         (shaper, atlas)
@@ -1754,14 +1894,31 @@ mod tests {
     fn pane_one(list: &mut DrawList, shaper: &crate::font::TextShaper, atlas: &FontAtlas) {
         list.push_clip([0.0, 0.0], [100.0, 100.0]);
         list.push(boxy(0.0));
-        list.push_shaped_text(&shaper.shape("Hi"), atlas, [10.0, 10.0], 16.0, 4.0, [1.0; 4]);
+        list.push_shaped_text(
+            &shaper.shape("Hi"),
+            atlas,
+            [10.0, 10.0],
+            16.0,
+            4.0,
+            [1.0; 4],
+        );
         list.push_clip_end();
     }
 
     fn pane_two(list: &mut DrawList, shaper: &crate::font::TextShaper, atlas: &FontAtlas) {
-        list.begin_effects(DrawEffects { blur_radius: 2.0, alpha_ombre: 0.0 });
+        list.begin_effects(DrawEffects {
+            blur_radius: 2.0,
+            alpha_ombre: 0.0,
+        });
         list.push_fill(boxy(200.0), Elevation::Raised);
-        list.push_shaped_text(&shaper.shape("ok"), atlas, [210.0, 10.0], 16.0, 4.0, [1.0; 4]);
+        list.push_shaped_text(
+            &shaper.shape("ok"),
+            atlas,
+            [210.0, 10.0],
+            16.0,
+            4.0,
+            [1.0; 4],
+        );
         list.end_effects();
     }
 
@@ -1781,9 +1938,18 @@ mod tests {
         assert_eq!(SdfRotate::Quarter(2).matrix2(), [-1.0, 0.0, 0.0, -1.0]);
         assert_eq!(SdfRotate::Quarter(3).matrix2(), [0.0, 1.0, -1.0, 0.0]);
         // Normalized mod 4, both directions.
-        assert_eq!(SdfRotate::Quarter(4).matrix2(), SdfRotate::Quarter(0).matrix2());
-        assert_eq!(SdfRotate::Quarter(-1).matrix2(), SdfRotate::Quarter(3).matrix2());
-        assert_eq!(SdfRotate::Quarter(-4).matrix2(), SdfRotate::Quarter(0).matrix2());
+        assert_eq!(
+            SdfRotate::Quarter(4).matrix2(),
+            SdfRotate::Quarter(0).matrix2()
+        );
+        assert_eq!(
+            SdfRotate::Quarter(-1).matrix2(),
+            SdfRotate::Quarter(3).matrix2()
+        );
+        assert_eq!(
+            SdfRotate::Quarter(-4).matrix2(),
+            SdfRotate::Quarter(0).matrix2()
+        );
     }
 
     #[test]
@@ -1794,19 +1960,34 @@ mod tests {
         // this is exactly the assertion a regression back to trig would
         // fail (cos(PI/2) in f32 is off by ~4.37e-8, which would leak into
         // every one of these coordinates).
-        let (pos, size) = rotate_rect([100.0, 50.0], [40.0, 10.0], SdfRotate::Quarter(1), [120.0, 55.0]);
+        let (pos, size) = rotate_rect(
+            [100.0, 50.0],
+            [40.0, 10.0],
+            SdfRotate::Quarter(1),
+            [120.0, 55.0],
+        );
         assert_eq!(pos, [115.0, 35.0]);
         assert_eq!(size, [10.0, 40.0]);
 
         // A full 180 about an off-center pivot (the origin): every corner
         // reflects through it (w/h unchanged — 180 degrees never swaps
         // width/height).
-        let (pos, size) = rotate_rect([100.0, 50.0], [40.0, 10.0], SdfRotate::Quarter(2), [0.0, 0.0]);
+        let (pos, size) = rotate_rect(
+            [100.0, 50.0],
+            [40.0, 10.0],
+            SdfRotate::Quarter(2),
+            [0.0, 0.0],
+        );
         assert_eq!(pos, [-140.0, -60.0]);
         assert_eq!(size, [40.0, 10.0]);
 
         // Quarter(0) is a true no-op, bit for bit.
-        let (pos, size) = rotate_rect([100.0, 50.0], [40.0, 10.0], SdfRotate::Quarter(0), [120.0, 55.0]);
+        let (pos, size) = rotate_rect(
+            [100.0, 50.0],
+            [40.0, 10.0],
+            SdfRotate::Quarter(0),
+            [120.0, 55.0],
+        );
         assert_eq!(pos, [100.0, 50.0]);
         assert_eq!(size, [40.0, 10.0]);
     }
@@ -1856,18 +2037,33 @@ mod tests {
         assert_ne!(nested_id, 0);
         let base = ((nested_id - 1) * 2) as usize;
         let expect180 = SdfRotate::Quarter(2).matrix2();
-        assert_eq!(frame.param_bank[base], expect180, "two nested 90s == one 180, bit-exact");
+        assert_eq!(
+            frame.param_bank[base], expect180,
+            "two nested 90s == one 180, bit-exact"
+        );
 
         // Middle instance: back to the outer 90-degree scope, a DIFFERENT
         // (smaller) transform id than the nested one, and NOT zero.
         let outer_id = frame.draws[1].xform[0] as u32;
-        assert_ne!(outer_id, 0, "still inside the outer push_rotate after the inner pop");
-        assert_ne!(outer_id, nested_id, "popped back to a different scope than the nested one");
+        assert_ne!(
+            outer_id, 0,
+            "still inside the outer push_rotate after the inner pop"
+        );
+        assert_ne!(
+            outer_id, nested_id,
+            "popped back to a different scope than the nested one"
+        );
         let outer_base = ((outer_id - 1) * 2) as usize;
-        assert_eq!(frame.param_bank[outer_base], SdfRotate::Quarter(1).matrix2());
+        assert_eq!(
+            frame.param_bank[outer_base],
+            SdfRotate::Quarter(1).matrix2()
+        );
 
         // Last instance: both scopes popped, stack empty, no leak.
-        assert_eq!(frame.draws[2].xform[0], 0.0, "transform stack must not leak past its pop");
+        assert_eq!(
+            frame.draws[2].xform[0], 0.0,
+            "transform stack must not leak past its pop"
+        );
     }
 
     /// **A translate scope translates, and does nothing else.**
@@ -2006,13 +2202,19 @@ mod tests {
         });
         let frame = list.lower();
         assert_eq!(frame.draws[0].xform, [0.0, 0.0, 0.0, 0.0]);
-        assert!(frame.param_bank.is_empty(), "no push_rotate ever happened -> nothing baked");
+        assert!(
+            frame.param_bank.is_empty(),
+            "no push_rotate ever happened -> nothing baked"
+        );
     }
 
     #[test]
     fn node_effect_scope_is_snapshotted_by_children_and_restored_after_pop() {
         let mut list = DrawList::new();
-        list.begin_effects(DrawEffects { blur_radius: 4.0, alpha_ombre: 0.5 });
+        list.begin_effects(DrawEffects {
+            blur_radius: 4.0,
+            alpha_ombre: 0.5,
+        });
         list.push(SdfInstance {
             kind: SdfKind::Box,
             position: [0.0, 0.0],
@@ -2063,7 +2265,11 @@ mod tests {
 
         list.translate_from(start, 674.0, 114.0);
 
-        assert_eq!(list.instances[0].position, [0.0, 0.0], "before the range, untouched");
+        assert_eq!(
+            list.instances[0].position,
+            [0.0, 0.0],
+            "before the range, untouched"
+        );
         assert!(list.instance_clip(0).is_none(), "and still unbounded");
 
         assert_eq!(list.instances[start].position, [679.0, 114.0], "ink moved");
@@ -2074,9 +2280,11 @@ mod tests {
         // point, and the thing that was false before.
         let i = list.instances[start];
         assert!(
-            i.position[0] >= clip.min[0] && i.position[1] >= clip.min[1]
+            i.position[0] >= clip.min[0]
+                && i.position[1] >= clip.min[1]
                 && i.position[0] + i.size[0] <= clip.max[0],
-            "the ink must still be inside its scissor: {:?} in {clip:?}", i.position
+            "the ink must still be inside its scissor: {:?} in {clip:?}",
+            i.position
         );
 
         assert_eq!(list.instances[start + 1].position, [681.0, 114.0]);
@@ -2102,7 +2310,14 @@ mod tests {
     fn translating_a_range_moves_a_strokes_control_points_with_it() {
         let mut list = DrawList::new();
         let start = list.instances.len();
-        list.push_bezier([10.0, 20.0], [12.0, 20.0], [16.0, 24.0], [16.0, 26.0], 1.0, [1.0; 4]);
+        list.push_bezier(
+            [10.0, 20.0],
+            [12.0, 20.0],
+            [16.0, 24.0],
+            [16.0, 26.0],
+            1.0,
+            [1.0; 4],
+        );
 
         list.translate_from(start, 674.0, 114.0);
 
@@ -2121,8 +2336,10 @@ mod tests {
             let xs = points.map(|p| p[0]);
             let ys = points.map(|p| p[1]);
             [
-                xs.iter().copied().fold(f32::MIN, f32::max) - xs.iter().copied().fold(f32::MAX, f32::min),
-                ys.iter().copied().fold(f32::MIN, f32::max) - ys.iter().copied().fold(f32::MAX, f32::min),
+                xs.iter().copied().fold(f32::MIN, f32::max)
+                    - xs.iter().copied().fold(f32::MAX, f32::min),
+                ys.iter().copied().fold(f32::MIN, f32::max)
+                    - ys.iter().copied().fold(f32::MAX, f32::min),
             ]
         };
         assert_eq!(
@@ -2133,9 +2350,17 @@ mod tests {
 
         let frame = list.lower();
         assert_eq!(frame.draws[0].pos, [684.0, 134.0], "P0 as lowered");
-        assert_eq!(frame.draws[0].size, [690.0, 140.0], "P3 rides the size slot");
+        assert_eq!(
+            frame.draws[0].size,
+            [690.0, 140.0],
+            "P3 rides the size slot"
+        );
         let idx = frame.draws[0].params[3].to_bits() as usize;
-        assert_eq!(frame.param_bank[idx], [686.0, 134.0, 690.0, 138.0], "C1/C2 as lowered");
+        assert_eq!(
+            frame.param_bank[idx],
+            [686.0, 134.0, 690.0, 138.0],
+            "C1/C2 as lowered"
+        );
     }
 
     // -- SdfKind::Line - two absolute endpoints, not a bar across the rect --
@@ -2206,7 +2431,10 @@ mod tests {
         // The grid has to have actually straddled the shape, or "they agree"
         // would be a statement about two functions that both said "far away".
         assert!(samples > 1000, "{samples} samples");
-        assert!(inside > 100, "only {inside} of {samples} samples landed in the bar");
+        assert!(
+            inside > 100,
+            "only {inside} of {samples} samples landed in the bar"
+        );
     }
 
     /// **A Line lowers like a Bezier minus the control points**: `pos` is A,
@@ -2219,11 +2447,21 @@ mod tests {
         let frame = list.lower();
 
         assert_eq!(frame.draws.len(), 1);
-        assert_eq!(frame.draws[0].params[0], DRAW_TYPE_LINE, "still case 3, no new draw type");
-        assert_eq!(frame.draws[0].params[1], 3.0, "thickness rides the radius slot");
+        assert_eq!(
+            frame.draws[0].params[0], DRAW_TYPE_LINE,
+            "still case 3, no new draw type"
+        );
+        assert_eq!(
+            frame.draws[0].params[1], 3.0,
+            "thickness rides the radius slot"
+        );
         assert_eq!(frame.draws[0].pos, [10.0, 20.0], "A is the pos slot");
         let idx = frame.draws[0].params[3].to_bits() as usize;
-        assert_eq!(frame.param_bank[idx], [90.0, 60.0, 0.0, 0.0], "B.xy, zw reserved");
+        assert_eq!(
+            frame.param_bank[idx],
+            [90.0, 60.0, 0.0, 0.0],
+            "B.xy, zw reserved"
+        );
     }
 
     /// **A diagonal is a diagonal.** The endpoints are honoured in both axes,
@@ -2236,9 +2474,8 @@ mod tests {
         list.push_line(a, b, 4.0, [1.0; 4]);
         let frame = list.lower();
         let cmd = &frame.draws[0];
-        let d = |x: f32, y: f32| {
-            crate::core::sdf::sdf_eval_with_params(cmd, x, y, &frame.param_bank).0
-        };
+        let d =
+            |x: f32, y: f32| crate::core::sdf::sdf_eval_with_params(cmd, x, y, &frame.param_bank).0;
 
         for t in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
             let (x, y) = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t);
@@ -2246,8 +2483,16 @@ mod tests {
         }
         // The two corners of the bounding box the diagonal does NOT touch -
         // exactly the pixels a horizontal-bar encoding would have filled.
-        assert!(d(90.0, 10.0) > 10.0, "off-diagonal corner: {}", d(90.0, 10.0));
-        assert!(d(10.0, 90.0) > 10.0, "off-diagonal corner: {}", d(10.0, 90.0));
+        assert!(
+            d(90.0, 10.0) > 10.0,
+            "off-diagonal corner: {}",
+            d(90.0, 10.0)
+        );
+        assert!(
+            d(10.0, 90.0) > 10.0,
+            "off-diagonal corner: {}",
+            d(10.0, 90.0)
+        );
         // And past an endpoint, where the segment's cap is.
         assert!(d(0.0, 0.0) > 0.0, "beyond A: {}", d(0.0, 0.0));
         assert!(d(100.0, 100.0) > 0.0, "beyond B: {}", d(100.0, 100.0));
@@ -2270,7 +2515,13 @@ mod tests {
         let frame = list.lower();
         let cmd = &frame.draws[0];
 
-        for (x, y) in [(50.0, 50.0), (45.0, 55.0), (30.0, 70.0), (20.0, 22.0), (88.0, 84.0)] {
+        for (x, y) in [
+            (50.0, 50.0),
+            (45.0, 55.0),
+            (30.0, 70.0),
+            (20.0, 22.0),
+            (88.0, 84.0),
+        ] {
             let seg = crate::core::sdf::sdf_eval_with_params(cmd, x, y, &frame.param_bank).0;
             let cubic = crate::core::sdf::sd_cubic_stroke(
                 x,
@@ -2306,12 +2557,19 @@ mod tests {
         };
         assert_eq!(list.instances[start].position, [684.0, 134.0], "A moved");
         assert_eq!(end, [690.0, 140.0], "B moved with it");
-        assert_eq!(thickness, 1.0, "a translate moves a shape, it does not stretch one");
+        assert_eq!(
+            thickness, 1.0,
+            "a translate moves a shape, it does not stretch one"
+        );
 
         let frame = list.lower();
         assert_eq!(frame.draws[0].pos, [684.0, 134.0], "A as lowered");
         let idx = frame.draws[0].params[3].to_bits() as usize;
-        assert_eq!(frame.param_bank[idx], [690.0, 140.0, 0.0, 0.0], "B as lowered");
+        assert_eq!(
+            frame.param_bank[idx],
+            [690.0, 140.0, 0.0, 0.0],
+            "B as lowered"
+        );
     }
 
     /// **A rotated instance in a translated range moves by `d`, not by `M*d`.**
@@ -2357,7 +2615,10 @@ mod tests {
         );
 
         let outside = list.instance_transforms[start - 1];
-        assert_ne!(outside, list.instance_transforms[start], "the range got its own copy");
+        assert_ne!(
+            outside, list.instance_transforms[start],
+            "the range got its own copy"
+        );
         assert_eq!(
             list.transforms[(outside - 1) as usize].apply(list.instances[start - 1].position),
             before,
@@ -2431,7 +2692,8 @@ mod tests {
         for &size in &[6.0f32, 14.0, 48.0] {
             let anchor = [321.0f32, 207.0];
             let mut list = DrawList::new();
-            list.push_marker(&run, &atlas, anchor, 0.0, size, 6.0, [1.0; 4]).unwrap();
+            list.push_marker(&run, &atlas, anchor, 0.0, size, 6.0, [1.0; 4])
+                .unwrap();
             let inst = list.instances[0];
 
             // Undo `push_shaped_text`'s left-margin shift to recover the pen.
@@ -2440,10 +2702,19 @@ mod tests {
             let baseline_y = inst.position[1] + entry.baseline_row * line_h / entry.atlas_h as f32;
             // The glyph's ink runs x in [0, advance] font units from the pen,
             // and `advance` is what `size` was scaled to mean.
-            assert!((pen_x + size - anchor[0]).abs() < 1e-3, "size {size}: point x off");
-            assert!((baseline_y - anchor[1]).abs() < 1e-3, "size {size}: point y off");
+            assert!(
+                (pen_x + size - anchor[0]).abs() < 1e-3,
+                "size {size}: point x off"
+            );
+            assert!(
+                (baseline_y - anchor[1]).abs() < 1e-3,
+                "size {size}: point y off"
+            );
             // ...and the ink is inside the rect the shader will shade.
-            assert!(inst.position[0] <= pen_x, "size {size}: ink starts left of the instance");
+            assert!(
+                inst.position[0] <= pen_x,
+                "size {size}: ink starts left of the instance"
+            );
             assert!(
                 inst.position[0] + inst.size[0] >= anchor[0],
                 "size {size}: the point is outside the instance rect"
@@ -2462,22 +2733,34 @@ mod tests {
         let anchor = [140.0f32, 90.0];
         for &angle in &[0.0f32, 0.37, 1.9, -2.6, 3.14159, 6.0] {
             let mut list = DrawList::new();
-            let got = list.push_marker(&run, &atlas, anchor, angle, 20.0, 6.0, [1.0; 4]).unwrap();
+            let got = list
+                .push_marker(&run, &atlas, anchor, angle, 20.0, 6.0, [1.0; 4])
+                .unwrap();
             let inst = list.instances[0];
             let want = rotate_rect(inst.position, inst.size, SdfRotate::Radians(angle), anchor);
             assert_eq!(got, want, "angle {angle}");
             // The pivot is invariant under its own rotation, so the anchor is
             // inside the bound at every angle — including the ones where the
             // AABB is loosest.
-            assert!(got.0[0] <= anchor[0] && anchor[0] <= got.0[0] + got.1[0], "angle {angle}");
-            assert!(got.0[1] <= anchor[1] && anchor[1] <= got.0[1] + got.1[1], "angle {angle}");
+            assert!(
+                got.0[0] <= anchor[0] && anchor[0] <= got.0[0] + got.1[0],
+                "angle {angle}"
+            );
+            assert!(
+                got.0[1] <= anchor[1] && anchor[1] <= got.0[1] + got.1[1],
+                "angle {angle}"
+            );
         }
         // Vacuity pin: the bound really does move with the angle, so the
         // equality above is not holding because everything is the same rect.
         let mut a = DrawList::new();
         let mut b = DrawList::new();
-        let r0 = a.push_marker(&run, &atlas, anchor, 0.0, 20.0, 6.0, [1.0; 4]).unwrap();
-        let r1 = b.push_marker(&run, &atlas, anchor, 1.0, 20.0, 6.0, [1.0; 4]).unwrap();
+        let r0 = a
+            .push_marker(&run, &atlas, anchor, 0.0, 20.0, 6.0, [1.0; 4])
+            .unwrap();
+        let r1 = b
+            .push_marker(&run, &atlas, anchor, 1.0, 20.0, 6.0, [1.0; 4])
+            .unwrap();
         assert_ne!(r0, r1);
     }
 
@@ -2489,24 +2772,39 @@ mod tests {
     fn a_marker_leaves_the_transform_stack_as_it_found_it() {
         let (atlas, run) = marker_atlas();
         let mut list = DrawList::new();
-        list.push_marker(&run, &atlas, [10.0, 10.0], 0.8, 16.0, 6.0, [1.0; 4]).unwrap();
-        list.push_marker(&run, &atlas, [40.0, 10.0], -0.8, 16.0, 6.0, [1.0; 4]).unwrap();
+        list.push_marker(&run, &atlas, [10.0, 10.0], 0.8, 16.0, 6.0, [1.0; 4])
+            .unwrap();
+        list.push_marker(&run, &atlas, [40.0, 10.0], -0.8, 16.0, 6.0, [1.0; 4])
+            .unwrap();
         // The instance drawn AFTER the markers carries no transform...
         list.push(box_at([0.0, 0.0]));
         let frame = list.lower(); // ...and this does not trip its own assertion.
-        assert_eq!(frame.draws[0].xform[0], 1.0, "first marker under its own scope");
-        assert_eq!(frame.draws[1].xform[0], 2.0, "second marker under its own scope");
-        assert_eq!(frame.draws[2].xform[0], 0.0, "the rotate scope did not leak past the marker");
+        assert_eq!(
+            frame.draws[0].xform[0], 1.0,
+            "first marker under its own scope"
+        );
+        assert_eq!(
+            frame.draws[1].xform[0], 2.0,
+            "second marker under its own scope"
+        );
+        assert_eq!(
+            frame.draws[2].xform[0], 0.0,
+            "the rotate scope did not leak past the marker"
+        );
 
         // Nested inside someone else's rotation, the marker composes onto it
         // and still restores exactly one level.
         let mut list = DrawList::new();
         list.push_rotate(SdfRotate::Quarter(1), [0.0, 0.0]);
-        list.push_marker(&run, &atlas, [10.0, 10.0], 0.5, 16.0, 6.0, [1.0; 4]).unwrap();
+        list.push_marker(&run, &atlas, [10.0, 10.0], 0.5, 16.0, 6.0, [1.0; 4])
+            .unwrap();
         list.push(box_at([0.0, 0.0]));
         list.push_rotate_end();
         let frame = list.lower();
-        assert_eq!(frame.draws[1].xform[0], 1.0, "back to the enclosing scope, not to none");
+        assert_eq!(
+            frame.draws[1].xform[0], 1.0,
+            "back to the enclosing scope, not to none"
+        );
     }
 
     /// A marker the face or the bake does not carry draws NOTHING and says so.
@@ -2532,7 +2830,11 @@ mod tests {
             ("degenerate size", run.clone(), 0.0),
         ] {
             let mut list = DrawList::new();
-            assert_eq!(list.push_marker(&r, &atlas, [0.0, 0.0], 0.0, size, 6.0, [1.0; 4]), None, "{label}");
+            assert_eq!(
+                list.push_marker(&r, &atlas, [0.0, 0.0], 0.0, size, 6.0, [1.0; 4]),
+                None,
+                "{label}"
+            );
             assert!(list.is_empty(), "{label}: something was drawn anyway");
             let _ = list.lower(); // and no rotate scope was left open
         }

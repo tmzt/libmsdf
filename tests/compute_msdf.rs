@@ -34,11 +34,7 @@ fn roboto_face() -> ttf_parser::Face<'static> {
 }
 
 /// Generate one glyph cell on the GPU, returning tightly packed RGBA rows.
-fn compute_cell(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    ch: char,
-) -> Option<Vec<u8>> {
+fn compute_cell(device: &wgpu::Device, queue: &wgpu::Queue, ch: char) -> Option<Vec<u8>> {
     let face = roboto_face();
     let gid = face.glyph_index(ch)?.0;
     let outline = extract_outline(&face, gid)?;
@@ -85,10 +81,16 @@ fn compute_msdf_smoke() {
         median3(rgba[i], rgba[i + 1], rgba[i + 2])
     };
     assert!(texel(1, 1) < 0.5, "top-left corner should be outside");
-    assert!(texel(CELL - 2, 1) < 0.5, "top-right corner should be outside");
+    assert!(
+        texel(CELL - 2, 1) < 0.5,
+        "top-right corner should be outside"
+    );
     // Stem of the 'A' near the baseline center-left/right is inside.
     let mid_row = (0..CELL).filter(|&x| texel(x, CELL * 2 / 3) > 0.5).count();
-    assert!(mid_row >= 2, "expected stem crossings on the lower third: {mid_row}");
+    assert!(
+        mid_row >= 2,
+        "expected stem crossings on the lower third: {mid_row}"
+    );
 }
 
 #[test]
@@ -257,7 +259,11 @@ fn compute_matches_cpu_baseline() {
         assert!(near > 0, "'{ch}': no near-outline texels — degenerate cell");
         let mean = sum_abs / near as f64;
         let frac_beyond = beyond_tol as f64 / near as f64;
-        let iou = if union == 0 { 1.0 } else { inter as f64 / union as f64 };
+        let iou = if union == 0 {
+            1.0
+        } else {
+            inter as f64 / union as f64
+        };
         eprintln!(
             "'{ch}': near-band n={near}, mean|Δmedian|={mean:.4}, >0.125: {:.2}%, IoU={iou:.3}",
             frac_beyond * 100.0
@@ -277,7 +283,10 @@ fn compute_matches_cpu_baseline() {
         // 0.5 isocontour — the glyph's actual shape — is unaffected, which is
         // what the IoU bound below pins hard. Tighten these as the compute
         // path's corner handling improves; they must never LOOSEN silently.
-        assert!(mean <= 0.13, "'{ch}': mean median deviation too high: {mean:.4}");
+        assert!(
+            mean <= 0.13,
+            "'{ch}': mean median deviation too high: {mean:.4}"
+        );
         assert!(
             frac_beyond <= 0.35,
             "'{ch}': too many texels beyond tolerance: {:.2}%",

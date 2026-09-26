@@ -107,8 +107,14 @@ fn baked_field_is_a_usable_distance_ramp() {
          not a distance field (column: {col:?})"
     );
     // ...and it must actually resolve the crossbar: some texel inside, some out.
-    assert!(col.iter().any(|&v| v > 0.5), "crossbar interior missing: {col:?}");
-    assert!(col.iter().any(|&v| v < 0.5), "crossbar surroundings missing: {col:?}");
+    assert!(
+        col.iter().any(|&v| v > 0.5),
+        "crossbar interior missing: {col:?}"
+    );
+    assert!(
+        col.iter().any(|&v| v < 0.5),
+        "crossbar surroundings missing: {col:?}"
+    );
 }
 
 /// The regression itself: at the chat sheet's 12px CLI-row size the `t`
@@ -206,7 +212,10 @@ fn antialiasing_floor_covers_the_smallest_shipped_style() {
         (floor - 48.0 / (1.3 * PX_RANGE)).abs() < 1e-4,
         "floor formula changed: {floor}"
     );
-    assert!(floor <= 8.0, "8px graph labels are below the atlas floor ({floor:.2}px)");
+    assert!(
+        floor <= 8.0,
+        "8px graph labels are below the atlas floor ({floor:.2}px)"
+    );
     // And the floor is exactly where the screen-space ramp bottoms out.
     assert!((screen_px_range(PX_RANGE, 48.0, floor) - 1.0).abs() < 1e-4);
     assert!(screen_px_range(PX_RANGE, 48.0, CLI_FONT_SIZE) > 1.0);
