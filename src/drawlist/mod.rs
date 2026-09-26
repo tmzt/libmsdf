@@ -758,6 +758,67 @@ impl DrawList {
         self.active_transform.pop();
     }
 
+    /// **Begin a translation scope**: every instance pushed until the matching
+    /// [`DrawList::push_translate_end`] is moved by `(dx, dy)`. Nests and
+    /// composes exactly as [`DrawList::push_rotate`] does, through the same
+    /// bank, the same per-instance tag and the same shader path.
+    ///
+    /// # What this is for
+    ///
+    /// A SCROLL OFFSET. Tim, 2026-09-19: *"the translation should only apply to
+    /// a grandparent, the matrix pushed on to the render list."* The offset of a
+    /// scroller is one fact at one address; applying it by adding `dy` to every
+    /// descendant's rectangle copies that fact into hundreds of places and makes
+    /// a layout that has to be rebuilt whenever it moves
+    /// (`HbLayout::translated_descendants` clones the layout and rebuilds the
+    /// whole hit index to do it). One push here says the same thing once.
+    ///
+    /// # It cannot skew, and that is a property of the math rather than a hope
+    ///
+    /// [`RotationTransform`] is a general 2x3 affine, so the question is fair:
+    /// the shader inverts a transform by TRANSPOSING its linear part, which is
+    /// the inverse only for an orthogonal one. A translate is
+    /// `[1 0; 0 1]` - the identity is orthogonal, its transpose is itself, and
+    /// the shader's `rel = pixel - [tx, ty]` followed by an identity multiply is
+    /// exactly `pixel - [dx, dy]`. Exact in floating point, too: the products
+    /// are by `1.0` and `0.0`.
+    ///
+    /// **And composition preserves it.** Composing a translate with an enclosing
+    /// transform leaves the enclosing linear part untouched -
+    /// `a' = outer.a*1 + outer.b*0` is `outer.a`, and so on - and moves only
+    /// `tx`/`ty`. So a scroller inside a rotated pane, a scroller inside a
+    /// scroller, and any nesting of the two keep `[a b; c d]` exactly as
+    /// orthogonal as the rotations alone made it.
+    /// `a_translate_scope_never_skews` and
+    /// `nesting_a_translate_keeps_the_linear_part_orthogonal` hold both halves.
+    ///
+    /// A SCALE would break that invariant and would need a real inverse in the
+    /// shader; there is deliberately no `push_scale`.
+    pub fn push_translate(&mut self, dx: f32, dy: f32) {
+        let outer = self
+            .active_transform
+            .last()
+            .map(|&id| self.transforms[(id - 1) as usize])
+            .unwrap_or(RotationTransform::IDENTITY);
+        let inner = RotationTransform {
+            tx: dx,
+            ty: dy,
+            ..RotationTransform::IDENTITY
+        };
+        self.transforms
+            .push(RotationTransform::compose(&outer, &inner));
+        self.active_transform.push(self.transforms.len() as u32);
+    }
+
+    /// End the current [`DrawList::push_translate`] scope.
+    ///
+    /// The same pop as [`DrawList::push_rotate_end`] - one stack, because a
+    /// translate and a rotation are one kind of thing to everything downstream -
+    /// and named separately so a reader sees which push it matches.
+    pub fn push_translate_end(&mut self) {
+        self.active_transform.pop();
+    }
+
     /// Push a straight line segment from `a` to `b` (absolute) at
     /// `thickness`.
     ///
@@ -1807,6 +1868,111 @@ mod tests {
 
         // Last instance: both scopes popped, stack empty, no leak.
         assert_eq!(frame.draws[2].xform[0], 0.0, "transform stack must not leak past its pop");
+    }
+
+    /// **A translate scope translates, and does nothing else.**
+    ///
+    /// Tim, 2026-09-19: *"the transform math should handle a translate only
+    /// matrix without skewing."* The concern is exact: [`RotationTransform`] is
+    /// a general affine and `sdf_render.wgsl` inverts one by TRANSPOSING its
+    /// linear part, which is the inverse only while that part is orthogonal.
+    ///
+    /// So this asserts the linear part is the identity EXACTLY - not
+    /// approximately - which makes the transpose the inverse, makes the shader's
+    /// multiply a no-op, and leaves `rel = pixel - [tx, ty]` as the whole of the
+    /// transform. Zero skew is then arithmetic rather than tolerance.
+    #[test]
+    fn a_translate_scope_never_skews() {
+        let mut list = DrawList::new();
+        list.push_translate(12.5, -40.0);
+        let entry = *list.transforms.last().expect("a bank entry");
+        list.push_translate_end();
+
+        assert_eq!(
+            (entry.a, entry.b, entry.c, entry.d),
+            (1.0, 0.0, 0.0, 1.0),
+            "the linear part must be EXACTLY the identity: the shader inverts \
+             by transposing it, and anything else here is a skew",
+        );
+        assert_eq!((entry.tx, entry.ty), (12.5, -40.0));
+        // The forward transform, which is what the CPU side means by it.
+        assert_eq!(entry.apply([100.0, 200.0]), [112.5, 160.0]);
+    }
+
+    /// **Nesting cannot introduce a skew either**, which is the half that is not
+    /// obvious.
+    ///
+    /// A translate composed under a rotation leaves the rotation's linear part
+    /// untouched - `a' = outer.a * 1 + outer.b * 0` - and moves only `tx`/`ty`.
+    /// So the orthogonality the shader relies on survives every arrangement of
+    /// the two, which is what makes a scroller inside a rotated pane safe.
+    ///
+    /// Asserted as `M * transpose(M) == I` exactly, because that IS the property
+    /// the shader's inverse rests on, rather than as a list of expected entries
+    /// that would only cover the cases someone thought of.
+    #[test]
+    fn nesting_a_translate_keeps_the_linear_part_orthogonal() {
+        let orthogonal = |t: &RotationTransform, what: &str| {
+            // M * transpose(M), which must be the identity.
+            assert_eq!(
+                (
+                    t.a * t.a + t.b * t.b,
+                    t.a * t.c + t.b * t.d,
+                    t.c * t.a + t.d * t.b,
+                    t.c * t.c + t.d * t.d,
+                ),
+                (1.0, 0.0, 0.0, 1.0),
+                "{what}: the linear part is no longer orthogonal, so the \
+                 shader's transpose is no longer its inverse - see \
+                 `sdf_render.wgsl` and `DrawList::push_translate`",
+            );
+        };
+
+        // translate inside a quarter turn
+        let mut list = DrawList::new();
+        list.push_rotate(SdfRotate::Quarter(1), [50.0, 50.0]);
+        list.push_translate(8.0, -16.0);
+        orthogonal(list.transforms.last().unwrap(), "translate inside a rotate");
+        list.push_translate_end();
+        list.push_rotate_end();
+
+        // a quarter turn inside a translate
+        let mut list = DrawList::new();
+        list.push_translate(8.0, -16.0);
+        list.push_rotate(SdfRotate::Quarter(3), [10.0, 10.0]);
+        orthogonal(list.transforms.last().unwrap(), "rotate inside a translate");
+        list.push_rotate_end();
+        list.push_translate_end();
+
+        // two translates, which must simply add
+        let mut list = DrawList::new();
+        list.push_translate(8.0, -16.0);
+        list.push_translate(2.0, 6.0);
+        let entry = *list.transforms.last().unwrap();
+        orthogonal(&entry, "translate inside a translate");
+        assert_eq!(
+            (entry.tx, entry.ty),
+            (10.0, -10.0),
+            "nested translates add and nothing else happens",
+        );
+        list.push_translate_end();
+        list.push_translate_end();
+    }
+
+    /// **The scope tags the instances inside it and nothing outside it** - the
+    /// same contract `push_rotate` has, asserted for the new door rather than
+    /// assumed from the shared implementation.
+    #[test]
+    fn a_translate_scope_tags_only_what_is_inside_it() {
+        let mut list = DrawList::new();
+        list.push(box_at([0.0, 0.0]));
+        list.push_translate(0.0, -24.0);
+        list.push(box_at([1.0, 1.0]));
+        list.push(box_at([2.0, 2.0]));
+        list.push_translate_end();
+        list.push(box_at([3.0, 3.0]));
+
+        assert_eq!(list.instance_transforms, vec![0, 1, 1, 0]);
     }
 
     #[test]
