@@ -346,7 +346,7 @@ pub fn read_cell_rgba(
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
 
-    let data = slice.get_mapped_range();
+    let data = slice.get_mapped_range().unwrap();
     let mut out = Vec::with_capacity((cell_buf.cell * cell_buf.cell * 4) as usize);
     for row in 0..cell_buf.cell {
         let start = (row as u64 * row_bytes) as usize;
