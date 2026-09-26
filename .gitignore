@@ -14,3 +14,7 @@ Cargo.lock
 # it outline-for-outline, so a wrong or moved upstream aborts the run rather than
 # silently producing a face built half from one build and half from another.
 fonts/MaterialSymbolsOutlined*.ttf
+
+# Bake output: `scripts/bake-atlases.py` writes here and nowhere else, so a
+# bake never dirties the tree. Committed copies are made from it deliberately.
+/out/
