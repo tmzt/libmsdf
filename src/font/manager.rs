@@ -101,7 +101,12 @@ impl AtlasManager {
         }
         if let Some(i) = best {
             let cell = self.free.swap_remove(i);
-            let region = AtlasRegion { x: cell.x, y: cell.y, w, h };
+            let region = AtlasRegion {
+                x: cell.x,
+                y: cell.y,
+                w,
+                h,
+            };
             self.allocated.insert(glyph_id, region);
             return Some(region);
         }

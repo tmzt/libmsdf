@@ -104,7 +104,9 @@ impl Default for PaneMark {
 impl PaneMark {
     /// A mark at its first revision.
     pub fn new() -> Self {
-        Self { rev: Rc::new(Cell::new(1)) }
+        Self {
+            rev: Rc::new(Cell::new(1)),
+        }
     }
 
     /// **A write happened.** Anything the pane draws may have changed.
@@ -180,7 +182,13 @@ impl<K: PaneKey> PaneGate<K> {
     /// directly - which is what makes the result keepable. Both paths then go
     /// through [`DrawList::append_from`], so the splice is exercised on a miss as
     /// well as a hit and a rebasing bug cannot hide until the first skip.
-    pub fn draw(&self, mark: &PaneMark, key: K, out: &mut DrawList, build: impl FnOnce(&mut DrawList)) {
+    pub fn draw(
+        &self,
+        mark: &PaneMark,
+        key: K,
+        out: &mut DrawList,
+        build: impl FnOnce(&mut DrawList),
+    ) {
         let rev = mark.revision();
         let hit = self
             .kept
@@ -195,14 +203,18 @@ impl<K: PaneKey> PaneGate<K> {
                 let kept = self.kept.borrow();
                 let ink = &kept.as_ref().expect("just checked").ink;
                 assert_eq!(
-                    ink.instances,
-                    fresh.instances,
+                    ink.instances, fresh.instances,
                     "pane `{}` was skipped as clean and is NOT: something wrote to it \
                      without moving its PaneMark, so a shipping frame would draw this \
                      pane's previous ink",
                     self.name,
                 );
-                assert_eq!(ink.chars(), fresh.chars(), "pane `{}`: kept glyphs are stale", self.name);
+                assert_eq!(
+                    ink.chars(),
+                    fresh.chars(),
+                    "pane `{}`: kept glyphs are stale",
+                    self.name
+                );
                 out.append_from(ink);
                 return;
             }
@@ -274,7 +286,11 @@ mod tests {
             drawn += 1;
             ink.push(boxy(0.0));
         });
-        assert_eq!(gate.rebuilds(), 1, "nothing moved: the pane must not draw again");
+        assert_eq!(
+            gate.rebuilds(),
+            1,
+            "nothing moved: the pane must not draw again"
+        );
         assert_eq!(gate.skips(), 1);
         assert_eq!(drawn, 1, "the build closure must not have been entered");
         assert_eq!(first.instances, second.instances);
@@ -339,6 +355,10 @@ mod tests {
         gate.draw(&mark, 7, &mut list, |ink| ink.push(boxy(0.0)));
         gate.draw(&mark, 7, &mut list, |ink| ink.push(boxy(0.0)));
         assert_eq!(gate.skips(), 1);
-        assert_eq!(list.instances.len(), 2, "the pane is still composed on a skip");
+        assert_eq!(
+            list.instances.len(),
+            2,
+            "the pane is still composed on a skip"
+        );
     }
 }

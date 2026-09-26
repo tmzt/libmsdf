@@ -106,7 +106,10 @@ mod tests {
         let mut p = ShelfPacker::new(64);
         assert!(p.pack_bounded(64, 32, 64).is_some());
         assert!(p.pack_bounded(64, 32, 64).is_some());
-        assert!(p.pack_bounded(64, 32, 64).is_none(), "third shelf exceeds max height");
+        assert!(
+            p.pack_bounded(64, 32, 64).is_none(),
+            "third shelf exceeds max height"
+        );
         assert!(p.pack_bounded(128, 8, 64).is_none(), "wider than atlas");
     }
 }

@@ -94,8 +94,15 @@ mod tests {
     #[test]
     fn glyph_entry_roundtrip() {
         let entry = GlyphEntry {
-            glyph_id: 42, atlas_x: 100, atlas_y: 200, atlas_w: 128, atlas_h: 128,
-            advance_x: 0.58, baseline_row: 80.0, px_per_em: 112.0, x_margin: 8.0,
+            glyph_id: 42,
+            atlas_x: 100,
+            atlas_y: 200,
+            atlas_w: 128,
+            atlas_h: 128,
+            advance_x: 0.58,
+            baseline_row: 80.0,
+            px_per_em: 112.0,
+            x_margin: 8.0,
         };
         let bytes = entry.to_bytes();
         let parsed = GlyphEntry::from_bytes(&bytes).unwrap();
@@ -105,8 +112,15 @@ mod tests {
     #[test]
     fn gpu_packing() {
         let entry = GlyphEntry {
-            glyph_id: 65, atlas_x: 10, atlas_y: 20, atlas_w: 128, atlas_h: 128,
-            advance_x: 0.6, baseline_row: 80.0, px_per_em: 112.0, x_margin: 8.0,
+            glyph_id: 65,
+            atlas_x: 10,
+            atlas_y: 20,
+            atlas_w: 128,
+            atlas_h: 128,
+            advance_x: 0.6,
+            baseline_row: 80.0,
+            px_per_em: 112.0,
+            x_margin: 8.0,
         };
         let packed = entry.to_gpu_u32s();
         assert_eq!(packed[0], 65);

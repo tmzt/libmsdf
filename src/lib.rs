@@ -31,16 +31,17 @@ pub use crate::core::{
     DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_SLAB, DRAW_TYPE_TEXT, GpuFont, RenderFrame,
     SdfDrawCmd,
 };
-pub use drawlist::{rotate_rect, DrawEffects, DrawList, Elevation, SdfFrame, SdfInstance, SdfKind, SdfRotate};
-pub use pane::{PaneGate, PaneMark};
+pub use drawlist::{
+    DrawEffects, DrawList, Elevation, SdfFrame, SdfInstance, SdfKind, SdfRotate, rotate_rect,
+};
 pub use font::{
     ATLAS_COLS, ATLAS_ROWS, AtlasManager, AtlasRegion, FontAtlas, FontAtlasBuilder, GlyphEntry,
-    HIGHBAY_ICONS, atlas_capacity,
-    HIGHBAY_ICONS_BLOCK, MARKERS, MARKER_ARROW, MSYMBOLS_ICONS, OWNED_BLOCKS,
-    ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII, ShapedRun, TextShaper, highbay_codepoint,
-    msymbols_codepoint,
+    HIGHBAY_ICONS, HIGHBAY_ICONS_BLOCK, MARKER_ARROW, MARKERS, MSYMBOLS_ICONS, OWNED_BLOCKS,
+    ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII, ShapedRun, TextShaper, atlas_capacity,
+    highbay_codepoint, msymbols_codepoint,
 };
-pub use gpu::{blur_params, BlurPass, GpuSdfRenderer, MsdfCompute};
+pub use gpu::{BlurPass, GpuSdfRenderer, MsdfCompute, blur_params};
+pub use pane::{PaneGate, PaneMark};
 
 /// Human-readable crate status, printed by the root `highbay` bin.
 pub const PHASE_STATUS: &str =

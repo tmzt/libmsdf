@@ -36,7 +36,9 @@ pub struct FontAtlas {
 impl FontAtlas {
     /// Look up a glyph entry by glyph ID.
     pub fn get_glyph(&self, glyph_id: u16) -> Option<&GlyphEntry> {
-        self.glyph_index.get(&glyph_id).map(|&idx| &self.glyphs[idx])
+        self.glyph_index
+            .get(&glyph_id)
+            .map(|&idx| &self.glyphs[idx])
     }
 
     /// Index of a glyph in the GPU glyph table (position in `glyphs`).
@@ -715,7 +717,11 @@ impl FontAtlasBuilder {
         for &glyph_id in &self.queued_glyphs {
             let cell = self.bake_cell(glyph_id)?;
             let (x, y) = packer.pack(padded, padded);
-            placed.push(Placed { cell, atlas_x: x + 1, atlas_y: y + 1 });
+            placed.push(Placed {
+                cell,
+                atlas_x: x + 1,
+                atlas_y: y + 1,
+            });
         }
 
         if placed.len() > atlas_capacity() {
@@ -842,14 +848,24 @@ mod tests {
     fn empty_atlas_insert_entry() {
         let mut atlas = FontAtlas::empty(64, 64, 3);
         let e = GlyphEntry {
-            glyph_id: 7, atlas_x: 1, atlas_y: 1, atlas_w: 32, atlas_h: 32,
-            advance_x: 0.5, baseline_row: 24.0, px_per_em: 24.6, x_margin: 4.8,
+            glyph_id: 7,
+            atlas_x: 1,
+            atlas_y: 1,
+            atlas_w: 32,
+            atlas_h: 32,
+            advance_x: 0.5,
+            baseline_row: 24.0,
+            px_per_em: 24.6,
+            x_margin: 4.8,
         };
         let idx = atlas.insert_entry(e);
         assert_eq!(idx, 0);
         assert_eq!(atlas.glyph_table_index(7), Some(0));
         // Replacement keeps the index.
-        let idx2 = atlas.insert_entry(GlyphEntry { advance_x: 0.6, ..e });
+        let idx2 = atlas.insert_entry(GlyphEntry {
+            advance_x: 0.6,
+            ..e
+        });
         assert_eq!(idx2, 0);
         assert_eq!(atlas.get_glyph(7).unwrap().advance_x, 0.6);
     }

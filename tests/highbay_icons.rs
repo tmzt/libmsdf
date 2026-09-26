@@ -74,7 +74,11 @@ impl Cell {
         let a = (0..gs)
             .flat_map(|y| (0..gs).map(move |x| (x, y)))
             .map(|(x, y)| {
-                let sd = median_at(atlas, e.atlas_x as u32 + x as u32, e.atlas_y as u32 + y as u32);
+                let sd = median_at(
+                    atlas,
+                    e.atlas_x as u32 + x as u32,
+                    e.atlas_y as u32 + y as u32,
+                );
                 (PX_RANGE * (sd - 0.5) + 0.5).clamp(0.0, 1.0)
             })
             .collect();
@@ -154,8 +158,14 @@ fn owned_blocks_are_the_top_of_the_carveout() {
     let (icons_lo, icons_hi) = HIGHBAY_ICONS_BLOCK;
     let (m_lo, m_hi) = MARKERS;
 
-    assert!(own_lo >= pua_lo && own_hi <= pua_hi, "the owned blocks escape the carveout");
-    assert_eq!(own_hi, pua_hi, "the owned blocks are the TOP of the carveout");
+    assert!(
+        own_lo >= pua_lo && own_hi <= pua_hi,
+        "the owned blocks escape the carveout"
+    );
+    assert_eq!(
+        own_hi, pua_hi,
+        "the owned blocks are the TOP of the carveout"
+    );
     // The two halves partition it: icons start at the bottom, markers end at
     // the top, and the boundary between them has no gap and no overlap.
     assert_eq!(icons_lo, own_lo);
@@ -253,14 +263,19 @@ fn a_name_never_crosses_between_the_two_vocabularies() {
 /// to whichever face is loaded.
 #[test]
 fn highbay_icon_contract_holds() {
-    for (label, bytes) in [("plain", ROBOTO_REGULAR_ASCII), ("merged", ROBOTO_ASCII_MSYMBOLS)] {
+    for (label, bytes) in [
+        ("plain", ROBOTO_REGULAR_ASCII),
+        ("merged", ROBOTO_ASCII_MSYMBOLS),
+    ] {
         let face = ttf_parser::Face::parse(bytes, 0).expect("the shipped face parses");
         let upem = face.units_per_em() as f32;
         for &(name, ch) in HIGHBAY_ICONS {
             let gid = face
                 .glyph_index(ch)
                 .unwrap_or_else(|| panic!("{label}: {name:?} is not in the face"));
-            let bbox = face.glyph_bounding_box(gid).expect("an icon has an outline");
+            let bbox = face
+                .glyph_bounding_box(gid)
+                .expect("an icon has an outline");
             let advance = face.glyph_hor_advance(gid).expect("an icon has an advance") as f32;
 
             assert_eq!(
@@ -270,7 +285,10 @@ fn highbay_icon_contract_holds() {
                  in the same row",
             );
             assert_eq!(
-                (bbox.x_min as f32 + bbox.x_max as f32, bbox.y_min as f32 + bbox.y_max as f32),
+                (
+                    bbox.x_min as f32 + bbox.x_max as f32,
+                    bbox.y_min as f32 + bbox.y_max as f32
+                ),
                 (upem, upem),
                 "{label} {name:?}: ink is not centred on the em square's middle — the \
                  Material set is, so an off-centre icon sits at a different optical height \
@@ -356,12 +374,21 @@ fn push_icon_centres_the_mark_in_its_box_and_reports_a_miss() {
     // developer's asset, not a user's text.
     let mut list = libmsdf::DrawList::new();
     let missing = shaper.shape("\u{F8EF}"); // inside our block, nothing drawn there
-    assert_eq!(missing.notdef_count(), 1, "vacuity: that codepoint IS uncovered");
     assert_eq!(
-        list.push_icon(&missing, &atlas, rect_pos, rect_size, EM, PX_RANGE, [1.0; 4]),
+        missing.notdef_count(),
+        1,
+        "vacuity: that codepoint IS uncovered"
+    );
+    assert_eq!(
+        list.push_icon(
+            &missing, &atlas, rect_pos, rect_size, EM, PX_RANGE, [1.0; 4]
+        ),
         None,
     );
-    assert!(list.instances.is_empty(), "a missing icon draws nothing at all");
+    assert!(
+        list.instances.is_empty(),
+        "a missing icon draws nothing at all"
+    );
 }
 
 /// Each icon shapes, is baked, and its cell has INK — the three separate ways
@@ -437,8 +464,14 @@ fn the_baked_table_cell_is_a_bordered_grid_with_a_header() {
     let (cx, cy) = ((x0 + x1) / 2, (y0 + y1) / 2);
 
     // A frame: ink all the way round, and a hollow middle.
-    assert!(cell.inked(cx, y0) && cell.inked(cx, y1), "the frame has no top or bottom");
-    assert!(cell.inked(x0, cy) && cell.inked(x1, cy), "the frame has no sides");
+    assert!(
+        cell.inked(cx, y0) && cell.inked(cx, y1),
+        "the frame has no top or bottom"
+    );
+    assert!(
+        cell.inked(x0, cy) && cell.inked(x1, cy),
+        "the frame has no sides"
+    );
 
     // Rows that are inked from edge to edge are the horizontal rules: the top
     // frame, the header rule, the bottom frame — and NOTHING else, or this is
@@ -453,7 +486,11 @@ fn the_baked_table_cell_is_a_bordered_grid_with_a_header() {
             _ => bands.push((y, y)),
         }
     }
-    assert_eq!(bands.len(), 3, "expected top frame, header rule, bottom frame; got {bands:?}");
+    assert_eq!(
+        bands.len(),
+        3,
+        "expected top frame, header rule, bottom frame; got {bands:?}"
+    );
 
     // In between, a row crosses four strokes: the two frame sides and the two
     // column dividers. Four strokes is three columns.
@@ -508,7 +545,11 @@ fn the_baked_props_cell_is_three_split_rows() {
             }
         }
     }
-    assert_eq!(bands.len(), 3, "expected three property rows, got {bands:?}");
+    assert_eq!(
+        bands.len(),
+        3,
+        "expected three property rows, got {bands:?}"
+    );
 
     for (i, &(a, b)) in bands.iter().enumerate() {
         let mid = (a + b) / 2;
@@ -536,7 +577,10 @@ fn the_baked_props_cell_is_three_split_rows() {
     }
     // The three rows are evenly pitched.
     let pitch = |i: usize| bands[i + 1].0 as i32 - bands[i].0 as i32;
-    assert!((pitch(0) - pitch(1)).abs() <= 1, "the rows are not evenly spaced: {bands:?}");
+    assert!(
+        (pitch(0) - pitch(1)).abs() <= 1,
+        "the rows are not evenly spaced: {bands:?}"
+    );
 }
 
 /// **Graph is three discs joined by two edges, and the DISCS dominate.**
@@ -557,7 +601,11 @@ fn the_baked_graph_cell_is_three_discs_and_two_edges() {
     // widest slice of the disc rather than at its first inked row, which for a
     // round feature is a two-texel cap that says nothing about where it sits.
     let top = cell.runs(cell.widest_row(y0, y0 + third));
-    assert_eq!(top.len(), 1, "the top of the glyph is {top:?}, not a single parent node");
+    assert_eq!(
+        top.len(),
+        1,
+        "the top of the glyph is {top:?}, not a single parent node"
+    );
     let parent_mid = (top[0].0 + top[0].1) / 2;
     assert!(
         parent_mid.abs_diff(cx) <= 1,
@@ -566,15 +614,30 @@ fn the_baked_graph_cell_is_three_discs_and_two_edges() {
 
     // The bottom is TWO masses, one at each side: the children.
     let bottom = cell.runs(cell.widest_row(y1 - third, y1));
-    assert_eq!(bottom.len(), 2, "the bottom of the glyph is {bottom:?}, not two child nodes");
-    assert_eq!((bottom[0].0, bottom[1].1), (x0, x1), "the children do not reach the sides");
+    assert_eq!(
+        bottom.len(),
+        2,
+        "the bottom of the glyph is {bottom:?}, not two child nodes"
+    );
+    assert_eq!(
+        (bottom[0].0, bottom[1].1),
+        (x0, x1),
+        "the children do not reach the sides"
+    );
 
     // Between them, two edges and a CLEAR CHANNEL down the middle — the half
     // that separates a graph from a stem-and-blobs shape like an anchor.
     let mid = (y0 + y1) / 2;
     let edges = cell.runs(mid);
-    assert_eq!(edges.len(), 2, "the middle of the glyph is {edges:?}, not two edges");
-    assert!(!cell.inked(cx, mid), "the glyph's centre line is inked at row {mid}");
+    assert_eq!(
+        edges.len(),
+        2,
+        "the middle of the glyph is {edges:?}, not two edges"
+    );
+    assert!(
+        !cell.inked(cx, mid),
+        "the glyph's centre line is inked at row {mid}"
+    );
 
     // **The nodes dominate the edges.** A child disc is 500 font units across
     // and an edge crosses a row in about 125, so the ratio is around four; at
@@ -606,7 +669,9 @@ fn the_baked_graph_cell_is_three_discs_and_two_edges() {
 /// glyph cannot be judged at page scale.
 #[test]
 fn dump_the_trio() {
-    let Ok(dir) = std::env::var("LIBMSDF_DUMP") else { return };
+    let Ok(dir) = std::env::var("LIBMSDF_DUMP") else {
+        return;
+    };
     std::fs::create_dir_all(&dir).unwrap();
     let atlas = atlas();
     let shaper = shaper();

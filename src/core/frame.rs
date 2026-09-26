@@ -9,13 +9,13 @@ use crate::core::text::GpuFont;
 
 /// Fully prepared frame — input to the render stage.
 pub struct RenderFrame {
-    pub draws: Vec<SdfDrawCmd>,        // string offsets already in params[3]
-    pub char_buffer: Vec<u32>,         // packed codepoints / glyph refs
-    pub param_bank: Vec<[f32; 4]>,     // aux per-instance data (Bézier control points)
+    pub draws: Vec<SdfDrawCmd>,    // string offsets already in params[3]
+    pub char_buffer: Vec<u32>,     // packed codepoints / glyph refs
+    pub param_bank: Vec<[f32; 4]>, // aux per-instance data (Bézier control points)
     pub anim_bank: Vec<Anim>,
     pub texture_bank: Vec<GpuTexture>, // texture descriptors
     pub font: GpuFont,
-    pub glyph_bitmap: Vec<u32>,        // packed bitmap
+    pub glyph_bitmap: Vec<u32>, // packed bitmap
     pub int_bank: [i32; 16],
     pub time_ms: f32,
     pub width: u32,

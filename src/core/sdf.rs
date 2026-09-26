@@ -75,12 +75,17 @@ pub const BEZIER_FLATTEN_STEPS: u32 = 24;
 pub struct GpuTexture {
     pub width: u32,
     pub height: u32,
-    pub layer: u32,      // index into texture_2d_array
-    pub flags: u32,      // format, filtering mode
+    pub layer: u32, // index into texture_2d_array
+    pub flags: u32, // format, filtering mode
 }
 
 impl GpuTexture {
-    pub const NONE: Self = Self { width: 0, height: 0, layer: 0, flags: 0 };
+    pub const NONE: Self = Self {
+        width: 0,
+        height: 0,
+        layer: 0,
+        flags: 0,
+    };
 }
 
 /// Animation descriptor — stored in AnimBank, referenced by SdfDrawCmd.params[2].
@@ -98,7 +103,12 @@ pub struct Anim {
 }
 
 impl Anim {
-    pub const NONE: Self = Self { freq: 0.0, duty: 1.0, enable_ref: 0, _pad: 0 };
+    pub const NONE: Self = Self {
+        freq: 0.0,
+        duty: 1.0,
+        enable_ref: 0,
+        _pad: 0,
+    };
 }
 
 /// The axis-aligned region an instance is allowed to paint into, in the same
@@ -302,7 +312,13 @@ pub fn sd_box(px: f32, py: f32, half_w: f32, half_h: f32) -> f32 {
 /// (+x right, +y down). Selects the radius for the quadrant `(px, py)` lands in
 /// then evaluates the standard rounded-box distance — the exact per-corner
 /// isometry with [`sd_rounded_box`] (matches the `sd_rounded_box_pc` WGSL fn).
-pub fn sd_rounded_box_per_corner(px: f32, py: f32, half_w: f32, half_h: f32, radii: [f32; 4]) -> f32 {
+pub fn sd_rounded_box_per_corner(
+    px: f32,
+    py: f32,
+    half_w: f32,
+    half_h: f32,
+    radii: [f32; 4],
+) -> f32 {
     let r = if px > 0.0 {
         if py > 0.0 { radii[2] } else { radii[1] } // right side: br / tr
     } else if py > 0.0 {
@@ -396,7 +412,10 @@ fn undo_xform(cmd: &SdfDrawCmd, px: f32, py: f32, param_bank: &[[f32; 4]]) -> (f
     let (rel_x, rel_y) = (px - row1[0], py - row1[1]);
     // Inverse of a rotation matrix is its transpose — exact for the
     // quarter-turn case, whose entries are only ever 0/1/-1.
-    (row0[0] * rel_x + row0[2] * rel_y, row0[1] * rel_x + row0[3] * rel_y)
+    (
+        row0[0] * rel_x + row0[2] * rel_y,
+        row0[1] * rel_x + row0[3] * rel_y,
+    )
 }
 
 /// Evaluate the SDF for a single draw command, with access to the aux
@@ -417,14 +436,22 @@ pub fn sdf_eval_with_params(
     let hh = cmd.size[1] * 0.5;
 
     let d = match cmd.draw_type() as u32 {
-        0 => sd_box(local_x, local_y, hw, hh),                         // Box
-        1 => sd_rounded_box(local_x, local_y, hw, hh, cmd.radius()),   // Slab
-        2 => sd_circle(local_x, local_y, hw.min(hh)),                  // Circle
+        0 => sd_box(local_x, local_y, hw, hh), // Box
+        1 => sd_rounded_box(local_x, local_y, hw, hh, cmd.radius()), // Slab
+        2 => sd_circle(local_x, local_y, hw.min(hh)), // Circle
         3 => {
             // Line: pos = (x1,y1), size = (x2,y2)
-            sd_segment(px, py, cmd.pos[0], cmd.pos[1], cmd.size[0], cmd.size[1], 1.0)
+            sd_segment(
+                px,
+                py,
+                cmd.pos[0],
+                cmd.pos[1],
+                cmd.size[0],
+                cmd.size[1],
+                1.0,
+            )
         }
-        4 => sd_box(local_x, local_y, hw, hh),                         // Text (placeholder box)
+        4 => sd_box(local_x, local_y, hw, hh), // Text (placeholder box)
         9 => {
             // Outline: rounded-rect stroke
             let box_d = sd_rounded_box(local_x, local_y, hw, hh, cmd.radius());
@@ -478,7 +505,11 @@ pub fn sdf_eval_animated(
             // Read enable from packed int_bank ref
             let enabled = if anim.enable_ref != 0 {
                 let slot = (anim.enable_ref & 0xFFFF) as usize;
-                if slot < int_bank.len() { int_bank[slot] as f32 } else { 0.0 }
+                if slot < int_bank.len() {
+                    int_bank[slot] as f32
+                } else {
+                    0.0
+                }
             } else {
                 1.0 // no enable ref = always enabled
             };
@@ -642,7 +673,10 @@ mod tests {
         assert!(d_on < 0.0, "curve midpoint should be inside stroke: {d_on}");
         // Chord midpoint is far from the bowed curve.
         let (d_chord, _) = sdf_eval_with_params(&cmd, 50.0, 100.0, &params);
-        assert!(d_chord > 10.0, "chord midpoint should be outside: {d_chord}");
+        assert!(
+            d_chord > 10.0,
+            "chord midpoint should be outside: {d_chord}"
+        );
     }
 
     // ── SdfRotate (xform) — mirrors the `sdf_render.wgsl` xform block ──────
@@ -668,11 +702,17 @@ mod tests {
         // x:[15,25], y:[-15,25]) but well outside the original 40x10
         // pos/size box (y:[0,10]) entirely.
         let (d_on, _) = sdf_eval_with_params(&cmd, 20.0, -10.0, &bank);
-        assert!(d_on < 0.0, "point on the rotated box should be inside: {d_on}");
+        assert!(
+            d_on < 0.0,
+            "point on the rotated box should be inside: {d_on}"
+        );
         // (35, 5) is inside the UN-rotated footprint (x:[0,40], y:[0,10])
         // but outside the rotated one (x:[15,25]) — must now read outside.
         let (d_off, _) = sdf_eval_with_params(&cmd, 35.0, 5.0, &bank);
-        assert!(d_off > 0.0, "point outside the rotated box should be outside: {d_off}");
+        assert!(
+            d_off > 0.0,
+            "point outside the rotated box should be outside: {d_off}"
+        );
     }
 
     #[test]

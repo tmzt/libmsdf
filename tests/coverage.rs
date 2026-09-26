@@ -79,7 +79,9 @@ fn every_declared_codepoint_has_a_glyph_and_a_cell() {
 #[test]
 fn latin1_letters_are_drawn_not_blank() {
     let (shaper, atlas) = (shaper(), atlas());
-    for ch in ['\u{e9}', '\u{fc}', '\u{f1}', '\u{e5}', '\u{df}', '\u{c7}', '\u{d8}'] {
+    for ch in [
+        '\u{e9}', '\u{fc}', '\u{f1}', '\u{e5}', '\u{df}', '\u{c7}', '\u{d8}',
+    ] {
         let gid = shaper.shape(ch.encode_utf8(&mut [0u8; 4])).glyphs[0].glyph_id;
         assert!(cell_has_ink(&atlas, gid), "{ch:?} bakes to a blank cell");
     }
@@ -98,7 +100,11 @@ fn a_users_name_survives_the_whole_path() {
     let run = shaper.shape("Jos\u{e9} \u{c5}ngstr\u{f6}m-M\u{fc}ller");
     assert_eq!(run.notdef_count(), 0);
     for g in &run.glyphs {
-        assert!(atlas.get_glyph(g.glyph_id).is_some(), "glyph {} unbaked", g.glyph_id);
+        assert!(
+            atlas.get_glyph(g.glyph_id).is_some(),
+            "glyph {} unbaked",
+            g.glyph_id
+        );
     }
 }
 
@@ -114,7 +120,9 @@ fn a_users_name_survives_the_whole_path() {
 #[test]
 fn glyph_zero_is_a_hollow_box() {
     let atlas = atlas();
-    let e = atlas.get_glyph(0).expect("the bake queues glyph 0 explicitly");
+    let e = atlas
+        .get_glyph(0)
+        .expect("the bake queues glyph 0 explicitly");
     let (ox, oy, w, h) = (
         e.atlas_x as u32,
         e.atlas_y as u32,
@@ -127,7 +135,10 @@ fn glyph_zero_is_a_hollow_box() {
         .flat_map(|y| (0..w).map(move |x| (x, y)))
         .filter(|&(x, y)| inside(x, y))
         .collect();
-    assert!(!ink.is_empty(), "glyph 0 baked blank — a missing character would draw NOTHING");
+    assert!(
+        !ink.is_empty(),
+        "glyph 0 baked blank — a missing character would draw NOTHING"
+    );
     let (x0, x1) = (
         ink.iter().map(|p| p.0).min().unwrap(),
         ink.iter().map(|p| p.0).max().unwrap(),
@@ -172,17 +183,36 @@ fn uncovered_characters_resolve_to_the_placeholder_cell() {
 fn the_emitter_points_an_uncovered_run_at_the_placeholder() {
     let (shaper, atlas) = (shaper(), atlas());
     let notdef_idx = atlas.glyph_table_index(0).expect("glyph 0 is in the table") as u32;
-    assert_ne!(notdef_idx, 0, "vacuity: glyph 0 must not BE table index 0 here");
+    assert_ne!(
+        notdef_idx, 0,
+        "vacuity: glyph 0 must not BE table index 0 here"
+    );
 
     let mut list = DrawList::new();
-    list.push_shaped_text(&shaper.shape("\u{2014}"), &atlas, [0.0, 0.0], 16.0, PX_RANGE, [1.0; 4]);
+    list.push_shaped_text(
+        &shaper.shape("\u{2014}"),
+        &atlas,
+        [0.0, 0.0],
+        16.0,
+        PX_RANGE,
+        [1.0; 4],
+    );
     let frame = list.lower();
-    let SdfKind::MsdfText { char_start, char_count, .. } = list.instances[0].kind else {
+    let SdfKind::MsdfText {
+        char_start,
+        char_count,
+        ..
+    } = list.instances[0].kind
+    else {
         panic!("expected a text instance");
     };
     assert_eq!(char_count, 1);
     let packed = frame.char_buffer[char_start as usize];
-    assert_eq!(packed >> 16, notdef_idx, "the em-dash was emitted as some other cell");
+    assert_eq!(
+        packed >> 16,
+        notdef_idx,
+        "the em-dash was emitted as some other cell"
+    );
 }
 
 /// A glyph the FACE carries but the BAKE skipped also lands on the box, rather
@@ -239,13 +269,21 @@ fn an_unknown_icon_name_never_becomes_a_codepoint() {
 fn covers_still_says_no_for_an_uncovered_codepoint() {
     let icons = TextShaper::new(ROBOTO_ASCII_MSYMBOLS.to_vec()).expect("the merged face parses");
     for &(_, cp) in MSYMBOLS_ICONS {
-        assert!(icons.covers(cp), "declared icon U+{:04X} is not in the face", cp as u32);
+        assert!(
+            icons.covers(cp),
+            "declared icon U+{:04X} is not in the face",
+            cp as u32
+        );
     }
     // Every kind of miss: an undeclared PUA codepoint, and ordinary text the
     // face cannot draw. Both answer `false` even though shaping either one
     // would now hand back a perfectly drawable box.
     for ch in ['\u{e000}', '\u{f8ff}', '\u{201c}', '\u{2026}'] {
-        assert!(!icons.covers(ch), "U+{:04X} should not be covered", ch as u32);
+        assert!(
+            !icons.covers(ch),
+            "U+{:04X} should not be covered",
+            ch as u32
+        );
         assert_eq!(icons.shape(ch.encode_utf8(&mut [0u8; 4])).notdef_count(), 1);
     }
 }
@@ -262,10 +300,19 @@ fn covers_still_says_no_for_an_uncovered_codepoint() {
 fn text_coverage_never_reaches_the_private_use_carveout() {
     let (lo, hi) = PRIVATE_USE;
     for &(a, b) in TEXT_RANGES {
-        assert!(b < lo || a > hi, "text range U+{:04X}..U+{:04X} overlaps the carveout", a as u32, b as u32);
+        assert!(
+            b < lo || a > hi,
+            "text range U+{:04X}..U+{:04X} overlaps the carveout",
+            a as u32,
+            b as u32
+        );
     }
     for &(name, cp) in MSYMBOLS_ICONS {
-        assert!(cp >= lo && cp <= hi, "icon {name:?} sits outside the carveout at U+{:04X}", cp as u32);
+        assert!(
+            cp >= lo && cp <= hi,
+            "icon {name:?} sits outside the carveout at U+{:04X}",
+            cp as u32
+        );
     }
 }
 
@@ -286,8 +333,15 @@ fn both_bundled_faces_draw_text_the_same_way() {
             let ch = char::from_u32(cp).unwrap();
             let s = ch.encode_utf8(&mut [0u8; 4]).to_string();
             let (a, b) = (plain.shape(&s), merged.shape(&s));
-            assert_eq!(a.total_advance, b.total_advance, "U+{cp:04X} advance differs");
-            assert_eq!(a.notdef_count(), b.notdef_count(), "U+{cp:04X} coverage differs");
+            assert_eq!(
+                a.total_advance, b.total_advance,
+                "U+{cp:04X} advance differs"
+            );
+            assert_eq!(
+                a.notdef_count(),
+                b.notdef_count(),
+                "U+{cp:04X} coverage differs"
+            );
         }
     }
     // Kerned pairs and ligatures too, which is where a merge or a widening
@@ -321,8 +375,15 @@ fn control_characters_leave_no_glyph_and_no_width() {
         let run = shaper.shape(text);
         let plain = shaper.shape("onetwo");
         assert_eq!(run.notdef_count(), 0, "{text:?} drew a placeholder box");
-        assert_eq!(run.glyphs.len(), plain.glyphs.len(), "{text:?} kept a glyph");
-        assert_eq!(run.total_advance, plain.total_advance, "{text:?} kept width");
+        assert_eq!(
+            run.glyphs.len(),
+            plain.glyphs.len(),
+            "{text:?} kept a glyph"
+        );
+        assert_eq!(
+            run.total_advance, plain.total_advance,
+            "{text:?} kept width"
+        );
     }
     // Vacuity pin: a NON-control character the face cannot draw is still kept
     // and still gets the box, so the rule above is about control characters

@@ -16,7 +16,7 @@
 pub mod blur;
 pub mod compute;
 
-pub use blur::{blur_params, BlurPass};
+pub use blur::{BlurPass, blur_params};
 pub use compute::MsdfCompute;
 
 use crate::core::{RenderFrame, SdfDrawCmd};
@@ -63,7 +63,7 @@ struct MinimalUniforms {
     /// Lo-fi hook: [distortion_amount_px, noise_scale, 0, 0]
     style_params: [f32; 4],
     // Merged from former storage buffers:
-    header: [u32; 4],           // .x = cmd_count
+    header: [u32; 4], // .x = cmd_count
     anim_bank: [GpuAnimEntry; 32],
     texture_bank: [GpuTextureDesc; 8],
 }
@@ -154,7 +154,12 @@ impl GpuSdfRenderer {
     }
 
     /// Create a renderer with a pre-sized MSDF atlas texture.
-    pub fn new_with_msdf(device: &wgpu::Device, surface_format: wgpu::TextureFormat, msdf_width: u32, msdf_height: u32) -> Self {
+    pub fn new_with_msdf(
+        device: &wgpu::Device,
+        surface_format: wgpu::TextureFormat,
+        msdf_width: u32,
+        msdf_height: u32,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sdf_render"),
             source: wgpu::ShaderSource::Wgsl(SHADER_SOURCE.into()),
@@ -174,14 +179,16 @@ impl GpuSdfRenderer {
             mapped_at_creation: false,
         });
         let glyph_bitmap_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("glyph_bitmap"), size: 8192,
+            label: Some("glyph_bitmap"),
+            size: 8192,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let char_buffer_gpu = device.create_buffer(&wgpu::BufferDescriptor {
             // 65536 bytes = 16384 u32 char entries — headroom carried over
             // from upstream (large text frames must truncate, not crash).
-            label: Some("char_buffer"), size: 65536,
+            label: Some("char_buffer"),
+            size: 65536,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -200,22 +207,38 @@ impl GpuSdfRenderer {
 
         let tex_array = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("tex_array"),
-            size: wgpu::Extent3d { width: PLACEHOLDER_TEX_SIZE, height: PLACEHOLDER_TEX_SIZE, depth_or_array_layers: MAX_TEXTURE_LAYERS },
-            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            size: wgpu::Extent3d {
+                width: PLACEHOLDER_TEX_SIZE,
+                height: PLACEHOLDER_TEX_SIZE,
+                depth_or_array_layers: MAX_TEXTURE_LAYERS,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
         let tex_array_view = tex_array.create_view(&wgpu::TextureViewDescriptor {
-            dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default()
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
         });
         let tex_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("tex_sampler"), mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear, ..Default::default()
+            label: Some("tex_sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
         });
 
         let msdf_atlas_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("msdf_atlas"),
-            size: wgpu::Extent3d { width: msdf_width.max(1), height: msdf_height.max(1), depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: msdf_width.max(1),
+                height: msdf_height.max(1),
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -301,16 +324,46 @@ impl GpuSdfRenderer {
             label: Some("sdf_render_bg"),
             layout: &bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: draw_cmd_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: glyph_bitmap_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: char_buffer_gpu.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&tex_array_view) },
-                wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::Sampler(&tex_sampler) },
-                wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&msdf_atlas_view) },
-                wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::Sampler(&msdf_sampler) },
-                wgpu::BindGroupEntry { binding: 11, resource: glyph_table_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 12, resource: param_bank_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: draw_cmd_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: glyph_bitmap_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: char_buffer_gpu.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&tex_array_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Sampler(&tex_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::TextureView(&msdf_atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: wgpu::BindingResource::Sampler(&msdf_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: glyph_table_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: param_bank_buffer.as_entire_binding(),
+                },
             ],
         });
 
@@ -404,7 +457,18 @@ impl GpuSdfRenderer {
         draws: &[SdfDrawCmd],
         time_ms: f32,
     ) {
-        self.render_full(device, queue, target, width, height, draws, time_ms, &[0; 16], &[], None);
+        self.render_full(
+            device,
+            queue,
+            target,
+            width,
+            height,
+            draws,
+            time_ms,
+            &[0; 16],
+            &[],
+            None,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -421,7 +485,9 @@ impl GpuSdfRenderer {
         anim_bank: &[crate::core::Anim],
         font: Option<&crate::core::GpuFont>,
     ) {
-        self.render_full_scaled(device, queue, target, width, height, 1.0, draws, time_ms, int_bank, anim_bank, font);
+        self.render_full_scaled(
+            device, queue, target, width, height, 1.0, draws, time_ms, int_bank, anim_bank, font,
+        );
     }
 
     /// Lower and render a [`DrawList`] in one call: uploads its packed char
@@ -443,8 +509,17 @@ impl GpuSdfRenderer {
         self.upload_chars(queue, &frame.char_buffer);
         self.upload_params(queue, &frame.param_bank);
         self.render_full_scaled(
-            device, queue, target, width, height, scale,
-            &frame.draws, time_ms, &[0; 16], &[], None,
+            device,
+            queue,
+            target,
+            width,
+            height,
+            scale,
+            &frame.draws,
+            time_ms,
+            &[0; 16],
+            &[],
+            None,
         );
     }
 
@@ -460,11 +535,17 @@ impl GpuSdfRenderer {
     /// capacity rather than panicking, so an unexpectedly large frame drops
     /// trailing glyphs instead of crashing the app.
     pub fn upload_chars(&self, queue: &wgpu::Queue, chars: &[u32]) {
-        if chars.is_empty() { return; }
+        if chars.is_empty() {
+            return;
+        }
         let cap = (self.char_buffer_gpu.size() as usize) / std::mem::size_of::<u32>();
         let clipped = if chars.len() > cap {
-            log::warn!("[sdf] upload_chars: truncating {} → {} u32 (buffer cap {}B)",
-                chars.len(), cap, self.char_buffer_gpu.size());
+            log::warn!(
+                "[sdf] upload_chars: truncating {} → {} u32 (buffer cap {}B)",
+                chars.len(),
+                cap,
+                self.char_buffer_gpu.size()
+            );
             &chars[..cap]
         } else {
             chars
@@ -482,10 +563,16 @@ impl GpuSdfRenderer {
     /// Upload the aux param bank (Bézier control points etc.), truncating
     /// at capacity like `upload_chars`.
     pub fn upload_params(&self, queue: &wgpu::Queue, params: &[[f32; 4]]) {
-        if params.is_empty() { return; }
+        if params.is_empty() {
+            return;
+        }
         let cap = (self.param_bank_buffer.size() as usize) / 16;
         let clipped = if params.len() > cap {
-            log::warn!("[sdf] upload_params: truncating {} → {} entries", params.len(), cap);
+            log::warn!(
+                "[sdf] upload_params: truncating {} → {} entries",
+                params.len(),
+                cap
+            );
             &params[..cap]
         } else {
             params
@@ -495,13 +582,27 @@ impl GpuSdfRenderer {
 
     /// Upload MSDF atlas RGBA pixel data to the whole atlas texture.
     /// Data must be RGBA8 (4 bytes per pixel), width × height × 4 bytes.
-    pub fn upload_msdf_atlas(&self, queue: &wgpu::Queue, width: u32, height: u32, rgba_data: &[u8]) {
+    pub fn upload_msdf_atlas(
+        &self,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        rgba_data: &[u8],
+    ) {
         self.upload_msdf_atlas_region(queue, 0, 0, width, height, rgba_data);
     }
 
     /// Upload RGBA8 pixels into a sub-region of the atlas texture (dynamic
     /// glyph appends via `AtlasManager`).
-    pub fn upload_msdf_atlas_region(&self, queue: &wgpu::Queue, x: u32, y: u32, width: u32, height: u32, rgba_data: &[u8]) {
+    pub fn upload_msdf_atlas_region(
+        &self,
+        queue: &wgpu::Queue,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        rgba_data: &[u8],
+    ) {
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.msdf_atlas_texture,
@@ -515,7 +616,11 @@ impl GpuSdfRenderer {
                 bytes_per_row: Some(width * 4),
                 rows_per_image: None,
             },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
     }
 
@@ -535,8 +640,18 @@ impl GpuSdfRenderer {
         font: Option<&crate::core::GpuFont>,
     ) {
         self.render_full_scaled_with_load(
-            device, queue, target, width, height, scale,
-            draws, time_ms, int_bank, anim_bank, font, &[],
+            device,
+            queue,
+            target,
+            width,
+            height,
+            scale,
+            draws,
+            time_ms,
+            int_bank,
+            anim_bank,
+            font,
+            &[],
             wgpu::LoadOp::Clear(wgpu::Color::BLACK),
         );
     }
@@ -559,8 +674,18 @@ impl GpuSdfRenderer {
         font: Option<&crate::core::GpuFont>,
     ) {
         self.render_full_scaled_with_load(
-            device, queue, target, width, height, scale,
-            draws, time_ms, int_bank, anim_bank, font, &[],
+            device,
+            queue,
+            target,
+            width,
+            height,
+            scale,
+            draws,
+            time_ms,
+            int_bank,
+            anim_bank,
+            font,
+            &[],
             wgpu::LoadOp::Load,
         );
     }
@@ -589,8 +714,19 @@ impl GpuSdfRenderer {
             label: Some("sdf_render_encoder"),
         });
         self.render_full_scaled_with_load_into(
-            &mut encoder, queue, target, width, height, scale,
-            draws, time_ms, int_bank, anim_bank, font, texture_bank, load,
+            &mut encoder,
+            queue,
+            target,
+            width,
+            height,
+            scale,
+            draws,
+            time_ms,
+            int_bank,
+            anim_bank,
+            font,
+            texture_bank,
+            load,
         );
         queue.submit(std::iter::once(encoder.finish()));
     }
@@ -618,8 +754,18 @@ impl GpuSdfRenderer {
         font: Option<&crate::core::GpuFont>,
     ) {
         self.render_full_scaled_with_load_into(
-            encoder, queue, target, width, height, scale,
-            draws, time_ms, int_bank, anim_bank, font, &[],
+            encoder,
+            queue,
+            target,
+            width,
+            height,
+            scale,
+            draws,
+            time_ms,
+            int_bank,
+            anim_bank,
+            font,
+            &[],
             wgpu::LoadOp::Load,
         );
     }
@@ -642,8 +788,18 @@ impl GpuSdfRenderer {
         font: Option<&crate::core::GpuFont>,
     ) {
         self.render_full_scaled_with_load_into(
-            encoder, queue, target, width, height, scale,
-            draws, time_ms, int_bank, anim_bank, font, &[],
+            encoder,
+            queue,
+            target,
+            width,
+            height,
+            scale,
+            draws,
+            time_ms,
+            int_bank,
+            anim_bank,
+            font,
+            &[],
             wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
         );
     }
@@ -687,7 +843,10 @@ impl GpuSdfRenderer {
         }
         for (i, a) in anim_bank.iter().take(32).enumerate() {
             uniforms.anim_bank[i] = GpuAnimEntry {
-                freq: a.freq, duty: a.duty, enable_ref: a.enable_ref, _pad: 0,
+                freq: a.freq,
+                duty: a.duty,
+                enable_ref: a.enable_ref,
+                _pad: 0,
             };
         }
         // Texture bank rides inside the same uniform write. (Upstream wrote
@@ -695,7 +854,10 @@ impl GpuSdfRenderer {
         // zeroed it again — fixed during extraction.)
         for (i, t) in texture_bank.iter().take(8).enumerate() {
             uniforms.texture_bank[i] = GpuTextureDesc {
-                width: t.width, height: t.height, layer: t.layer, flags: t.flags,
+                width: t.width,
+                height: t.height,
+                layer: t.layer,
+                flags: t.flags,
             };
         }
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -736,15 +898,25 @@ impl GpuSdfRenderer {
             self.upload_params(queue, &frame.param_bank);
         }
         if !frame.glyph_bitmap.is_empty() {
-            queue.write_buffer(&self.glyph_bitmap_buffer, 0, bytemuck::cast_slice(&frame.glyph_bitmap));
+            queue.write_buffer(
+                &self.glyph_bitmap_buffer,
+                0,
+                bytemuck::cast_slice(&frame.glyph_bitmap),
+            );
         }
 
         self.render_full_scaled_with_load(
-            device, queue, target,
-            frame.width, frame.height, frame.scale,
-            &frame.draws, frame.time_ms,
+            device,
+            queue,
+            target,
+            frame.width,
+            frame.height,
+            frame.scale,
+            &frame.draws,
+            frame.time_ms,
             &frame.int_bank,
-            &frame.anim_bank, Some(&frame.font),
+            &frame.anim_bank,
+            Some(&frame.font),
             &frame.texture_bank,
             wgpu::LoadOp::Clear(wgpu::Color::BLACK),
         );
