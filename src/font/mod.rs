@@ -20,31 +20,124 @@ pub mod packer;
 pub mod shaper;
 
 pub use atlas::{
-    ATLAS_COLS, ATLAS_ROWS, FontAtlas, FontAtlasBuilder, GlyphProjection, atlas_capacity,
-    glyph_projection,
+    ATLAS_COLS, ATLAS_HEADER_SIZE, ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, ATLAS_VERSION_LAYERED,
+    AtlasLayer, CAP_TOP_FRAC, CELL_EM_RATIO, FALLBACK_BASELINE_FRAC, FALLBACK_CAP_HEIGHT_EM,
+    FALLBACK_MAX_INK_DESCENT_EM, FontAtlas, FontAtlasBuilder, GlyphProjection, LayerNotBaked,
+    MAX_ATLAS_LAYERS, SetMetrics, StyledGlyphError, atlas_capacity, cap_height, glyph_projection,
 };
 pub use glyph_table::GlyphEntry;
 pub use manager::{AtlasManager, AtlasRegion};
 pub use outline::{Edge, EdgeKind, GlyphOutline, extract_outline};
 pub use packer::ShelfPacker;
-pub use shaper::{ShapedGlyph, ShapedRun, TextShaper};
+pub use shaper::{NoFaceForStyle, ShapedGlyph, ShapedRun, StyledShaper, TextShaper};
 
 /// **The TEXT coverage of the bundled faces, and there is exactly one of it.**
 ///
-/// Inclusive codepoint ranges, in the order [`FontAtlasBuilder::add_shipped_coverage`]
-/// queues them — which is also the order the atlas packs them, so this list is
-/// append-only (see that method for why the ordering is load-bearing).
+/// Inclusive codepoint ranges. Every one of them is queued into
+/// [`GlyphSet::Text`], so the order they are WRITTEN in here is no longer the
+/// order the atlas packs them: cells go in `(set, glyph id)` order, and this
+/// list can be reordered, or a range widened, without renumbering a cell that
+/// a range below it already owns. (It used to be load-bearing, and
+/// [`FontAtlasBuilder::add_shipped_coverage`] carried a `debug_assert` about
+/// its first element to keep it that way.)
 ///
 /// * `U+0020..=U+007E` printable ASCII.
-/// * `U+00A0..=U+00FF` **Latin-1 Supplement**, the widening: it is what a
+/// * `U+00A0..=U+00FF` **Latin-1 Supplement**, the first widening: it is what a
 ///   European name needs (`José`, `Müller`, `Ångström`), it is contiguous, and
 ///   it stops nowhere near [`PRIVATE_USE`].
+/// * **Ten typographic codepoints** — eight of General Punctuation, plus the
+///   euro and the trade mark — the second widening, and the one that retires a
+///   STANDING HAZARD rather than adding a nicety. See below.
 ///
 /// What is NOT here still has an answer, and it is a visible one: a codepoint
 /// outside these ranges shapes to glyph 0, which the bundled faces draw as a
 /// hollow box (see [`ROBOTO_REGULAR_ASCII`]). There is no scrubbing step
 /// between arbitrary text and this list, and no panic if text steps outside it.
-pub const TEXT_RANGES: &[(char, char)] = &[('\u{0020}', '\u{007E}'), ('\u{00A0}', '\u{00FF}')];
+///
+/// # The typographic ten, and why each one earns a cell
+///
+/// The project's own evaluation checklist carried a rule that read *"the baked
+/// font atlas is ASCII-only: an em-dash or curly quote renders as an INVISIBLE
+/// SPACE in the live UI"*. It was true, it cost this repo real time, and
+/// `deps/libpipeline/README_AGY.md` lost three em dashes to it. That rule
+/// existed only because these were unbaked; it is now a statement about a
+/// SMALLER set, and the atlas is the thing that says which.
+///
+/// The set is deliberately a LIST rather than the General Punctuation block:
+/// `U+2000..=U+206F` is 112 cells against the 96 that were free, and a cell is
+/// not free — MEASURED at 934 bytes of gzipped payload each (the ten cost the
+/// shipped atlas 9,343 bytes gzipped, 297,745 to 307,088), because the texture
+/// is pinned and its empty cells compress to almost nothing while an MSDF glyph
+/// does not.
+///
+/// * `U+2013..=U+2014` **en dash, em dash.** The em dash is the hazard named
+///   above, and the most-used non-ASCII character in this tree's prose by an
+///   order of magnitude (11,671 occurrences across 285 files when this was
+///   written). The en dash is one cell more and is the same author's next
+///   reach, for a range.
+/// * `U+2018..=U+2019` **single quotation marks.** The other half of the named
+///   hazard, and the half nobody types on purpose: every editor with smart
+///   quotes turns `don't` into `don’t` silently.
+/// * `U+201C..=U+201D` **double quotation marks.** Same, for quoted speech.
+/// * `U+2022` **bullet.** `libhbui`'s `markdown::BULLET` is the ASCII hyphen
+///   and its doc says why: *"a `U+2022` bullet would render as an INVISIBLE
+///   SPACE ... and both are somebody else's change."* This is that change; the
+///   substitution above it can now be un-substituted.
+/// * `U+2026` **horizontal ellipsis.** The truncation affordance. Every
+///   truncating path in this workspace writes one today (`agent/context.rs`,
+///   `agent/tools.rs`, `agent/transport.rs`), and any of that text reaching a
+///   drawn surface drew a hole.
+/// * `U+20AC` **euro sign.** Latin-1 gave us `¢ £ ¤ ¥` and stopped one short of
+///   the one a European actually types. This is the same argument the Latin-1
+///   widening was made on, and it is stronger, because a currency symbol
+///   arrives in a USER'S data — a project name, a form value — where we do not
+///   control the input and cannot ASCII-fold it by convention.
+/// * `U+2122` **trade mark sign.** `©` and `®` are baked and `™` was not; one
+///   cell closes a set that was already two-thirds present.
+///
+/// # What was considered and DROPPED
+///
+/// * `U+2020`/`U+2021` **daggers**, `U+2030` **per mille**, `U+2032`/`U+2033`
+///   **primes**, `U+2039`/`U+203A` **single angle quotes** — nine cells, zero
+///   occurrences anywhere in this tree, and each is the second level of an
+///   apparatus whose first level is already baked: the footnote marker of a
+///   document with no footnotes, the per-mille beside a baked `%`, the prime
+///   that everyone mistypes as the now-baked `’`, and the inner nesting of the
+///   `«»` Latin-1 already carries.
+/// * **Arrows** (`U+2190..=U+2194`, `U+21D2`) — WANTED and measured (876
+///   occurrences across 111 files, third behind the em dash and the ellipsis),
+///   and **not available**: Roboto v2.138's `roboto-android` drop, the build
+///   every glyph here comes from, does not define them. Taking them from
+///   another build is precisely what `fonts/widen.py`'s provenance check
+///   exists to prevent, and a substituted arrow would pass every test in this
+///   repo and look wrong beside the prose. An arrow wants to be drawn into
+///   [`HIGHBAY_ICONS_BLOCK`] by `fonts/icon.py`, where the geometry is ours.
+///
+/// # Adding to this list moves cells, and that is measured rather than assumed
+///
+/// A new TEXT codepoint lands in [`GlyphSet::Text`], which is set 1 — so every
+/// later set shifts by as many cells as were added, and this widening moved
+/// [`GlyphSet::ShapedText`], [`GlyphSet::Markers`] and both icon sets down by
+/// ten. What did NOT move is any glyph's TEXELS: an MSDF cell is baked from the
+/// outline alone and blitted into whatever cell it lands in, so the ink is
+/// bit-identical at a new address, and every rendered frame in the workspace
+/// was byte-identical across the re-bake. That is a MEASUREMENT, not a
+/// property — `no_baked_glyph_changed_a_texel_when_the_ranges_widened` in
+/// `tests/coverage.rs` is what keeps it one.
+pub const TEXT_RANGES: &[(char, char)] = &[
+    // Printable ASCII, and the Latin-1 Supplement widening.
+    ('\u{0020}', '\u{007E}'),
+    ('\u{00A0}', '\u{00FF}'),
+    // The typographic ten. Written as the tight pairs they are, never as the
+    // block they sit in - see the doc above for what each one buys.
+    ('\u{2013}', '\u{2014}'), // en dash, em dash
+    ('\u{2018}', '\u{2019}'), // single quotation marks
+    ('\u{201C}', '\u{201D}'), // double quotation marks
+    ('\u{2022}', '\u{2022}'), // bullet
+    ('\u{2026}', '\u{2026}'), // horizontal ellipsis
+    ('\u{20AC}', '\u{20AC}'), // euro sign
+    ('\u{2122}', '\u{2122}'), // trade mark sign
+];
 
 /// **The carveout our own glyphs live in**, and the reason [`TEXT_RANGES`] can
 /// grow without a codepoint audit.
@@ -67,7 +160,7 @@ pub const PRIVATE_USE: (char, char) = ('\u{E000}', '\u{F8FF}');
 /// one comparison: `cp >= U+F800`.
 ///
 /// Everything above this line is drawn in `fonts/` by a script in this repo;
-/// everything below is borrowed at some vendor's codepoints (the nine
+/// everything below is borrowed at some vendor's codepoints (the eighteen
 /// [`MSYMBOLS_ICONS`] top out at `U+F0D3`, more than two thousand codepoints
 /// clear). `owned_blocks_are_the_top_of_the_carveout` checks it rather than
 /// leaving it to memory.
@@ -77,6 +170,10 @@ pub const PRIVATE_USE: (char, char) = ('\u{E000}', '\u{F8FF}');
 ///
 /// * [`MARKERS`], the last sixteen — geometry the RENDERER reaches for.
 /// * [`HIGHBAY_ICONS_BLOCK`], the 240 below them — names an APP asks for.
+///
+/// The atlas says so too: they are [`GlyphSet::Markers`] and
+/// [`GlyphSet::OwnedIcons`], two sets rather than one, which is what keeps a
+/// growing icon vocabulary from moving the arrowhead's cell.
 pub const OWNED_BLOCKS: (char, char) = ('\u{F800}', '\u{F8FF}');
 
 /// **The block our own UI ICONS are allocated from** — names this repo owns,
@@ -84,9 +181,14 @@ pub const OWNED_BLOCKS: (char, char) = ('\u{F800}', '\u{F8FF}');
 ///
 /// `U+F800..=U+F8EF`: the bottom 240 of [`OWNED_BLOCKS`], directly below
 /// [`MARKERS`]. Codepoints are handed out *upward* from `U+F800` for the same
-/// reason markers run upward — [`FontAtlasBuilder::add_shipped_coverage`] scans
-/// the Private Use Area in codepoint order, so a name added above every
-/// existing one leaves every existing icon's cell exactly where it was.
+/// reason markers run upward — a name added above every existing one is a pure
+/// append to the block, so no icon that has already shipped is renumbered
+/// (`fonts/icon.py` records what that renumbering cost when the codepoints
+/// were still `ICON_BASE + index`). What keeps the icon's atlas CELL where it
+/// was is [`GlyphSet::OwnedIcons`] plus `icon.py` appending glyph ids, since
+/// cells are laid out in `(set, glyph id)` order — but the two rules point the
+/// same way, and allocating downward would mean renumbering a shipped
+/// codepoint to no purpose.
 ///
 /// It is 15x the size of [`MARKERS`] because the two grow at completely
 /// different rates: the marker set is an arrowhead and whatever cardinality
@@ -107,16 +209,20 @@ pub const HIGHBAY_ICONS_BLOCK: (char, char) = ('\u{F800}', '\u{F8EF}');
 /// from [`MARKER_ARROW`]. Both halves of that matter:
 ///
 /// * **At the top**, because Material Symbols' codepoints are the vendor's and
-///   run far below here (the bundled nine top out at `U+F0D3`), so a borrowed
-///   icon and a drawn marker can never land on the same codepoint — checked by
+///   run far below here (the bundled eighteen top out at `U+F0D3`), so a
+///   borrowed icon and a drawn marker can never land on the same codepoint — checked by
 ///   `icons_sort_below_the_marker_block`, not by remembering.
-/// * **Upward**, because [`FontAtlasBuilder::add_shipped_coverage`] scans this
-///   range in codepoint order and the bake queue is append-only: a marker added
-///   above every existing one leaves every existing cell exactly where it was.
-///   Allocating downward would renumber the block on every addition.
+/// * **Upward**, so a marker added above every existing one never renumbers a
+///   marker that has already shipped. Its atlas CELL is held still by a
+///   different rule — [`GlyphSet::Markers`] is its own set and `fonts/marker.py`
+///   appends glyph ids, so a new marker sorts last within the set and moves
+///   nothing before it.
 ///
 /// [`HIGHBAY_ICONS_BLOCK`] sits immediately below, so the two owned blocks are
-/// contiguous and a marker still sorts last of everything in the face.
+/// contiguous and a marker still sorts last of everything in the face. Their
+/// CELLS are the other way round on purpose: [`GlyphSet::Markers`] is baked
+/// before [`GlyphSet::OwnedIcons`], because the icon vocabulary is the one that
+/// accumulates and a set that grows must come after one that does not.
 ///
 /// The outlines themselves are authored in `fonts/marker.py`, which is where
 /// the geometry is decided; `marker_contract_holds` asserts what Rust relies on
@@ -133,6 +239,428 @@ pub const MARKERS: (char, char) = ('\u{F8F0}', '\u{F8FF}');
 /// ([`msymbols_codepoint`]), whereas this is geometry the renderer reaches for
 /// itself.
 pub const MARKER_ARROW: char = '\u{F8F0}';
+
+/// **Which vocabulary a glyph was baked from — and, in this declaration order,
+/// where its cell goes.**
+///
+/// # What this replaces
+///
+/// A glyph's atlas cell used to be decided by WHEN it was queued.
+/// [`FontAtlasBuilder::add_shipped_coverage`] called `add_ascii`, then
+/// `add_shaped_ascii`, then scanned the Private Use Area, then the rest of
+/// [`TEXT_RANGES`], and the packer took them in exactly that order. So the
+/// layout was ALREADY grouped by vocabulary — by accident of call sequence.
+/// Nothing declared it, nothing preserved it, and swapping two of those calls
+/// silently renumbered every cell from the first one on. The atlas also
+/// carried a `HashMap<u16, usize>` rebuilt on every load, which existed for no
+/// other reason than that the entries had no order worth binary-searching.
+///
+/// This is the order, stated. The builder records the set at the moment a
+/// glyph is QUEUED — the only moment it is known, because a glyph id cannot be
+/// asked afterwards which vocabulary asked for it — and cells are placed in
+/// `(set, glyph id)` order.
+///
+/// # Why the set id and not the codepoint
+///
+/// The codepoint space is sparse and it is not ours: borrowed icons sit at
+/// Material's scattered `U+E0xx`..`U+F0xx`, ours at `U+F800`, text is
+/// elsewhere again. Sorting by codepoint would interleave a vendor's
+/// allocation decisions with our own, and a lookup could not use the result
+/// anyway — the key a cell is fetched by is a GLYPH ID, which is what the
+/// shaper hands back. Glyph ids are not ours either: re-merge Roboto with
+/// Material Symbols differently and every id moves (in the shipped merged face
+/// the borrowed icons are glyphs 111..=119, 231..=234 and 247..=251, three
+/// merge waves, with 107 Latin-1 glyphs sitting between the first two). The
+/// SET is the part of the order that is ours; the glyph id orders within it,
+/// and it does so append-only because every script in `fonts/` appends.
+///
+/// # The order runs most-fixed to most-fluid
+///
+/// Growth in the LAST set is a pure append: no earlier set's cells move. So
+/// the sets are declared in ascending order of how much they can still change,
+/// which is what makes `a_later_set_never_moves_an_earlier_sets_cells` a
+/// property of the design rather than a coincidence of today's contents.
+///
+/// It also buys a property across the two bundled faces: the borrowed half is
+/// LAST, so [`ROBOTO_REGULAR_ASCII`] and [`ROBOTO_ASCII_MSYMBOLS`] bake to the
+/// same 221 cells in the same places, and the merged face simply appends its
+/// 18 borrowed ones. Before this the merged bake shifted Latin-1 and the
+/// placeholder by 13 cells relative to the plain one, because a vendor's
+/// `U+E0xx` sorts below our `U+F8xx` in a codepoint scan.
+///
+/// # Markers and icons are TWO sets, not one
+///
+/// [`OWNED_BLOCKS`] already argues that *edge marker* and *UI icon* are
+/// different KINDS of thing and that "the namespace should say so rather than
+/// a comment". This is that namespace, so it says so. The distinction earns
+/// its place here rather than only documenting one: [`MARKERS`] is geometry
+/// the RENDERER reaches for and mod.rs sizes it at single digits, done;
+/// [`HIGHBAY_ICONS_BLOCK`] is names an APP asks for and is "the one that
+/// actually accumulates". Two sets, growing set later, means the icon
+/// vocabulary can grow for years without ever moving the arrowhead's cell.
+/// One set would have put them back on a shared numbering where a new icon
+/// shifts a marker.
+///
+/// # A STYLE is a set too, and every one of them sorts last
+///
+/// A second FACE - Roboto's bold cut - is a second vocabulary by exactly the
+/// argument above: its glyphs are not the regular face's glyphs, they are
+/// allocated by a different `cmap`, and a run has to be able to say which of
+/// the two it means. So bold text is [`GlyphSet::BoldText`] rather than a
+/// second kind of [`GlyphSet::Text`], and [`GlyphStyle`] is the axis that
+/// names the pairing.
+///
+/// Two consequences, and they are the reason this shape was chosen over a
+/// style FIELD beside the set:
+///
+/// * **Every styled set is declared after every unstyled one**, so a bake that
+///   adds bold appends: not one existing cell moves, by the same "growth in
+///   the last set" property the order already had. A style field between the
+///   set and the glyph id would have interleaved instead - bold Text before
+///   regular ShapedText - and renumbered the whole symbol half.
+/// * **The atlas file needed no new field.** [`SetMetrics`] already carries
+///   its set as an ordinal with room above [`GlyphSet::BorrowedIcons`], and
+///   already refuses an ordinal it does not know as "baked by a newer
+///   libmsdf" ([`atlas::SetMetrics`]). A style AXIS in the header would have
+///   widened the row, and widening the row is a format version - which every
+///   committed atlas in the workspace would have had to be re-baked for
+///   ([`ATLAS_VERSION`] says what that cost last time).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum GlyphSet {
+    /// Glyph 0, the placeholder box ([`ROBOTO_REGULAR_ASCII`]). One glyph, no
+    /// codepoint maps to it, and there will never be a second — the most fixed
+    /// thing in the atlas, so it is first and its cell is cell 0.
+    Placeholder = 0,
+    /// [`TEXT_RANGES`] resolved through the face's `cmap`. Declared coverage,
+    /// and declared closed.
+    Text = 1,
+    /// What the SHAPER emits for text beyond what `cmap` names: ligatures and
+    /// GSUB forms ([`FontAtlasBuilder::add_shaped_ascii`]). A function of the
+    /// face's layout tables rather than of a range we wrote down, which is why
+    /// it is a set of its own and sits after the ranges it supplements.
+    ShapedText = 2,
+    /// The [`MARKERS`] block: geometry the renderer reaches for.
+    Markers = 3,
+    /// The [`HIGHBAY_ICONS_BLOCK`]: names an app asks for, drawn by this repo.
+    OwnedIcons = 4,
+    /// The vendor half of [`PRIVATE_USE`] — [`MSYMBOLS_ICONS`] at Material's
+    /// own codepoints, present only in the merged face. Last, because it is
+    /// the one set whose glyph ids someone else allocates.
+    BorrowedIcons = 5,
+
+    /// [`TEXT_RANGES`] through [`ROBOTO_BOLD_ASCII`]'s `cmap` — the same
+    /// coverage as [`GlyphSet::Text`], in the bold cut. See [`GlyphStyle`] for
+    /// why the STYLE is above the set in the order rather than beside it.
+    BoldText = 6,
+    /// What the shaper emits beyond `cmap` for the bold face. Its own layout
+    /// tables, so its own set — see [`GlyphStyle::shaped_set`].
+    BoldShapedText = 7,
+    /// [`TEXT_RANGES`] through [`ROBOTO_ITALIC_ASCII`]'s `cmap`.
+    ItalicText = 8,
+    /// The italic face's shaped superset.
+    ItalicShapedText = 9,
+    /// [`TEXT_RANGES`] in a bold italic face. **No such face is bundled** -
+    /// this is address space, not a bake, and an atlas that has no cells here
+    /// refuses the style ([`FontAtlas::styled_glyph`]) rather than drawing
+    /// bold. [`GlyphStyle::BoldItalic`] says why it is addressable anyway.
+    BoldItalicText = 10,
+    /// The bold italic face's shaped superset. Also unbaked.
+    BoldItalicShapedText = 11,
+}
+
+impl GlyphSet {
+    /// The variant whose discriminant is `n`.
+    ///
+    /// Written as an exhaustive match rather than a transmute so that adding a
+    /// variant is a COMPILE ERROR here, not a silently unreachable arm - the
+    /// same reason [`CellKey`] can claim to be lossless.
+    pub const fn from_ordinal(n: u8) -> Self {
+        match Self::try_from_ordinal(n) {
+            Some(set) => set,
+            None => {
+                panic!("no GlyphSet has this discriminant - a CellKey was built from raw bits")
+            }
+        }
+    }
+
+    /// The variant whose discriminant is `n`, or `None` when this build has no
+    /// such set.
+    ///
+    /// The fallible form exists for ONE caller: `SetMetrics::from_bytes`,
+    /// which reads the ordinal out of an untrusted file and has to refuse a
+    /// set baked by a newer libmsdf rather than panic on it. Everything else
+    /// gets the ordinal from a [`CellKey`] it just built and wants the
+    /// panicking form.
+    pub const fn try_from_ordinal(n: u8) -> Option<Self> {
+        match n {
+            0 => Some(GlyphSet::Placeholder),
+            1 => Some(GlyphSet::Text),
+            2 => Some(GlyphSet::ShapedText),
+            3 => Some(GlyphSet::Markers),
+            4 => Some(GlyphSet::OwnedIcons),
+            5 => Some(GlyphSet::BorrowedIcons),
+            6 => Some(GlyphSet::BoldText),
+            7 => Some(GlyphSet::BoldShapedText),
+            8 => Some(GlyphSet::ItalicText),
+            9 => Some(GlyphSet::ItalicShapedText),
+            10 => Some(GlyphSet::BoldItalicText),
+            11 => Some(GlyphSet::BoldItalicShapedText),
+            _ => None,
+        }
+    }
+
+    /// **Which style's face this set was baked from.**
+    ///
+    /// [`GlyphStyle::Regular`] for every set that is not a styled one -
+    /// including [`GlyphSet::Markers`] and both icon sets, which are
+    /// style-INVARIANT rather than regular-by-default: they are geometry the
+    /// renderer reaches for and names an app asks for, and there is no bold
+    /// arrowhead ([`FontAtlasBuilder::add_styled_coverage`] queues text ranges
+    /// and nothing else).
+    pub const fn style(self) -> GlyphStyle {
+        match self {
+            GlyphSet::BoldText | GlyphSet::BoldShapedText => GlyphStyle::Bold,
+            GlyphSet::ItalicText | GlyphSet::ItalicShapedText => GlyphStyle::Italic,
+            GlyphSet::BoldItalicText | GlyphSet::BoldItalicShapedText => GlyphStyle::BoldItalic,
+            _ => GlyphStyle::Regular,
+        }
+    }
+}
+
+/// **A cell's sort position, as one integer**: the set above the glyph id.
+///
+/// `(set, glyph id)` is the order [`GlyphSet`] declares, and this is that pair
+/// JOINED rather than compared field by field - the set in the high bits, the
+/// glyph id in the low sixteen. Ascending numeric order is therefore exactly
+/// the declared cell order, so the sort is one `u32` compare and the ordering
+/// cannot drift from the join: they are the same number.
+///
+/// **Lossless, and provably so.** A glyph id is a `u16`, and [`GlyphSet`] has
+/// twelve variants with explicit discriminants - four bits. Twenty bits into
+/// thirty-two, with [`CellKey::set`] and [`CellKey::glyph_id`] recovering both
+/// exactly; `a_key_round_trips_every_set_and_glyph_id` pins it at the extremes.
+///
+/// The glyph id half is the STYLED one ([`GlyphStyle::styled_glyph_id`]) for a
+/// cell from a style face, which is what keeps two faces' colliding raw ids
+/// apart in one atlas. It is still a `u16` and still the key the table is
+/// looked up by; only its top two bits have gained a meaning.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct CellKey(u32);
+
+impl CellKey {
+    /// Bits reserved for the glyph id. The set occupies everything above.
+    const GLYPH_BITS: u32 = 16;
+
+    /// Join a set and a glyph id into the position their cell takes.
+    pub const fn new(set: GlyphSet, glyph_id: u16) -> Self {
+        Self(((set as u32) << Self::GLYPH_BITS) | glyph_id as u32)
+    }
+
+    /// The set half.
+    pub const fn set(self) -> GlyphSet {
+        GlyphSet::from_ordinal((self.0 >> Self::GLYPH_BITS) as u8)
+    }
+
+    /// The glyph id half - what [`crate::FontAtlas::get_glyph`] is called with.
+    pub const fn glyph_id(self) -> u16 {
+        self.0 as u16
+    }
+
+    /// The joined bits. For a test that wants to show the order IS the number.
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+}
+
+impl GlyphSet {
+    /// Every set, in cell order. Iterating this is how a caller walks the
+    /// atlas by vocabulary without hard-coding the list a second time.
+    pub const ALL: &'static [GlyphSet] = &[
+        GlyphSet::Placeholder,
+        GlyphSet::Text,
+        GlyphSet::ShapedText,
+        GlyphSet::Markers,
+        GlyphSet::OwnedIcons,
+        GlyphSet::BorrowedIcons,
+        GlyphSet::BoldText,
+        GlyphSet::BoldShapedText,
+        GlyphSet::ItalicText,
+        GlyphSet::ItalicShapedText,
+        GlyphSet::BoldItalicText,
+        GlyphSet::BoldItalicShapedText,
+    ];
+}
+
+/// **Which CUT of the face a run is set in** - the axis that lets one
+/// codepoint resolve to a bold glyph, and the one that lets an atlas say it
+/// cannot.
+///
+/// # A style is an ADDRESS, and the address is the glyph id's top two bits
+///
+/// The atlas is keyed by glyph id, and glyph ids are a FACE's private
+/// numbering: Roboto Regular's `a` and Roboto Bold's `a` are both some small
+/// integer, and nothing about either one says which face it came from. Two
+/// faces in one atlas therefore collide by construction, and the fix is the
+/// one Tim named - "font shapes derived from ttf and mapping to a prefixed
+/// glyphid": a styled glyph id is the raw id with the style PREFIXED into the
+/// bits above it ([`GlyphStyle::styled_glyph_id`]).
+///
+/// Two bits at the top of the `u16`, so:
+///
+/// * **[`GlyphStyle::Regular`] is prefix 0**, which means a regular styled
+///   glyph id *is* the raw glyph id and every lookup that exists today is
+///   bit-for-bit the lookup it was before this type existed. That is not a
+///   convenience, it is the regression bar: nothing that already draws may
+///   change, and the cheapest way to guarantee it is for the new address to
+///   pass through unchanged.
+/// * **[`MAX_RAW_GLYPH_ID`] is 16383**, which every face this repo bakes fits
+///   inside by two orders of magnitude (the bundled faces are ~230 glyphs).
+///   A face that did not fit is REFUSED - `styled_glyph_id` returns `None`
+///   rather than aliasing one face's glyph onto another's.
+///
+/// # Why this and not one more atlas
+///
+/// A prefixed id and a second texture are not alternatives, and reading them
+/// as one was this doc's mistake. The prefix answers *which face does this
+/// glyph belong to*; a texture answers *where do its texels live*. Both are
+/// needed, and the prefix is what lets the second be cheap.
+///
+/// What was wrong here: a second texture per style was called *"a RENDERER
+/// change: another bind group, another sampler, another set of dimensions in
+/// `sdf_render.wgsl`, and a draw list that has to know which texture each
+/// glyph came from."* Measured, it is none of those. The atlas is sampled
+/// through an INDIRECTION already - the glyph table - so a texture-array layer
+/// index goes in the TABLE (`g1.w`, which was the constant zero and read
+/// nowhere) and the draw list keeps packing a bare 16-bit glyph id, never
+/// learning that textures are plural. See [`crate::AtlasLayer`].
+///
+/// So the cost is not CELLS after all. A style is a second LAYER with its own
+/// [`crate::ATLAS_ROWS`] x [`crate::ATLAS_COLS`] grid, which is what unblocked
+/// a styled bake: 239 + 215 + 215 cells do not fit one 320-cell grid and do fit
+/// three.
+///
+/// # `BoldItalic` is addressable and unbaked, deliberately
+///
+/// No bold-italic face is bundled. It is still a variant, because markdown
+/// nests emphasis (`**bold with *italic* inside**`) and a consumer that meets
+/// that has to be able to ASK for the cut it wants. An address space missing
+/// the combination would force the caller to silently pick bold or italic -
+/// exactly the substitution [`FontAtlas::styled_glyph`] exists to refuse.
+/// Adding the face later is one `fonts/style.py` run; adding it to the address
+/// later would have been a renumbering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum GlyphStyle {
+    /// The cut every existing atlas, face and lookup is in. Prefix 0.
+    Regular = 0,
+    /// [`ROBOTO_BOLD_ASCII`] - heavier, for `**bold**`.
+    Bold = 1,
+    /// [`ROBOTO_ITALIC_ASCII`] - slanted, for `*italic*`.
+    Italic = 2,
+    /// Addressable, and no bundled face draws it. See the type's doc.
+    BoldItalic = 3,
+}
+
+/// **The widest raw glyph id a style can carry**: 14 bits, because
+/// [`GlyphStyle`]'s prefix takes the two above it.
+///
+/// A face with more glyphs than this cannot be addressed as a style, and
+/// [`GlyphStyle::styled_glyph_id`] says so with `None` instead of wrapping one
+/// face's glyph onto another's cell. For scale, the bundled faces carry ~230
+/// glyphs and all of Roboto Regular carries ~1300.
+pub const MAX_RAW_GLYPH_ID: u16 = (1 << 14) - 1;
+
+impl GlyphStyle {
+    /// Every style, in the order their cells are laid down.
+    pub const ALL: &'static [GlyphStyle] = &[
+        GlyphStyle::Regular,
+        GlyphStyle::Bold,
+        GlyphStyle::Italic,
+        GlyphStyle::BoldItalic,
+    ];
+
+    /// The variant whose discriminant is `n`, or `None`. Written as a match so
+    /// that a new style is a compile error here, for [`GlyphSet`]'s reason.
+    pub const fn try_from_ordinal(n: u8) -> Option<Self> {
+        match n {
+            0 => Some(GlyphStyle::Regular),
+            1 => Some(GlyphStyle::Bold),
+            2 => Some(GlyphStyle::Italic),
+            3 => Some(GlyphStyle::BoldItalic),
+            _ => None,
+        }
+    }
+
+    /// The set this style's declared [`TEXT_RANGES`] coverage is baked into.
+    pub const fn text_set(self) -> GlyphSet {
+        match self {
+            GlyphStyle::Regular => GlyphSet::Text,
+            GlyphStyle::Bold => GlyphSet::BoldText,
+            GlyphStyle::Italic => GlyphSet::ItalicText,
+            GlyphStyle::BoldItalic => GlyphSet::BoldItalicText,
+        }
+    }
+
+    /// The set this style's SHAPED superset is baked into - what its own
+    /// layout tables emit beyond `cmap`.
+    ///
+    /// **Every style needs one of these, and it is not the regular face's.**
+    /// [`GlyphSet::ShapedText`] exists because shaping escapes the cmap:
+    /// Roboto's `liga` folds `fi`/`fl`/`ffi`/`ffl`, and `lnum`/`pnum` (which
+    /// [`TextShaper`] enables by default) remap digits to glyphs no codepoint
+    /// names. A second face has its OWN `GSUB` and therefore its own answer -
+    /// a bold `fi` is a bold ligature glyph, at a glyph id that means
+    /// something else entirely in the regular face. Baking the regular
+    /// superset and hoping would put the placeholder box in the middle of
+    /// every bold word containing `fi`.
+    pub const fn shaped_set(self) -> GlyphSet {
+        match self {
+            GlyphStyle::Regular => GlyphSet::ShapedText,
+            GlyphStyle::Bold => GlyphSet::BoldShapedText,
+            GlyphStyle::Italic => GlyphSet::ItalicShapedText,
+            GlyphStyle::BoldItalic => GlyphSet::BoldItalicShapedText,
+        }
+    }
+
+    /// **The atlas address of `raw` in this style**, or `None` for a glyph id
+    /// too wide to prefix ([`MAX_RAW_GLYPH_ID`]).
+    ///
+    /// # Glyph 0 is glyph 0 in every style, and that is the point
+    ///
+    /// The placeholder box is style-INVARIANT: one glyph, no codepoint maps to
+    /// it, and [`GlyphSet::Placeholder`]'s doc already says there will never be
+    /// a second. So a bold run that meets a codepoint the bold face cannot
+    /// draw shapes to raw glyph 0, addresses cell 0, and draws the same box the
+    /// regular path draws - with no styled cell baked for it and no lookup
+    /// able to miss. The bundled style faces have no outline on `.notdef` at
+    /// all (`fonts/style.py`), which is what makes this a property of the bytes
+    /// rather than of this function.
+    ///
+    /// The map is therefore deliberately not injective across styles at zero,
+    /// and [`GlyphStyle::split_glyph_id`] answers `Regular` for it.
+    pub const fn styled_glyph_id(self, raw: u16) -> Option<u16> {
+        if raw > MAX_RAW_GLYPH_ID {
+            return None;
+        }
+        if raw == 0 {
+            return Some(0);
+        }
+        Some(((self as u16) << 14) | raw)
+    }
+
+    /// The style and raw glyph id a styled glyph id was built from - the
+    /// inverse of [`GlyphStyle::styled_glyph_id`], for a caller (or a test)
+    /// holding an address and asking what it means.
+    pub const fn split_glyph_id(styled: u16) -> (GlyphStyle, u16) {
+        match GlyphStyle::try_from_ordinal((styled >> 14) as u8) {
+            // Every two-bit value is a style, so this is total; the `match` is
+            // how that stays true when a fifth style cannot be added silently.
+            Some(style) => (style, styled & MAX_RAW_GLYPH_ID),
+            None => unreachable!(),
+        }
+    }
+}
 
 /// Bundled Roboto Regular, subset to [`TEXT_RANGES`] — printable ASCII plus
 /// Latin-1 Supplement — with both [`OWNED_BLOCKS`] added.
@@ -203,7 +731,20 @@ pub const ROBOTO_REGULAR_ASCII: &[u8] = include_bytes!("../../fonts/Roboto-Regul
 /// menu U+E5D2   more_vert U+E5D4   send U+E163   chat U+E0C9   person U+F0D3
 /// home U+E9B2   search U+EF7A      library_books U+E02F        settings U+E8B8
 /// code U+E86F   edit U+F097        undo U+E166   redo U+E15A
+/// check U+E668  chevron_left U+E5CB             chevron_right U+E5CC
+/// expand_less U+E5CE              expand_more U+E5CF
 /// ```
+///
+/// The last five are the four chevrons and the tick, added 2026-09-09 because
+/// components in this workspace were drawing them as `<SdfLine>` strokes
+/// beside icons that came from the face, or leaving them out: `checkbox.tsx`
+/// composes the tick from two lines, `props_sheet.tsx` composes two chevrons
+/// from two more, and `genius_canvas.tsx` omits its chevron entirely. Each
+/// says in its own words that the manifest carries no such name, which was
+/// true and is the one reason a manifest gets widened rather than a shape
+/// substituted. See [`MSYMBOLS_ICONS`] for why the vertical chevrons are
+/// `expand_less`/`expand_more` rather than a `chevron_*` pair, and why `check`
+/// is `U+E668`.
 ///
 /// The merge is `fonts/msymbols.py`, which is additive and verifies every
 /// already-merged icon against the upstream build before appending a new one.
@@ -217,6 +758,58 @@ pub const ROBOTO_REGULAR_ASCII: &[u8] = include_bytes!("../../fonts/Roboto-Regul
 /// `fonts/LICENSE-MaterialSymbols.txt`.
 pub const ROBOTO_ASCII_MSYMBOLS: &[u8] =
     include_bytes!("../../fonts/Roboto-Regular-ascii-msymbols.ttf");
+
+/// **Roboto Bold**, subset to [`TEXT_RANGES`] - the same coverage the regular
+/// face declares, in the heavier cut, so `**bold**` resolves to outlines a type
+/// designer drew rather than to a synthesized weight.
+///
+/// Baked into [`GlyphSet::BoldText`] and addressed as
+/// [`GlyphStyle::Bold`]. Made by `fonts/style.py` from the SAME upstream drop
+/// as the regular face (Roboto v2.138, `roboto-android.zip`), which that script
+/// checks outline-for-outline rather than asserting - a bold cut from a
+/// different build passes every test in this repo and simply looks wrong beside
+/// the prose.
+///
+/// # What it does NOT carry, and why neither is an omission
+///
+/// * **No Private Use Area.** Markers and both icon vocabularies are
+///   style-invariant geometry; see [`GlyphSet::style`].
+/// * **No outline on glyph 0.** The placeholder is style-invariant too -
+///   [`GlyphStyle::styled_glyph_id`] addresses it as glyph 0 in every style,
+///   so a styled `.notdef` would be a cell nothing can reach.
+///
+/// 19,628 bytes; 13,084 gzipped. Roboto is (c) The Roboto Project Authors,
+/// licensed Apache-2.0 - see `fonts/LICENSE-Roboto.txt`.
+pub const ROBOTO_BOLD_ASCII: &[u8] = include_bytes!("../../fonts/Roboto-Bold-ascii.ttf");
+
+/// **Roboto Italic**, subset to [`TEXT_RANGES`] - everything
+/// [`ROBOTO_BOLD_ASCII`] says, in the slanted cut, for `*italic*`.
+///
+/// It is here because it is the same MECHANISM and not merely more bytes: one
+/// `fonts/style.py` run, one [`GlyphStyle`] variant, one pair of sets, and the
+/// bake path cannot tell the two apart. A true italic is also the reason to do
+/// this at all rather than shear the regular face - Roboto's italic `a` is a
+/// different letterform, not a slanted one, and a shear would have been a
+/// renderer feature that looks like typography from a distance.
+///
+/// 21,520 bytes; 14,833 gzipped.
+pub const ROBOTO_ITALIC_ASCII: &[u8] = include_bytes!("../../fonts/Roboto-Italic-ascii.ttf");
+
+/// The bundled face for `style`, or `None` for a style this build ships no
+/// face for ([`GlyphStyle::BoldItalic`]).
+///
+/// `None` is the missing-asset answer, exactly as it is in
+/// [`msymbols_codepoint`]: a caller that turns it into the regular face has
+/// defeated the reason this is fallible, and has drawn upright text where the
+/// document said emphasis.
+pub const fn bundled_style_face(style: GlyphStyle) -> Option<&'static [u8]> {
+    match style {
+        GlyphStyle::Regular => Some(ROBOTO_REGULAR_ASCII),
+        GlyphStyle::Bold => Some(ROBOTO_BOLD_ASCII),
+        GlyphStyle::Italic => Some(ROBOTO_ITALIC_ASCII),
+        GlyphStyle::BoldItalic => None,
+    }
+}
 
 /// The BORROWED icon half of [`ROBOTO_ASCII_MSYMBOLS`]: every declared
 /// Material Symbols name, and the codepoint Material draws it at.
@@ -242,10 +835,32 @@ pub const ROBOTO_ASCII_MSYMBOLS: &[u8] =
 /// five, of which `U+F097` is the published one. Taking the declared value is
 /// what keeps this a statement about a catalogue rather than about whichever
 /// alias a scan picked.
+///
+/// `check` is the case where that rule bites in the other direction, and it is
+/// worth naming because the wrong answer is the memorable one: the face draws
+/// it at both `U+E5CA` and `U+E668`, `U+E5CA` is the Material *Icons*
+/// codepoint everyone remembers, and the Material *Symbols* manifest declares
+/// no name at all at `U+E5CA` — `check` is `U+E668`. Both codepoints reach the
+/// same outline in today's face, so picking the alias would have drawn the
+/// right tick under a codepoint the published catalogue does not use.
+///
+/// # The four chevrons are not four `chevron_*` names
+///
+/// Material publishes `chevron_left`/`chevron_right` for W and E, and
+/// `expand_less`/`expand_more` for N and S. There is no `chevron_up` or
+/// `chevron_down` to reach for, and the asymmetry is Material's rather than an
+/// omission here: the vertical pair is named for what it does to a disclosure
+/// row, and it is the same chevron rotated. A caller wanting "the chevron
+/// pointing north" asks for `expand_less`.
 pub const MSYMBOLS_ICONS: &[(&str, char)] = &[
     ("chat", '\u{E0C9}'),
+    ("check", '\u{E668}'),
+    ("chevron_left", '\u{E5CB}'),
+    ("chevron_right", '\u{E5CC}'),
     ("code", '\u{E86F}'),
     ("edit", '\u{F097}'),
+    ("expand_less", '\u{E5CE}'),
+    ("expand_more", '\u{E5CF}'),
     ("home", '\u{E9B2}'),
     ("library_books", '\u{E02F}'),
     ("menu", '\u{E5D2}'),
@@ -299,7 +914,9 @@ pub fn msymbols_codepoint(name: &str) -> Option<char> {
 /// manifest for the borrowed set.
 ///
 /// ```text
-/// graph U+F800   props U+F801   table U+F802   screen U+F803
+/// graph  U+F800   props    U+F801   table   U+F802   screen  U+F803
+/// branch U+F804   database U+F805   form    U+F806   sparkle U+F807
+/// widget U+F808   device   U+F809   sitemap U+F80A   avatar  U+F80B
 /// ```
 ///
 /// These exist because the vocabulary Material publishes does not contain
@@ -313,6 +930,35 @@ pub fn msymbols_codepoint(name: &str) -> Option<char> {
 /// name, they sit two thousand codepoints clear of Material's, and
 /// [`msymbols_codepoint`] answers `None` for every one of them.
 ///
+/// The last eight (2026-09-17) are the navigation rail's marks — seven
+/// destinations plus `avatar`, the account control's, which is chrome rather
+/// than a destination. `avatar` is the one place the FILL axis mattered: this
+/// bake instances Material Symbols at FILL 0, so its `person` is an outlined
+/// ring and a hollow body where the rail draws a solid silhouette. Rendered
+/// both and compared rather than assumed, which is why `person` is not a
+/// near-miss this manifest could have adopted. The seven destination marks are
+/// the ones
+/// which `crates/highbay_ui/src/zui/rail.rs` draws as bezier strokes from a
+/// `match` on a destination enum, and which the AUTHORED rail can now name.
+/// Both still exist: `highbay_ui` is feature-gated, the zui shell keeps its own
+/// strokes, and the `ideroot` root cannot reach that crate at all. The same
+/// argument applies to every one: Material publishes nothing that MEANS a
+/// custom widget, an app's data store, a screen rendered as a form, an
+/// assisted-generation pane, or a commit ledger — `extension`, `storage`,
+/// `list_alt`, `auto_awesome` and `commit` each mean something adjacent, and
+/// adopting one would put a name in the codebase that says what the mark does
+/// not.
+///
+/// **`sitemap` and `device` are the two that look like names already here, and
+/// they are different MARKS.** `graph`'s nodes are filled discs on straight
+/// edges, drawn small for the toolbar; `sitemap`'s are outlined rounded
+/// squares joined through their own centres, which is what the rail draws at
+/// 24dp. `screen` is a LANDSCAPE frame; `device` is a portrait phone, and the
+/// aspect is the whole of what that mark says. Naming the rail's marks after
+/// the two already here would have been a vocabulary that drew the wrong
+/// picture, which is the failure this manifest's separation exists to prevent
+/// one level up.
+///
 /// The outlines are authored in `fonts/icon.py`, which is where the geometry
 /// is decided and where `table` and `props` record which proportions they take
 /// from `highbay_ui`'s since-retired `draw_table_glyph`/`draw_props_glyph`.
@@ -323,10 +969,20 @@ pub fn msymbols_codepoint(name: &str) -> Option<char> {
 /// alphabetically-placed codepoint would have renumbered a glyph that had
 /// already shipped.
 pub const HIGHBAY_ICONS: &[(&str, char)] = &[
+    ("avatar", '\u{F80B}'),
+    ("branch", '\u{F804}'),
+    ("database", '\u{F805}'),
+    ("device", '\u{F809}'),
+    ("folder", '\u{F80C}'),
+    ("form", '\u{F806}'),
     ("graph", '\u{F800}'),
+    ("plus", '\u{F80D}'),
     ("props", '\u{F801}'),
     ("screen", '\u{F803}'),
+    ("sitemap", '\u{F80A}'),
+    ("sparkle", '\u{F807}'),
     ("table", '\u{F802}'),
+    ("widget", '\u{F808}'),
 ];
 
 /// The codepoint the bundled faces draw the repo's own icon `name` at, or
@@ -359,4 +1015,71 @@ pub fn highbay_codepoint(name: &str) -> Option<char> {
         .binary_search_by_key(&name, |&(n, _)| n)
         .ok()
         .map(|i| HIGHBAY_ICONS[i].1)
+}
+
+#[cfg(test)]
+mod cell_key_tests {
+    use super::{CellKey, GlyphSet};
+
+    /// **The join is lossless at the extremes**, which is what lets the sort be
+    /// one integer compare instead of a tuple compare.
+    #[test]
+    fn a_key_round_trips_every_set_and_glyph_id() {
+        let sets = [
+            GlyphSet::Placeholder,
+            GlyphSet::Text,
+            GlyphSet::ShapedText,
+            GlyphSet::Markers,
+            GlyphSet::OwnedIcons,
+            GlyphSet::BorrowedIcons,
+        ];
+        for set in sets {
+            for glyph_id in [0u16, 1, 255, 256, 32767, 32768, u16::MAX] {
+                let key = CellKey::new(set, glyph_id);
+                assert_eq!(key.set(), set, "set lost for glyph {glyph_id}");
+                assert_eq!(key.glyph_id(), glyph_id, "glyph id lost for {set:?}");
+            }
+        }
+    }
+
+    /// **Ascending numeric order IS `(set, glyph id)` order.** This is the whole
+    /// claim the join rests on: if it failed, cells would be laid out in an
+    /// order the sets do not describe, silently.
+    #[test]
+    fn numeric_order_is_the_declared_order() {
+        let sets = [
+            GlyphSet::Placeholder,
+            GlyphSet::Text,
+            GlyphSet::ShapedText,
+            GlyphSet::Markers,
+            GlyphSet::OwnedIcons,
+            GlyphSet::BorrowedIcons,
+        ];
+        let mut keys: Vec<CellKey> = Vec::new();
+        for set in sets {
+            for glyph_id in [0u16, 7, u16::MAX] {
+                keys.push(CellKey::new(set, glyph_id));
+            }
+        }
+        let mut by_bits = keys.clone();
+        by_bits.sort_unstable_by_key(|k| k.bits());
+        let mut by_pair = keys.clone();
+        by_pair.sort_unstable_by_key(|k| (k.set(), k.glyph_id()));
+        assert_eq!(
+            by_bits, by_pair,
+            "the packed order and the pair order differ"
+        );
+    }
+
+    /// A glyph id can never reach into the set's bits - the guard that makes
+    /// "lossless" a property rather than an observation about small inputs.
+    #[test]
+    fn the_widest_glyph_id_cannot_reach_the_set_bits() {
+        let low = CellKey::new(GlyphSet::Placeholder, u16::MAX);
+        let high = CellKey::new(GlyphSet::Text, 0);
+        assert!(
+            low < high,
+            "a maximal glyph id in one set outranked the next set"
+        );
+    }
 }

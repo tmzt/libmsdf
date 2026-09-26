@@ -66,14 +66,9 @@ fn scene(atlas: &FontAtlas) -> DrawList {
         color: [0.55, 0.75, 0.95, 1.0],
         anim: 0,
     });
-    // Line.
-    list.push(SdfInstance {
-        kind: SdfKind::Line,
-        position: [70.0, 170.0],
-        size: [660.0, 2.0],
-        color: [0.8, 0.8, 0.85, 1.0],
-        anim: 0,
-    });
+    // Line - the same rule that used to be the rect (70,170) 660x2: a segment
+    // along that rect's mid-height, at the rect's height as its thickness.
+    list.push_line([70.0, 171.0], [730.0, 171.0], 2.0, [0.8, 0.8, 0.85, 1.0]);
     // Containment arc (primary weight) and flow arc (secondary weight) —
     // the ZUI nav-graph pair.
     list.push_bezier(

@@ -153,13 +153,39 @@ impl GpuSdfRenderer {
         Self::new_with_msdf(device, surface_format, 1, 1)
     }
 
-    /// Create a renderer with a pre-sized MSDF atlas texture.
+    /// Create a renderer with a pre-sized MSDF atlas texture - ONE layer.
+    ///
+    /// Every atlas this repo ships is single-layer, so this is still the whole
+    /// answer for them. A consumer holding a layered [`crate::FontAtlas`] must
+    /// pass its [`crate::FontAtlas::layer_count`] through
+    /// [`GpuSdfRenderer::new_with_msdf_layers`] instead: the layer count is a
+    /// texture-CREATION parameter in wgpu, so it cannot be inferred later from
+    /// the pixels handed to `upload_msdf_atlas`.
     pub fn new_with_msdf(
         device: &wgpu::Device,
         surface_format: wgpu::TextureFormat,
         msdf_width: u32,
         msdf_height: u32,
     ) -> Self {
+        Self::new_with_msdf_layers(device, surface_format, msdf_width, msdf_height, 1)
+    }
+
+    /// [`GpuSdfRenderer::new_with_msdf`] with an explicit layer count - the
+    /// constructor a layered atlas needs.
+    ///
+    /// `msdf_layers` is [`crate::FontAtlas::layer_count`]. Every layer of an
+    /// array shares `msdf_width` x `msdf_height`, so the texture costs that
+    /// rectangle times the layer count; [`crate::MAX_ATLAS_LAYERS`] is the
+    /// guaranteed ceiling and this clamps to it rather than asking the device
+    /// for a limit the repo does not pin.
+    pub fn new_with_msdf_layers(
+        device: &wgpu::Device,
+        surface_format: wgpu::TextureFormat,
+        msdf_width: u32,
+        msdf_height: u32,
+        msdf_layers: u32,
+    ) -> Self {
+        let msdf_layers = msdf_layers.clamp(1, crate::MAX_ATLAS_LAYERS as u32);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sdf_render"),
             source: wgpu::ShaderSource::Wgsl(SHADER_SOURCE.into()),
@@ -237,7 +263,7 @@ impl GpuSdfRenderer {
             size: wgpu::Extent3d {
                 width: msdf_width.max(1),
                 height: msdf_height.max(1),
-                depth_or_array_layers: 1,
+                depth_or_array_layers: msdf_layers,
             },
             mip_level_count: 1,
             sample_count: 1,
@@ -250,7 +276,14 @@ impl GpuSdfRenderer {
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
-        let msdf_atlas_view = msdf_atlas_texture.create_view(&Default::default());
+        // D2Array EXPLICITLY: wgpu's default view dimension for a texture with
+        // one array layer is D2, which no longer matches the binding. A
+        // one-layer D2Array view samples identically to the D2 view it
+        // replaces, which is what keeps every existing frame where it is.
+        let msdf_atlas_view = msdf_atlas_texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
         let msdf_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("msdf_sampler"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -295,13 +328,14 @@ impl GpuSdfRenderer {
                     count: None,
                 },
                 // binding 8 merged into uniform buffer (texture_bank)
-                // Binding 9: MSDF atlas texture
+                // Binding 9: MSDF atlas texture - an ARRAY, one layer per
+                // `(point size, style)`; see `crate::AtlasLayer`.
                 wgpu::BindGroupLayoutEntry {
                     binding: 9,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false,
                     },
                     count: None,
@@ -432,6 +466,13 @@ impl GpuSdfRenderer {
     /// The MSDF atlas texture (for compute-shader generation into regions).
     pub fn msdf_atlas_texture(&self) -> &wgpu::Texture {
         &self.msdf_atlas_texture
+    }
+
+    /// Array layers the MSDF atlas texture was created with. A consumer checks
+    /// this against [`crate::FontAtlas::layer_count`] before uploading; the
+    /// upload checks it too, because a mismatch is silent in a frame.
+    pub fn msdf_atlas_layers(&self) -> u32 {
+        self.msdf_atlas_texture.depth_or_array_layers()
     }
 
     /// Render SdfDrawCmd list to a texture view.
@@ -580,8 +621,22 @@ impl GpuSdfRenderer {
         queue.write_buffer(&self.param_bank_buffer, 0, bytemuck::cast_slice(clipped));
     }
 
-    /// Upload MSDF atlas RGBA pixel data to the whole atlas texture.
-    /// Data must be RGBA8 (4 bytes per pixel), width × height × 4 bytes.
+    /// Upload MSDF atlas RGBA pixel data to the whole atlas texture, **every
+    /// layer the data covers**.
+    ///
+    /// Data is RGBA8 (4 bytes per texel), `width * height * 4 * layers` bytes,
+    /// layer-major - exactly what [`crate::FontAtlas::to_rgba_bytes`] returns,
+    /// so a caller passing a layered atlas's bytes uploads all of it without
+    /// changing this call.
+    ///
+    /// **A mismatch is reported, not truncated silently.** The layer count is
+    /// fixed when the texture is created
+    /// ([`GpuSdfRenderer::new_with_msdf_layers`]), so an atlas with more
+    /// layers than the texture cannot be uploaded - and the glyphs in the
+    /// missing layers would draw NOTHING rather than draw wrongly (the shader
+    /// skips an out-of-range layer). That is a build-order defect with a
+    /// one-line fix, and it is logged as an error because a blank word in a
+    /// frame does not say which of a dozen things went wrong.
     pub fn upload_msdf_atlas(
         &self,
         queue: &wgpu::Queue,
@@ -589,14 +644,58 @@ impl GpuSdfRenderer {
         height: u32,
         rgba_data: &[u8],
     ) {
-        self.upload_msdf_atlas_region(queue, 0, 0, width, height, rgba_data);
+        let per_layer = (width as usize) * (height as usize) * 4;
+        if per_layer == 0 {
+            return;
+        }
+        let have = rgba_data.len() / per_layer;
+        let texture_layers = self.msdf_atlas_layers() as usize;
+        if have > texture_layers {
+            log::error!(
+                "[sdf] upload_msdf_atlas: the atlas has {have} layers and the texture was created \
+                 with {texture_layers} - glyphs in layers {texture_layers}.. will draw nothing. \
+                 Build the renderer with GpuSdfRenderer::new_with_msdf_layers(.., \
+                 atlas.layer_count())"
+            );
+        }
+        for layer in 0..have.min(texture_layers) {
+            let start = layer * per_layer;
+            self.upload_msdf_atlas_region_in_layer(
+                queue,
+                layer as u32,
+                0,
+                0,
+                width,
+                height,
+                &rgba_data[start..start + per_layer],
+            );
+        }
     }
 
-    /// Upload RGBA8 pixels into a sub-region of the atlas texture (dynamic
-    /// glyph appends via `AtlasManager`).
+    /// Upload RGBA8 pixels into a sub-region of layer 0 of the atlas texture
+    /// (dynamic glyph appends via `AtlasManager`).
     pub fn upload_msdf_atlas_region(
         &self,
         queue: &wgpu::Queue,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        rgba_data: &[u8],
+    ) {
+        self.upload_msdf_atlas_region_in_layer(queue, 0, x, y, width, height, rgba_data);
+    }
+
+    /// [`GpuSdfRenderer::upload_msdf_atlas_region`] into a named layer.
+    ///
+    /// `AtlasManager` allocates over ONE layer's rectangle - it is a 2D
+    /// allocator and a layer is a 2D surface - so a runtime atlas with layers
+    /// keeps one manager per layer and names the layer here.
+    #[allow(clippy::too_many_arguments)]
+    pub fn upload_msdf_atlas_region_in_layer(
+        &self,
+        queue: &wgpu::Queue,
+        layer: u32,
         x: u32,
         y: u32,
         width: u32,
@@ -607,14 +706,15 @@ impl GpuSdfRenderer {
             wgpu::TexelCopyTextureInfo {
                 texture: &self.msdf_atlas_texture,
                 mip_level: 0,
-                origin: wgpu::Origin3d { x, y, z: 0 },
+                // z IS the array layer for a 2D-array texture.
+                origin: wgpu::Origin3d { x, y, z: layer },
                 aspect: wgpu::TextureAspect::All,
             },
             rgba_data,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width * 4),
-                rows_per_image: None,
+                rows_per_image: Some(height),
             },
             wgpu::Extent3d {
                 width,

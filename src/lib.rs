@@ -35,9 +35,13 @@ pub use drawlist::{
     DrawEffects, DrawList, Elevation, SdfFrame, SdfInstance, SdfKind, SdfRotate, rotate_rect,
 };
 pub use font::{
-    ATLAS_COLS, ATLAS_ROWS, AtlasManager, AtlasRegion, FontAtlas, FontAtlasBuilder, GlyphEntry,
-    HIGHBAY_ICONS, HIGHBAY_ICONS_BLOCK, MARKER_ARROW, MARKERS, MSYMBOLS_ICONS, OWNED_BLOCKS,
-    ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII, ShapedRun, TextShaper, atlas_capacity,
+    ATLAS_COLS, ATLAS_HEADER_SIZE, ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, ATLAS_VERSION_LAYERED,
+    AtlasLayer, AtlasManager, AtlasRegion, CellKey, FALLBACK_BASELINE_FRAC,
+    FALLBACK_MAX_INK_DESCENT_EM, FontAtlas, FontAtlasBuilder, GlyphEntry, GlyphSet, GlyphStyle,
+    HIGHBAY_ICONS, HIGHBAY_ICONS_BLOCK, LayerNotBaked, MARKER_ARROW, MARKERS, MAX_ATLAS_LAYERS,
+    MAX_RAW_GLYPH_ID, MSYMBOLS_ICONS, NoFaceForStyle, OWNED_BLOCKS, ROBOTO_ASCII_MSYMBOLS,
+    ROBOTO_BOLD_ASCII, ROBOTO_ITALIC_ASCII, ROBOTO_REGULAR_ASCII, SetMetrics, ShapedRun,
+    StyledGlyphError, StyledShaper, TEXT_RANGES, TextShaper, atlas_capacity, bundled_style_face,
     highbay_codepoint, msymbols_codepoint,
 };
 pub use gpu::{BlurPass, GpuSdfRenderer, MsdfCompute, blur_params};

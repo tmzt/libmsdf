@@ -6,6 +6,15 @@
 //! entries. Pixel uploads are the caller's job (either
 //! `GpuSdfRenderer::upload_msdf_atlas_region` with CPU-baked bytes or
 //! `gpu::MsdfCompute` for runtime generation).
+//!
+//! **ONE MANAGER PER LAYER.** This is a 2D allocator and a
+//! [`crate::AtlasLayer`] is a 2D surface, so a runtime atlas with layers keeps
+//! one of these per layer and names the layer at upload
+//! (`upload_msdf_atlas_region_in_layer`, `generate_into_texture_layer`).
+//! Deliberately not layer-aware itself: a layer is `(point size, style)`, so
+//! two layers have different cell sizes and different eviction pressure, and
+//! one allocator over all of them would pack a 16px cell into a 48px layer's
+//! shelf.
 
 use std::collections::HashMap;
 

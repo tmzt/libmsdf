@@ -245,7 +245,7 @@ impl MsdfCompute {
         out
     }
 
-    /// Generate one glyph cell directly into a region of `texture`
+    /// Generate one glyph cell directly into a region of layer 0 of `texture`
     /// (RGBA8, must have COPY_DST — e.g. the renderer's MSDF atlas).
     #[allow(clippy::too_many_arguments)]
     pub fn generate_into_texture(
@@ -253,6 +253,34 @@ impl MsdfCompute {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         texture: &wgpu::Texture,
+        x: u32,
+        y: u32,
+        outline: &GlyphOutline,
+        proj: &GlyphProjection,
+        cell: u32,
+        px_range: f32,
+    ) {
+        self.generate_into_texture_layer(
+            device, queue, texture, 0, x, y, outline, proj, cell, px_range,
+        );
+    }
+
+    /// [`MsdfCompute::generate_into_texture`] into a named array LAYER.
+    ///
+    /// The runtime half of emphasis: a browser can generate a style's cells on
+    /// demand rather than download them (a style's baked cells are ~290 KiB
+    /// gzipped against a 13 KiB face), file the entry under
+    /// [`crate::GlyphStyle::styled_glyph_id`] with its
+    /// [`crate::GlyphEntry::layer`] set, and the same lookup and the same
+    /// shader path find it. Nothing here needs a different address from a
+    /// baked cell.
+    #[allow(clippy::too_many_arguments)]
+    pub fn generate_into_texture_layer(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        texture: &wgpu::Texture,
+        layer: u32,
         x: u32,
         y: u32,
         outline: &GlyphOutline,
@@ -276,7 +304,8 @@ impl MsdfCompute {
             wgpu::TexelCopyTextureInfo {
                 texture,
                 mip_level: 0,
-                origin: wgpu::Origin3d { x, y, z: 0 },
+                // z IS the array layer for a 2D-array texture.
+                origin: wgpu::Origin3d { x, y, z: layer },
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::Extent3d {

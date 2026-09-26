@@ -148,9 +148,12 @@ impl Cell {
 /// **The top 256 codepoints of the Private Use Area are the repo's**, split in
 /// two blocks that abut exactly and overlap nowhere.
 ///
-/// This is the property that lets `add_shipped_coverage` queue the whole PUA
-/// without knowing an icon set: borrowed glyphs sit far below the line, ours
-/// sit above it, and neither can wander into the other by accident.
+/// This is the property that lets `add_shipped_coverage` queue the whole PUA as
+/// three declared BLOCKS without knowing an icon set: borrowed glyphs sit far
+/// below the line, ours sit above it in two abutting halves, and neither can
+/// wander into the other by accident. The bake asserts the same shape before it
+/// scans, because a gap between the blocks would be codepoints the face defines
+/// and the atlas never queues.
 #[test]
 fn owned_blocks_are_the_top_of_the_carveout() {
     let (pua_lo, pua_hi) = PRIVATE_USE;
@@ -414,18 +417,40 @@ fn every_highbay_icon_shapes_and_is_baked_with_ink() {
 
         let cell = Cell::of(&atlas, name);
         let (x0, y0, x1, y1) = cell.bounds();
-        // **One optical size and one optical height.** The live box is 16 x 15
-        // Material grid units — 24.6 x 23.1 texels at 48px cells — and Props,
-        // the narrowest, keeps the same relation to it that
-        // Props has to Table in the retired toolbar originals. What makes them a SET
-        // rather than three marks drawn nearby is that none is much smaller
-        // than the box and all three share a centre.
+        // **Inside the live box, and not a speck in it.** The box is 16 x 15
+        // Material grid units — 24.6 x 23.1 texels at 48px cells — and the
+        // ceiling is what makes these a set with the borrowed marks: nothing
+        // may reach past it, because past it the distance field is cut off.
+        //
+        // The FLOOR used to be 20 x 18, which said "every one of them fills the
+        // box". That was true of the toolbar trio and is not true of the seven
+        // the navigation rail brought (2026-09-17): those were designed
+        // together in one 24px box at one stroke weight and are deliberately
+        // NOT the same size as each other — the widget is 16.4 x 15.0 of that
+        // box where the sparkle is 22.4 x 21.6 — so mapping them through one
+        // scale, which is what keeps their stroke one weight, lands them at 15
+        // to 23 texels. Stretching each to fill the box would have given the
+        // set an optical size the design refuses and made the stroke a
+        // different weight in every glyph.
+        //
+        // So the floor is now "not a speck" rather than "fills the box", and
+        // what still makes them a SET is the line below: one centre.
         assert!(
-            (20..=26).contains(&(x1 - x0 + 1)) && (18..=26).contains(&(y1 - y0 + 1)),
-            "{name:?} inks {}x{} texels, outside the trio's shared live box",
+            (15..=26).contains(&(x1 - x0 + 1)) && (15..=26).contains(&(y1 - y0 + 1)),
+            "{name:?} inks {}x{} texels, outside the shared live box",
             x1 - x0 + 1,
             y1 - y0 + 1,
         );
+        // ...and the four drawn for the TOOLBAR still fill it, which is the
+        // half of the old assertion that is still a fact about a design.
+        if matches!(name, "graph" | "props" | "screen" | "table") {
+            assert!(
+                (20..=26).contains(&(x1 - x0 + 1)) && (18..=26).contains(&(y1 - y0 + 1)),
+                "{name:?} is one of the toolbar four and no longer fills the live box: {}x{}",
+                x1 - x0 + 1,
+                y1 - y0 + 1,
+            );
+        }
         assert!(
             (x0 + x1).abs_diff(cell.gs - 1) <= 1,
             "{name:?} is not centred in its cell: ink spans {x0}..{x1} of {}",
@@ -441,7 +466,7 @@ fn every_highbay_icon_shapes_and_is_baked_with_ink() {
     for &(name, c) in &centres {
         assert!(
             c.abs_diff(first) <= 1,
-            "{name:?} sits at a different optical height from the rest of the trio",
+            "{name:?} sits at a different optical height from the rest of the set",
         );
     }
 }

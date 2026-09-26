@@ -12,8 +12,9 @@
 //! does it shape, does it have a cell, and does that cell have ink in it.
 
 use libmsdf::font::{
-    FontAtlas, MSYMBOLS_ICONS, PRIVATE_USE, ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII,
-    TEXT_RANGES, TextShaper, msymbols_codepoint,
+    CellKey, FontAtlas, FontAtlasBuilder, GlyphSet, HIGHBAY_ICONS_BLOCK, MARKERS, MSYMBOLS_ICONS,
+    PRIVATE_USE, ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII, TEXT_RANGES, TextShaper,
+    msymbols_codepoint,
 };
 use libmsdf::{ATLAS_COLS, ATLAS_ROWS, DrawList, SdfKind, atlas_capacity};
 
@@ -71,7 +72,11 @@ fn every_declared_codepoint_has_a_glyph_and_a_cell() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 95 + 96, "printable ASCII plus Latin-1 Supplement");
+    assert_eq!(
+        checked,
+        95 + 96 + 10,
+        "printable ASCII, Latin-1 Supplement, and the typographic ten"
+    );
 }
 
 /// The letters actually have INK. A cell can exist and be blank — that is what
@@ -165,10 +170,13 @@ fn glyph_zero_is_a_hollow_box() {
 #[test]
 fn uncovered_characters_resolve_to_the_placeholder_cell() {
     let (shaper, atlas) = (shaper(), atlas());
-    // A curly quote and an ellipsis (the authored-source case the old panic was
-    // written for), an em-dash, a CJK ideograph and an emoji (arbitrary runtime
-    // data, which is the case that broke it).
-    for ch in ['\u{201c}', '\u{2026}', '\u{2014}', '\u{597d}', '\u{1f389}'] {
+    // **These examples moved when `TEXT_RANGES` gained the typographic ten**,
+    // and what replaced them says why each is still outside coverage: an ARROW,
+    // which this tree's prose wants and the upstream drop does not define; a
+    // DAGGER, which the drop defines and the range list left out on purpose; a
+    // CJK ideograph and an emoji (arbitrary runtime data, which is the case
+    // that broke it).
+    for ch in ['\u{2192}', '\u{2020}', '\u{597d}', '\u{1f389}'] {
         let run = shaper.shape(ch.encode_utf8(&mut [0u8; 4]));
         assert_eq!(run.notdef_count(), 1, "{ch:?} unexpectedly covered");
         assert_eq!(run.glyphs[0].glyph_id, 0);
@@ -177,20 +185,29 @@ fn uncovered_characters_resolve_to_the_placeholder_cell() {
 }
 
 /// ...and the DRAW LIST agrees. The two above could both hold while the emitter
-/// still pointed the run at table index 0, which for every shipped atlas is the
-/// space — the invisible gap by a second route.
+/// still pointed the run at table index 0, which for every shipped atlas used to
+/// be the space — the invisible gap by a second route.
+///
+/// # The vacuity pin moved, and why it had to
+///
+/// This used to assert `notdef_idx != 0` first, so that matching it meant
+/// something. That is no longer possible: the glyph table is ordered by GLYPH
+/// ID and glyph 0 is the lowest there is, so the placeholder is table index 0
+/// in every atlas that bakes it. Two things follow. The emitter's last-resort
+/// arm (`None => (0, ..)`, for an atlas with no glyph 0 at all) now lands on
+/// the placeholder wherever there is one, which is strictly better than
+/// "whatever was packed first". And a stuck zero is no longer distinguishable
+/// from the right answer by looking at this glyph alone — so the run carries a
+/// SECOND glyph, and the pin is that the second one comes back as itself.
 #[test]
 fn the_emitter_points_an_uncovered_run_at_the_placeholder() {
     let (shaper, atlas) = (shaper(), atlas());
     let notdef_idx = atlas.glyph_table_index(0).expect("glyph 0 is in the table") as u32;
-    assert_ne!(
-        notdef_idx, 0,
-        "vacuity: glyph 0 must not BE table index 0 here"
-    );
 
     let mut list = DrawList::new();
+    // An arrow (uncovered - see `TEXT_RANGES`) followed by an 'A' (covered).
     list.push_shaped_text(
-        &shaper.shape("\u{2014}"),
+        &shaper.shape("\u{2192}A"),
         &atlas,
         [0.0, 0.0],
         16.0,
@@ -206,13 +223,25 @@ fn the_emitter_points_an_uncovered_run_at_the_placeholder() {
     else {
         panic!("expected a text instance");
     };
-    assert_eq!(char_count, 1);
-    let packed = frame.char_buffer[char_start as usize];
+    assert_eq!(char_count, 2);
+    let packed = |i: u32| frame.char_buffer[(char_start + i) as usize] >> 16;
     assert_eq!(
-        packed >> 16,
+        packed(0),
         notdef_idx,
-        "the em-dash was emitted as some other cell"
+        "the arrow was emitted as some other cell"
     );
+
+    // Vacuity pin: the buffer is carrying real indices, not zeros. 'A' is a
+    // covered glyph, so it must come back as its OWN cell and not as the
+    // placeholder's.
+    let a_idx = atlas
+        .glyph_table_index(shaper.shape("A").glyphs[0].glyph_id)
+        .expect("'A' is baked") as u32;
+    assert_ne!(
+        a_idx, notdef_idx,
+        "vacuity: 'A' must not resolve to the placeholder"
+    );
+    assert_eq!(packed(1), a_idx, "'A' was emitted as some other cell");
 }
 
 /// A glyph the FACE carries but the BAKE skipped also lands on the box, rather
@@ -278,7 +307,7 @@ fn covers_still_says_no_for_an_uncovered_codepoint() {
     // Every kind of miss: an undeclared PUA codepoint, and ordinary text the
     // face cannot draw. Both answer `false` even though shaping either one
     // would now hand back a perfectly drawable box.
-    for ch in ['\u{e000}', '\u{f8ff}', '\u{201c}', '\u{2026}'] {
+    for ch in ['\u{e000}', '\u{f8ff}', '\u{2192}', '\u{2020}'] {
         assert!(
             !icons.covers(ch),
             "U+{:04X} should not be covered",
@@ -286,6 +315,52 @@ fn covers_still_says_no_for_an_uncovered_codepoint() {
         );
         assert_eq!(icons.shape(ch.encode_utf8(&mut [0u8; 4])).notdef_count(), 1);
     }
+}
+
+/// **The typographic ten have INK**, not just cells.
+///
+/// The widening's own vacuity pin. `every_declared_codepoint_has_a_glyph_and_a_cell`
+/// would pass on ten blank squares - which is precisely the failure being
+/// retired here, since a blank cell and an unbaked codepoint draw the same
+/// nothing. Every one of these has a visible mark, so every one of them is
+/// checked for one.
+#[test]
+fn the_typographic_ten_are_drawn_not_blank() {
+    let (shaper, atlas) = (shaper(), atlas());
+    let ten = [
+        ('\u{2013}', "en dash"),
+        ('\u{2014}', "em dash"),
+        ('\u{2018}', "left single quote"),
+        ('\u{2019}', "right single quote"),
+        ('\u{201c}', "left double quote"),
+        ('\u{201d}', "right double quote"),
+        ('\u{2022}', "bullet"),
+        ('\u{2026}', "ellipsis"),
+        ('\u{20ac}', "euro"),
+        ('\u{2122}', "trade mark"),
+    ];
+    for (ch, name) in ten {
+        let run = shaper.shape(ch.encode_utf8(&mut [0u8; 4]));
+        assert_eq!(run.notdef_count(), 0, "the {name} is not covered");
+        let gid = run.glyphs[0].glyph_id;
+        assert!(
+            cell_has_ink(&atlas, gid),
+            "the {name} (U+{:04X}, glyph {gid}) has a cell with no ink in it - it would \
+             draw the same nothing it drew before it was baked",
+            ch as u32
+        );
+    }
+    // ...and the set really is TEN, so a range edited in one place and not the
+    // other is caught here rather than by a missing character in a frame.
+    let declared: usize = TEXT_RANGES
+        .iter()
+        .map(|&(a, b)| (b as usize) - (a as usize) + 1)
+        .sum();
+    assert_eq!(
+        declared,
+        95 + 96 + 10,
+        "TEXT_RANGES no longer declares the ten"
+    );
 }
 
 // ── the private-use carveout ────────────────────────────────────────────
@@ -387,10 +462,11 @@ fn control_characters_leave_no_glyph_and_no_width() {
     }
     // Vacuity pin: a NON-control character the face cannot draw is still kept
     // and still gets the box, so the rule above is about control characters
-    // rather than about `.notdef`.
-    let em_dash = shaper.shape("one\u{2014}two");
-    assert_eq!(em_dash.notdef_count(), 1);
-    assert_eq!(em_dash.glyphs.len(), 7);
+    // rather than about `.notdef`. (It was the em dash until that became a
+    // baked glyph; the arrow is uncovered for a reason `TEXT_RANGES` records.)
+    let arrow = shaper.shape("one\u{2192}two");
+    assert_eq!(arrow.notdef_count(), 1);
+    assert_eq!(arrow.glyphs.len(), 7);
 }
 
 /// Clusters still address the ORIGINAL string after a control character is
@@ -447,4 +523,522 @@ fn the_shipped_atlas_is_pinned_and_has_the_reserved_headroom() {
         "{} glyphs is well past the recorded budget - see ATLAS_ROWS",
         a.glyphs.len()
     );
+}
+
+// ── the declared cell order ─────────────────────────────────────────────
+
+/// The queue the shipped atlas was baked from, for either bundled face.
+fn shipped_queue(face: &[u8]) -> FontAtlasBuilder {
+    let mut builder = FontAtlasBuilder::new(face.to_vec(), 48, PX_RANGE as f64);
+    builder.add_shipped_coverage();
+    builder
+}
+
+/// **The bytes on disk are in the order the code says they are.**
+///
+/// `GlyphSet` declares the layout and `FontAtlasBuilder::cell_order` computes
+/// it; this reads the layout back off the ARTIFACT — cells in raster order,
+/// which is the only order the texture actually has — and holds the two
+/// against each other. Without it the declaration is a comment: the atlas is
+/// baked by hand and committed, so a bake done from a different order would
+/// ship, load, and render, with nothing to say the order had drifted.
+///
+/// It also pins the claim `cell_order` makes about geometry, that entry *n* is
+/// the glyph in cell *n* of the grid. A caller reasoning about where a glyph
+/// will land needs that to be true and cannot see the packer.
+#[test]
+fn the_shipped_atlas_is_laid_out_in_the_declared_cell_order() {
+    let a = atlas();
+    let declared = shipped_queue(ROBOTO_REGULAR_ASCII).cell_order();
+    assert_eq!(
+        declared.len(),
+        a.glyphs.len(),
+        "the bake queued a different number of glyphs"
+    );
+    assert!(
+        declared.len() > 200,
+        "vacuity: the queue came back nearly empty"
+    );
+
+    // The artifact's own order: cells left to right, top to bottom.
+    let mut by_cell: Vec<&libmsdf::GlyphEntry> = a.glyphs.iter().collect();
+    by_cell.sort_by_key(|e| (e.atlas_y, e.atlas_x));
+
+    let padded = 48 + 2;
+    for (cell, (&key, entry)) in declared.iter().zip(by_cell.iter()).enumerate() {
+        let (set, glyph_id) = (key.set(), key.glyph_id());
+        assert_eq!(
+            entry.glyph_id, glyph_id,
+            "cell {cell} holds glyph {} and the declared order puts {glyph_id} ({set:?}) there \
+             - the committed atlas was baked from a different order than the one \
+             `GlyphSet` states",
+            entry.glyph_id
+        );
+        // ...and cell `n` is where `cell_order`'s doc says it is.
+        assert_eq!(
+            (entry.atlas_x as u32, entry.atlas_y as u32),
+            (
+                1 + (cell as u32 % ATLAS_COLS) * padded,
+                1 + (cell as u32 / ATLAS_COLS) * padded
+            ),
+            "cell {cell} is not at grid position ({}, {})",
+            cell % ATLAS_COLS as usize,
+            cell / ATLAS_COLS as usize
+        );
+    }
+    // The sets really are laid down in blocks, and in the declared sequence.
+    let sets: Vec<GlyphSet> = declared.iter().map(|k| k.set()).collect();
+    assert!(
+        sets.windows(2).all(|w| w[0] <= w[1]),
+        "the sets are interleaved"
+    );
+    assert_eq!(
+        sets[0],
+        GlyphSet::Placeholder,
+        "cell 0 is not the placeholder box"
+    );
+}
+
+/// **The two bundled faces bake to the SAME cells**, right up to the borrowed
+/// icons the merged one adds on the end.
+///
+/// `libhbui` ships the merged atlas and `highbay_ui` the plain one, and this is
+/// what makes a cell in one comparable to a cell in the other. It falls out of
+/// `GlyphSet::BorrowedIcons` being last: the vendor half is the only part of
+/// the merged face that is not in the plain one, so appending it disturbs
+/// nothing. Under the old codepoint scan a borrowed `U+E0xx` sorted below our
+/// `U+F8xx`, so the merged bake pushed Latin-1 and the placeholder 13 cells
+/// along and the two atlases agreed about almost nothing.
+///
+/// Compared through CODEPOINTS, because the glyph ids differ between the faces
+/// — that is the whole reason the set id, and not the glyph id, is what makes
+/// the order ours.
+#[test]
+fn the_two_bundled_faces_share_a_cell_layout() {
+    let (plain_face, merged_face) = (
+        shaper(),
+        TextShaper::new(ROBOTO_ASCII_MSYMBOLS.to_vec()).unwrap(),
+    );
+    let (plain, merged) = (
+        shipped_queue(ROBOTO_REGULAR_ASCII).cell_order(),
+        shipped_queue(ROBOTO_ASCII_MSYMBOLS).cell_order(),
+    );
+    let cell_of = |order: &[CellKey], gid: u16| order.iter().position(|k| k.glyph_id() == gid);
+
+    let mut checked = 0;
+    let ranges = TEXT_RANGES
+        .iter()
+        .copied()
+        .chain([HIGHBAY_ICONS_BLOCK, MARKERS]);
+    for (lo, hi) in ranges {
+        for cp in (lo as u32)..=(hi as u32) {
+            let ch = char::from_u32(cp).unwrap();
+            let (Some(pg), Some(mg)) = (
+                plain_face.glyph_id_for_char(ch),
+                merged_face.glyph_id_for_char(ch),
+            ) else {
+                continue;
+            };
+            assert_eq!(
+                cell_of(&plain, pg),
+                cell_of(&merged, mg),
+                "U+{cp:04X} is glyph {pg} in the plain face and {mg} in the merged one, \
+                 and the two bakes put it in different cells"
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked > 190,
+        "vacuity: only {checked} codepoints were comparable"
+    );
+
+    // The merged face's extra cells are exactly its borrowed icons, and they
+    // are all at the END — after every cell the plain face has.
+    assert_eq!(merged.len(), plain.len() + MSYMBOLS_ICONS.len());
+    for (cell, key) in merged.iter().enumerate() {
+        let set = key.set();
+        assert_eq!(
+            set == GlyphSet::BorrowedIcons,
+            cell >= plain.len(),
+            "cell {cell} of the merged bake is {set:?}"
+        );
+    }
+}
+
+// ── The set header: the face's metrics, and every cell agreeing with them ──
+
+/// The face the fixture atlas was baked from.
+fn face() -> ttf_parser::Face<'static> {
+    ttf_parser::Face::parse(ROBOTO_REGULAR_ASCII, 0).expect("the shipped face parses")
+}
+
+/// **The baked baseline is the FACE's baseline**, recomputed here from the
+/// font rather than copied from the file.
+///
+/// `glyph_projection` aligns the cap band to `CAP_TOP_FRAC` of the cell, so the
+/// baseline lands at `CAP_TOP_FRAC + cap_height / (upem * CELL_EM_RATIO)` -
+/// 0.696875 for Roboto, whose `'A'` tops out at 1456 of 2048 units. Anything
+/// else in the header means the bake and the face have come apart.
+///
+/// Note what this number is NOT: `hhea`'s `ascender / (ascender - descender)`
+/// is 0.7917 for this face, and that is a different quantity - where a line
+/// box's ascent sits, not where THIS atlas's cells put their baseline. Reading
+/// one for the other is a mistake worth 0.09 of a cell.
+#[test]
+fn the_text_baseline_is_the_faces_cap_projection() {
+    let face = face();
+    let upem = face.units_per_em() as f64;
+    let expected = (libmsdf::font::CAP_TOP_FRAC
+        + libmsdf::font::cap_height(&face) / (upem * libmsdf::font::CELL_EM_RATIO))
+        as f32;
+
+    let atlas = atlas();
+    let baked = atlas
+        .text_baseline_frac()
+        .expect("the shipped atlas carries a Text set");
+    assert!(
+        (baked - expected).abs() < 1e-6,
+        "header says {baked}, the face says {expected}"
+    );
+    assert!(
+        (baked - 0.696875).abs() < 1e-6,
+        "Roboto's cap projection is 0.696875 of the cell, not {baked}"
+    );
+}
+
+/// **Every cell agrees with its set's header.**
+///
+/// This is the regression guard, and it is written over ALL cells on purpose:
+/// the underline bug was one cell in 221 disagreeing with the other 220, and
+/// `atlas.glyphs.first()` happening to be that one. A whitespace cell used to
+/// carry `0.75 * cell` while every cell with ink carried 0.6969, and because a
+/// space draws nothing, no rendered frame could show it. Only a test that reads
+/// the metric rather than the pixels can.
+#[test]
+fn no_cell_disagrees_with_its_sets_baseline() {
+    let atlas = atlas();
+    let header = atlas.text_baseline_frac().expect("a Text set");
+    for e in &atlas.glyphs {
+        let cell = e.baseline_row / e.atlas_h as f32;
+        assert!(
+            (cell - header).abs() < 1e-6,
+            "glyph {} is baked at {cell} of its cell, the header says {header}",
+            e.glyph_id
+        );
+    }
+}
+
+/// **The em metrics are the face's own tables**, not remembered numbers.
+///
+/// `libhbui` deliberately rules a roomier underline than Roboto asks for at
+/// 12px. That is a decision it is entitled to make - but it can only be stated
+/// as a decision if the face's actual value is available to compare against,
+/// which is what these fields are for.
+#[test]
+fn the_em_metrics_are_read_from_the_face() {
+    let face = face();
+    let upem = face.units_per_em() as f32;
+    let atlas = atlas();
+    let m = atlas.set_metrics(GlyphSet::Text).expect("a Text set");
+
+    let underline = face.underline_metrics().expect("Roboto has a post table");
+    assert!((m.underline_pos_em - underline.position as f32 / upem).abs() < 1e-6);
+    assert!((m.underline_thickness_em - underline.thickness as f32 / upem).abs() < 1e-6);
+    // Roboto-Regular: post underlinePosition -150/2048, thickness 100/2048.
+    assert!(
+        (m.underline_pos_em + 0.07324).abs() < 1e-4,
+        "{}",
+        m.underline_pos_em
+    );
+    assert!((m.underline_thickness_em - 0.04883).abs() < 1e-4);
+
+    assert!((m.ascent_em - face.ascender() as f32 / upem).abs() < 1e-6);
+    assert!((m.descent_em - face.descender() as f32 / upem).abs() < 1e-6);
+    assert!((m.line_gap_em - face.line_gap() as f32 / upem).abs() < 1e-6);
+    assert!(m.descent_em < 0.0, "descent is negative below the baseline");
+
+    // One em is the font size, and this is the field that says why: a cell is
+    // `CELL_EM_RATIO` em tall and is drawn to `LINE_BOX_RATIO` x the size.
+    let em_px = m.px_per_em_frac * libmsdf::drawlist::LINE_BOX_RATIO * 12.0;
+    assert!(
+        (em_px - 12.0).abs() < 1e-3,
+        "one em at 12px came out {em_px}"
+    );
+}
+
+/// **The ink descent is MEASURED from the outlines, and the face's declared
+/// descender is not a bound on it in either direction.**
+///
+/// This is the finding the field exists for, so it is asserted rather than
+/// written in a comment. Roboto-Regular, upem 2048, `hhea` descender -500:
+///
+/// * `Text` reaches -495 (`U+00A7`), five units SHALLOWER than declared.
+/// * `Markers` reaches -512 (`U+F8F0`), twelve units DEEPER than declared.
+///
+/// One face, one declaration, two sets that miss it in opposite directions. A
+/// consumer that used `descent_em` as a clearance would be needlessly low on
+/// text and actually crossed on markers.
+#[test]
+fn the_ink_descent_is_the_deepest_outline_of_its_own_set() {
+    let face = face();
+    let upem = face.units_per_em() as f32;
+    let atlas = atlas();
+
+    let text = atlas.set_metrics(GlyphSet::Text).expect("a Text set");
+    assert!(
+        (text.ink_descent_em - -495.0 / upem).abs() < 1e-6,
+        "Text ink descent came out {} em",
+        text.ink_descent_em
+    );
+    // The deepest Text glyph, found rather than assumed: whatever the set's
+    // minimum is, some glyph of the set has to reach exactly it.
+    let section = face
+        .glyph_index('\u{00A7}')
+        .expect("the face draws a section sign");
+    let deepest = face
+        .glyph_bounding_box(section)
+        .expect("it has an outline")
+        .y_min;
+    assert_eq!(deepest, -495);
+
+    let markers = atlas.set_metrics(GlyphSet::Markers).expect("a Markers set");
+    assert!(
+        (markers.ink_descent_em - -512.0 / upem).abs() < 1e-6,
+        "Markers ink descent came out {} em",
+        markers.ink_descent_em
+    );
+
+    // The two misses, in opposite directions, against one declaration.
+    assert!(
+        text.ink_descent_em > text.descent_em,
+        "Text ink {} is not shallower than the declared {}",
+        text.ink_descent_em,
+        text.descent_em
+    );
+    assert!(
+        markers.ink_descent_em < markers.descent_em,
+        "Markers ink {} is not deeper than the declared {}",
+        markers.ink_descent_em,
+        markers.descent_em
+    );
+
+    // The consumer-facing flip, and the accessor `libhbui` actually calls.
+    assert_eq!(text.max_ink_descent_em(), -text.ink_descent_em);
+    assert_eq!(atlas.text_max_ink_descent_em(), Some(495.0 / upem));
+
+    // Not every set has ink below the baseline, and the measurement says so
+    // rather than clamping: the owned icons bottom out ABOVE it.
+    let icons = atlas
+        .set_metrics(GlyphSet::OwnedIcons)
+        .expect("an OwnedIcons set");
+    assert!(
+        icons.ink_descent_em > 0.0,
+        "owned icons: {}",
+        icons.ink_descent_em
+    );
+    assert!(icons.max_ink_descent_em() < 0.0, "so the depth is negative");
+}
+
+/// **The set the underline reads is not the deepest set in the file**, which is
+/// the whole reason the metric is per-set.
+///
+/// Measured face-wide, the answer is `Markers`' -512 - a glyph that never
+/// appears in a text run, dragging every underline in the app a quarter-pixel
+/// lower at 48px for nothing. A rule that clears `Text` clears the text.
+#[test]
+fn the_face_wide_minimum_is_deeper_than_the_text_set() {
+    let atlas = atlas();
+    let face_wide = atlas
+        .sets
+        .iter()
+        .map(|m| m.ink_descent_em)
+        .fold(f32::INFINITY, f32::min);
+    let text = atlas
+        .set_metrics(GlyphSet::Text)
+        .expect("a Text set")
+        .ink_descent_em;
+    assert!(
+        face_wide < text,
+        "face-wide {face_wide} is not deeper than Text {text} - if a re-bake made \
+         them equal, the per-set argument is still sound but this test no longer \
+         demonstrates it"
+    );
+}
+
+/// **A run of text can also carry SHAPED forms**, and the rule is placed from
+/// `Text` alone - so `ShapedText` must not be deeper than `Text`, or a ligature
+/// would poke through a rule sized for the letters around it.
+///
+/// Checked rather than assumed: the ligatures and GSUB forms in the shipped
+/// bake bottom out at -20/2048, nowhere near the letters. If a future face
+/// brought in a descending form, this is where it would be caught.
+#[test]
+fn no_shaped_form_is_deeper_than_the_text_set() {
+    let atlas = atlas();
+    let text = atlas
+        .set_metrics(GlyphSet::Text)
+        .expect("a Text set")
+        .ink_descent_em;
+    let shaped = atlas
+        .set_metrics(GlyphSet::ShapedText)
+        .expect("a ShapedText set");
+    assert!(
+        shaped.ink_descent_em >= text,
+        "a shaped form reaches {} em, past the Text set's {text} em that the rule is \
+         placed from - `underline_rect` would be crossed by it",
+        shaped.ink_descent_em
+    );
+}
+
+/// Every set in the shipped bake declares itself, and the counts are the real
+/// cell counts.
+#[test]
+fn every_baked_set_is_in_the_header() {
+    let atlas = atlas();
+    assert!(
+        !atlas.sets.is_empty(),
+        "a baked atlas always has a set header"
+    );
+    let counted: usize = atlas.sets.iter().map(|s| s.glyph_count as usize).sum();
+    assert_eq!(counted, atlas.glyphs.len());
+    for set in [
+        GlyphSet::Placeholder,
+        GlyphSet::Text,
+        GlyphSet::ShapedText,
+        GlyphSet::Markers,
+    ] {
+        assert!(
+            atlas.set_metrics(set).is_some(),
+            "{set:?} has cells but no header"
+        );
+    }
+    // The plain face borrows nothing, so it has no BorrowedIcons cells - and
+    // therefore no header entry for them. An absent set is `None`, not zero.
+    assert_eq!(atlas.set_metrics(GlyphSet::BorrowedIcons), None);
+}
+
+// ── widening the ranges, for real (native + msdfgen) ────────────────────
+
+/// ```text
+/// CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm cargo test --features cpu-bake
+/// ```
+#[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
+mod baked {
+    use super::*;
+    use libmsdf::font::{GlyphEntry, OWNED_BLOCKS};
+
+    /// Small cells: this is a test about where ink LANDS, not about field
+    /// quality, and the property is scale-free. 48px would be a minute of
+    /// msdfgen for the same answer.
+    const GS: u32 = 16;
+    const PX: f64 = 2.0;
+
+    /// **The queue as it stood before the typographic ten** - every call
+    /// `FontAtlasBuilder::add_shipped_coverage` makes, with the text ranges cut
+    /// back to the two that predate the widening.
+    ///
+    /// Spelled out rather than driven off `TEXT_RANGES` on purpose: the point
+    /// of the test is to hold TODAY's coverage against a fixed earlier one, and
+    /// a "narrow" side computed from the same constant as the wide side would
+    /// widen along with it and stop measuring anything.
+    fn narrow(face: &[u8]) -> FontAtlas {
+        let mut b = FontAtlasBuilder::new(face.to_vec(), GS, PX);
+        b.add_codepoint_range(GlyphSet::Text, '\u{0020}', '\u{007E}');
+        b.add_codepoint_range(GlyphSet::Text, '\u{00A0}', '\u{00FF}');
+        b.add_shaped_ascii();
+        let (pua_lo, _) = PRIVATE_USE;
+        let (own_lo, _) = OWNED_BLOCKS;
+        let (icons_lo, icons_hi) = HIGHBAY_ICONS_BLOCK;
+        let (markers_lo, markers_hi) = MARKERS;
+        let borrowed_hi = char::from_u32(own_lo as u32 - 1).expect("U+F7FF is a scalar value");
+        b.add_codepoint_range(GlyphSet::BorrowedIcons, pua_lo, borrowed_hi);
+        b.add_codepoint_range(GlyphSet::Markers, markers_lo, markers_hi);
+        b.add_codepoint_range(GlyphSet::OwnedIcons, icons_lo, icons_hi);
+        b.add_glyph(GlyphSet::Placeholder, 0);
+        b.build().expect("the pre-widening coverage bakes")
+    }
+
+    fn wide(face: &[u8]) -> FontAtlas {
+        let mut b = FontAtlasBuilder::new(face.to_vec(), GS, PX);
+        b.add_shipped_coverage();
+        b.build().expect("the shipped coverage bakes")
+    }
+
+    /// Every texel of one glyph's cell, at whatever address the cell has.
+    fn cell(a: &FontAtlas, e: &GlyphEntry) -> Vec<u8> {
+        let row = (e.atlas_w as u32 * a.channels) as usize;
+        (0..e.atlas_h as u32)
+            .flat_map(|dy| {
+                let o =
+                    (((e.atlas_y as u32 + dy) * a.width + e.atlas_x as u32) * a.channels) as usize;
+                a.pixel_data[o..o + row].to_vec()
+            })
+            .collect()
+    }
+
+    /// **Widening `TEXT_RANGES` MOVES CELLS AND MOVES NO TEXEL.**
+    ///
+    /// This is the case Wave O's `a_styled_bake_moves_no_texel_of_layer_zero`
+    /// could not cover and the reason it is worth having both. A style APPENDS
+    /// - every existing cell keeps its address, so nothing about the atlas has
+    /// to be re-examined. A text codepoint INSERTS: it lands in `GlyphSet::Text`,
+    /// which is set 1, so every later set slides down by as many cells as were
+    /// added and every one of those glyphs gets a new `u`/`v`.
+    ///
+    /// What makes that safe is that an MSDF cell is baked from the OUTLINE
+    /// alone and blitted into whichever cell it lands in, so the ink is
+    /// bit-identical at the new address. Measured on the real 48px bake, the
+    /// widening moved 19 of 211 cells in the plain atlas and 32 of 224 in the
+    /// merged one, changed no texel of either, and left all 103 dumped frames
+    /// pixel-identical.
+    ///
+    /// Both halves are asserted, and the MOVE is asserted first: a build where
+    /// nothing moved would pass the texel half vacuously.
+    #[test]
+    fn widening_the_text_ranges_moved_cells_but_no_texel() {
+        for face in [ROBOTO_REGULAR_ASCII, ROBOTO_ASCII_MSYMBOLS] {
+            let (before, after) = (narrow(face), wide(face));
+            assert_eq!(
+                (before.width, before.height),
+                (after.width, after.height),
+                "the texture is pinned - widening coverage must not resize it"
+            );
+            assert_eq!(
+                after.glyphs.len(),
+                before.glyphs.len() + 10,
+                "the widening is not the ten cells TEXT_RANGES declares"
+            );
+
+            let mut moved = 0;
+            for e in &before.glyphs {
+                let now = after
+                    .get_glyph(e.glyph_id)
+                    .unwrap_or_else(|| panic!("glyph {} lost its cell", e.glyph_id));
+                if (e.atlas_x, e.atlas_y) != (now.atlas_x, now.atlas_y) {
+                    moved += 1;
+                }
+                // Everything about the entry EXCEPT its address is unchanged:
+                // same size, same advance, same baseline, same layer.
+                let (mut a, mut b) = (*e, *now);
+                a.atlas_x = 0;
+                a.atlas_y = 0;
+                b.atlas_x = 0;
+                b.atlas_y = 0;
+                assert_eq!(a, b, "glyph {} changed more than its address", e.glyph_id);
+                // ...and so is every texel of the cell, at the new address.
+                assert_eq!(
+                    cell(&before, e),
+                    cell(&after, now),
+                    "glyph {} changed ink",
+                    e.glyph_id
+                );
+            }
+            assert!(
+                moved > 0,
+                "vacuity: no cell moved, so this is the APPEND case and proves nothing \
+                 about an INSERT"
+            );
+        }
+    }
 }
