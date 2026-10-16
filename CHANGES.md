@@ -102,3 +102,20 @@ Plan: filled Bézier path plan. In the 02:36 EDT addendum, the departure
 about `CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm` is labelled "Step 5". It
 belongs to the preamble of the plan's section 5 (Steps), which gives the GPU
 test command, not to step 5.
+
+## 2026-10-16 12:19 EDT — Atlas layout tables plan
+
+New plan `docs/design/20261016_01_ATLAS_LAYOUT_TABLES_PLAN.md` (status
+Draft): atlas file-major 5 with a split version field (file-major, major,
+minor, patch; semver from 0.1.0, parsing gated by `>` comparisons, newer
+files refused, v3/v4 still read), a table directory with first-capital
+OpenType-derived tables (`Head`, `Cmap`, `Hmtx`, `Gsub`, `Gpos`) and
+all-capital libmsdf tables (`LICS`, licence fourcc/version mapped to SPDX,
+required for every baked face), a rule that no bytecode or VM-interpreted
+table is ever carried, a pure-Rust `AtlasShaper` that matches `TextShaper`
+exactly and is proven against rustybuzz on a corpus at bake, and
+`rustybuzz`/`ttf-parser` 0.25 made optional behind a default-on `shaper`
+feature. Requested by the owner for the tower defense game, whose atlases
+would then lay out text without a TTF or a shaping dependency. Proposed as
+0.4.0. No code changes until the owner approves the plan and answers its
+open questions (notably Grenze Gotisch's contextual accent rules).
