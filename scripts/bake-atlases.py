@@ -16,6 +16,10 @@ committed is a separate, deliberate copy:
     out/roboto-ascii-48.atlas     ->  highbay  src/assets/
                                   ->  libmsdf  tests/fixtures/  (--update-fixture)
 
+Both bakes are written at atlas format 5:0.1.0 with layout tables
+(`--layout`) and licence records (`--licence`), which every bake now needs
+(docs/design/20261016_01_ATLAS_LAYOUT_TABLES_PLAN.md, step 7).
+
 The plain bake's delta is reported against the committed fixture. The merged
 bake has no committed copy in this repo, so pass `--reference-dir` (highbay's
 `crates/libhbui/assets`, say) to get its delta - that is the one whose cells
@@ -95,14 +99,17 @@ ATLASES = [
     (
         "roboto-msymbols-48.atlas",
         MERGED_FACE,
-        ["--style", "bold", "--style", "italic"],
+        ["--style", "bold", "--style", "italic",
+         "--licence", "Apache-2.0=Roboto@regular,bold,italic",
+         "--licence", "Apache-2.0=Material Symbols",
+         "--layout"],
         None,
         "merged face, 3 layers (Regular/Bold/Italic) - libhbui::surface::BAKED_ATLAS",
     ),
     (
         "roboto-ascii-48.atlas",
         PLAIN_FACE,
-        [],
+        ["--licence", "Apache-2.0=Roboto", "--layout"],
         FIXTURE,
         "plain face, 1 layer - libmsdf's test fixture and highbay's src/assets",
     ),
@@ -125,7 +132,17 @@ def index(path: pathlib.Path):
     ver, w, h, ng, ch, sc = struct.unpack_from("<6I", d, 4)
     off = 28
     layers = []
-    if ver == 4:
+    if d[4] == 5:
+        # File-major 5: [5, major, minor, patch], then a layer count and a
+        # table count after the legacy 28 bytes.
+        ver = f"5:{d[5]}.{d[6]}.{d[7]}"
+        lc, _tc = struct.unpack_from("<2I", d, 28)
+        off = 36
+        for _ in range(lc):
+            size_px, style = struct.unpack_from("<HB", d, off)
+            layers.append((size_px, style))
+            off += 4
+    elif ver == 4:
         (lc,) = struct.unpack_from("<I", d, off)
         off += 4
         for _ in range(lc):
