@@ -16,6 +16,7 @@ pub mod atlas;
 pub mod atlas_shaper;
 pub mod glyph_table;
 pub mod layout;
+#[cfg(feature = "shaper")]
 pub mod layout_bake;
 pub mod licence;
 pub mod manager;
@@ -28,22 +29,29 @@ pub use atlas::{
     ATLAS_MAGIC, ATLAS_ROWS, ATLAS_TABLE_FACE_ALL, ATLAS_VERSION, ATLAS_VERSION_LAYERED,
     AtlasFileVersion, AtlasFormatVersion, AtlasLayer, CAP_TOP_FRAC, CELL_EM_RATIO,
     FALLBACK_BASELINE_FRAC, FALLBACK_CAP_HEIGHT_EM, FALLBACK_MAX_INK_DESCENT_EM, FontAtlas,
-    FontAtlasBuilder, GlyphProjection, LayerNotBaked, MAX_ATLAS_LAYERS, MAX_ATLAS_TABLE_BYTES,
-    MAX_ATLAS_TABLES, SetMetrics, StyledGlyphError, atlas_capacity, cap_height, glyph_projection,
+    GlyphProjection, LayerNotBaked, MAX_ATLAS_LAYERS, MAX_ATLAS_TABLE_BYTES, MAX_ATLAS_TABLES,
+    SetMetrics, StyledGlyphError, atlas_capacity,
 };
+#[cfg(feature = "shaper")]
+pub use atlas::{FontAtlasBuilder, cap_height, glyph_projection};
 pub use atlas_shaper::{AtlasShaper, NoLayout, RunShaper, is_default_ignorable};
 pub use glyph_table::GlyphEntry;
 pub use layout::{
     AtlasLayout, ContextSide, ContextSingle, FaceLayout, GsubLookup, GsubRules, Ligature,
 };
+#[cfg(feature = "shaper")]
 pub use layout_bake::{LayoutError, LayoutOptions};
 pub use licence::{
     LICENCE_REGISTRY, LicenceKind, LicenceRecord, LicenceTextError, licence_by_key, licence_by_spdx,
 };
 pub use manager::{AtlasManager, AtlasRegion};
-pub use outline::{Edge, EdgeKind, GlyphOutline, extract_outline};
+#[cfg(feature = "shaper")]
+pub use outline::extract_outline;
+pub use outline::{Edge, EdgeKind, GlyphOutline};
 pub use packer::ShelfPacker;
-pub use shaper::{NoFaceForStyle, ShapedGlyph, ShapedRun, StyledShaper, TextShaper};
+#[cfg(feature = "shaper")]
+pub use shaper::{NoFaceForStyle, StyledShaper, TextShaper};
+pub use shaper::{ShapedGlyph, ShapedRun};
 
 /// **The TEXT coverage of the bundled faces, and there is exactly one of it.**
 ///

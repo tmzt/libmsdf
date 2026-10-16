@@ -91,6 +91,7 @@ pub struct GlyphOutline {
     pub contours: Vec<std::ops::Range<usize>>,
 }
 
+#[cfg(feature = "shaper")]
 struct OutlineSink {
     outline: GlyphOutline,
     start: [f32; 2],
@@ -98,6 +99,7 @@ struct OutlineSink {
     contour_start_idx: usize,
 }
 
+#[cfg(feature = "shaper")]
 impl OutlineSink {
     fn new() -> Self {
         Self {
@@ -131,6 +133,7 @@ impl OutlineSink {
     }
 }
 
+#[cfg(feature = "shaper")]
 impl ttf_parser::OutlineBuilder for OutlineSink {
     fn move_to(&mut self, x: f32, y: f32) {
         self.start = [x, y];
@@ -162,6 +165,7 @@ impl ttf_parser::OutlineBuilder for OutlineSink {
 
 /// Extract a glyph's outline as a colored edge list. Returns None for
 /// glyphs without outlines (whitespace).
+#[cfg(feature = "shaper")]
 pub fn extract_outline(face: &ttf_parser::Face, glyph_id: u16) -> Option<GlyphOutline> {
     let mut sink = OutlineSink::new();
     face.outline_glyph(ttf_parser::GlyphId(glyph_id), &mut sink)?;
@@ -266,7 +270,7 @@ pub fn color_edges(outline: &mut GlyphOutline, angle_threshold: f32) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "shaper"))]
 mod tests {
     use super::*;
 

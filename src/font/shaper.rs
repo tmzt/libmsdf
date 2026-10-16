@@ -3,6 +3,7 @@
 //! Wraps `rustybuzz::shape()` to produce positioned glyph runs from Unicode
 //! text, handling complex scripts, ligatures, kerning, and BiDi.
 
+#[cfg(feature = "shaper")]
 use unicode_segmentation::UnicodeSegmentation;
 
 /// A single positioned glyph from shaping.
@@ -58,12 +59,14 @@ impl ShapedRun {
 }
 
 /// Text shaper backed by rustybuzz.
+#[cfg(feature = "shaper")]
 pub struct TextShaper {
     face_data: Vec<u8>,
     units_per_em: u16,
     default_features: Vec<(ttf_parser::Tag, u32)>,
 }
 
+#[cfg(feature = "shaper")]
 impl TextShaper {
     /// Create a shaper from raw font file data (TTF/OTF).
     pub fn new(font_data: Vec<u8>) -> Result<Self, &'static str> {
@@ -278,6 +281,7 @@ impl TextShaper {
     }
 }
 
+#[cfg(feature = "shaper")]
 impl crate::font::RunShaper for TextShaper {
     fn shape(&self, text: &str) -> ShapedRun {
         TextShaper::shape(self, text)
@@ -325,6 +329,7 @@ impl crate::font::RunShaper for TextShaper {
 /// reason: upright text where the document said emphasis is a wrong render
 /// that looks like a correct one, and the only place the gap can still be
 /// reported is here.
+#[cfg(feature = "shaper")]
 pub struct StyledShaper {
     faces: Vec<(crate::font::GlyphStyle, TextShaper)>,
 }
@@ -333,9 +338,11 @@ pub struct StyledShaper {
 /// style. Distinct from [`crate::font::StyledGlyphError`], which is the same
 /// question asked of an ATLAS - a caller can have the face and not the cells,
 /// or the cells and not the face, and the two are fixed in different places.
+#[cfg(feature = "shaper")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NoFaceForStyle(pub crate::font::GlyphStyle);
 
+#[cfg(feature = "shaper")]
 impl core::fmt::Display for NoFaceForStyle {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
@@ -347,6 +354,7 @@ impl core::fmt::Display for NoFaceForStyle {
     }
 }
 
+#[cfg(feature = "shaper")]
 impl StyledShaper {
     /// A shaper carrying only [`crate::font::GlyphStyle::Regular`], from an explicit face.
     pub fn new(regular: Vec<u8>) -> Result<Self, &'static str> {
@@ -451,7 +459,7 @@ impl StyledShaper {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "shaper"))]
 mod tests {
     use super::*;
 
@@ -531,7 +539,7 @@ mod tests {
 /// DAGGER, which that drop does define and which the range list deliberately
 /// left out. Two different reasons to be uncovered, and the shaper owes them
 /// the same answer.
-#[cfg(test)]
+#[cfg(all(test, feature = "shaper"))]
 mod uncovered_text_shapes_to_the_placeholder {
     use super::TextShaper;
 

@@ -1850,6 +1850,7 @@ mod tests {
         assert!(!clip.contains([51.0, 51.0]));
     }
 
+    #[cfg(feature = "shaper")]
     #[test]
     fn shaped_text_packs_chars() {
         let shaper = crate::font::TextShaper::new(crate::font::ROBOTO_REGULAR_ASCII.to_vec())
@@ -1904,6 +1905,7 @@ mod tests {
     /// glyphs - a frame with the right number of instances in the right
     /// places and the wrong letters in them, which no count and no geometry
     /// check can see.
+    #[cfg(feature = "shaper")]
     #[test]
     fn a_spliced_pane_lowers_to_what_drawing_it_in_place_would_have() {
         let (shaper, atlas) = text_fixture();
@@ -1993,6 +1995,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "shaper")]
     fn text_fixture() -> (crate::font::TextShaper, FontAtlas) {
         let shaper = crate::font::TextShaper::new(crate::font::ROBOTO_REGULAR_ASCII.to_vec())
             .expect("fixture parses");
@@ -2015,6 +2018,7 @@ mod tests {
         (shaper, atlas)
     }
 
+    #[cfg(feature = "shaper")]
     fn pane_one(list: &mut DrawList, shaper: &crate::font::TextShaper, atlas: &FontAtlas) {
         list.push_clip([0.0, 0.0], [100.0, 100.0]);
         list.push(boxy(0.0));
@@ -2029,6 +2033,7 @@ mod tests {
         list.push_clip_end();
     }
 
+    #[cfg(feature = "shaper")]
     fn pane_two(list: &mut DrawList, shaper: &crate::font::TextShaper, atlas: &FontAtlas) {
         list.begin_effects(DrawEffects {
             blur_radius: 2.0,
@@ -2046,6 +2051,7 @@ mod tests {
         list.end_effects();
     }
 
+    #[cfg(feature = "shaper")]
     fn draw_two_panes(list: &mut DrawList, shaper: &crate::font::TextShaper, atlas: &FontAtlas) {
         pane_one(list, shaper, atlas);
         pane_two(list, shaper, atlas);

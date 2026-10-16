@@ -17,6 +17,8 @@
 //! each is read here off the baked field rather than off the font, because
 //! "the outline says so" and "the atlas drew it" are different claims.
 
+#![cfg(feature = "shaper")]
+
 use libmsdf::drawlist::{LINE_BOX_RATIO, screen_px_range};
 use libmsdf::font::{
     FontAtlas, HIGHBAY_ICONS, HIGHBAY_ICONS_BLOCK, MARKERS, MSYMBOLS_ICONS, OWNED_BLOCKS,

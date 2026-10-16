@@ -7,6 +7,8 @@
 //! the font still says what Rust assumes, against the bytes that ship rather
 //! than against a rebuild. This file is that something.
 
+#![cfg(feature = "shaper")]
+
 use libmsdf::DrawList;
 use libmsdf::drawlist::{LINE_BOX_RATIO, X_MARGIN_FRAC};
 use libmsdf::font::{

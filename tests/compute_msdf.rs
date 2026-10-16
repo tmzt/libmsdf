@@ -7,7 +7,7 @@
 //!   per Cargo.toml notes): compute output vs the CPU msdfgen baseline,
 //!   median-of-channels within tolerance.
 
-#![cfg(feature = "gpu-tests")]
+#![cfg(all(feature = "gpu-tests", feature = "shaper"))]
 
 use libmsdf::font::atlas::glyph_projection;
 use libmsdf::font::outline::extract_outline;

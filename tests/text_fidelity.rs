@@ -9,6 +9,8 @@
 //! screen-space one. Text still *drew*, and still read — only the hairlines
 //! silently dropped, so "created" rendered as "creale".
 
+#![cfg(feature = "shaper")]
+
 use libmsdf::drawlist::{LINE_BOX_RATIO, screen_px_range};
 use libmsdf::font::{FontAtlas, TextShaper};
 

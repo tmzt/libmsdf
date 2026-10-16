@@ -10,12 +10,19 @@ publish = false
 wgpu = "30.0.1"
 bytemuck = { version = "1", features = ["derive"] }
 log = "0.4"
-rustybuzz = "0.20"
-ttf-parser = "0.25"
+# Shaping and font parsing: optional behind `shaper` (on by default). A
+# consumer that lays text out from an atlas's layout tables with AtlasShaper
+# can turn default features off and build neither.
+rustybuzz = { version = "0.20", optional = true }
+ttf-parser = { version = "0.25", optional = true }
 unicode-segmentation = "1.13"
 
 [features]
-default = []
+default = ["shaper"]
+# TextShaper, StyledShaper, FontAtlasBuilder, outline extraction and the
+# layout-table extraction (FaceLayout::extract): everything that reads a TTF.
+# Without it, atlases are read, drawn and shaped with AtlasShaper only.
+shaper = ["dep:rustybuzz", "dep:ttf-parser"]
 # CPU msdfgen reference baking. Off by default for two reasons:
 # 1. msdfgen is C++ FFI — it can never build for wasm32 (the compute-shader
 #    MSDF path is the runtime generator there);
@@ -24,7 +31,7 @@ default = []
 #    (`___ZN7msdfgen…` vs the archive's `__ZN7msdfgen…`), so linking fails.
 #    Enable together with the LLVM backend, e.g.:
 #    CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm cargo test -p libmsdf --features cpu-bake
-cpu-bake = ["dep:msdfgen", "dep:ttf-parser-018"]
+cpu-bake = ["shaper", "dep:msdfgen", "dep:ttf-parser-018"]
 # GPU integration tests (headless wgpu). Gated for the same reason: under
 # the Cranelift dev profile, wgpu init aborts at runtime on aarch64
 # ("llvm.aarch64.crc32b is not yet supported" — cranelift issue #171).

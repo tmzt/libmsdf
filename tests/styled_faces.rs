@@ -15,6 +15,8 @@
 //!   0, so every address in the shipped atlas is the number it always was, and
 //!   that is checked against the committed bytes rather than argued.
 
+#![cfg(feature = "shaper")]
+
 use libmsdf::font::{
     CellKey, FontAtlas, FontAtlasBuilder, GlyphSet, GlyphStyle, MAX_RAW_GLYPH_ID,
     ROBOTO_ASCII_MSYMBOLS, ROBOTO_BOLD_ASCII, ROBOTO_ITALIC_ASCII, ROBOTO_REGULAR_ASCII,

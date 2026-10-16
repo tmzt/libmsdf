@@ -33,6 +33,8 @@
 //! `ICONS` and delete this file - the check becomes structural at that point,
 //! which is strictly better.
 
+#![cfg(feature = "shaper")]
+
 use std::collections::BTreeMap;
 use std::path::Path;
 

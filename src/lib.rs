@@ -39,13 +39,16 @@ pub use font::{
     ATLAS_COLS, ATLAS_FILE_MAJOR, ATLAS_FORMAT_VERSION, ATLAS_HEADER_SIZE, ATLAS_HEADER_SIZE_V5,
     ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, ATLAS_VERSION_LAYERED, AtlasFileVersion,
     AtlasFormatVersion, AtlasLayer, AtlasLayout, AtlasManager, AtlasRegion, AtlasShaper, CellKey,
-    FALLBACK_BASELINE_FRAC, FALLBACK_MAX_INK_DESCENT_EM, FaceLayout, FontAtlas, FontAtlasBuilder,
-    GlyphEntry, GlyphSet, GlyphStyle, HIGHBAY_ICONS, HIGHBAY_ICONS_BLOCK, LICENCE_REGISTRY,
-    LayerNotBaked, LayoutError, LayoutOptions, LicenceRecord, MARKER_ARROW, MARKERS,
-    MAX_ATLAS_LAYERS, MAX_RAW_GLYPH_ID, MSYMBOLS_ICONS, NoFaceForStyle, NoLayout, OWNED_BLOCKS,
-    ROBOTO_ASCII_MSYMBOLS, ROBOTO_BOLD_ASCII, ROBOTO_ITALIC_ASCII, ROBOTO_REGULAR_ASCII, RunShaper,
-    SetMetrics, ShapedRun, StyledGlyphError, StyledShaper, TEXT_RANGES, TextShaper, atlas_capacity,
-    bundled_style_face, highbay_codepoint, msymbols_codepoint,
+    FALLBACK_BASELINE_FRAC, FALLBACK_MAX_INK_DESCENT_EM, FaceLayout, FontAtlas, GlyphEntry,
+    GlyphSet, GlyphStyle, HIGHBAY_ICONS, HIGHBAY_ICONS_BLOCK, LICENCE_REGISTRY, LayerNotBaked,
+    LicenceRecord, MARKER_ARROW, MARKERS, MAX_ATLAS_LAYERS, MAX_RAW_GLYPH_ID, MSYMBOLS_ICONS,
+    NoLayout, OWNED_BLOCKS, ROBOTO_ASCII_MSYMBOLS, ROBOTO_BOLD_ASCII, ROBOTO_ITALIC_ASCII,
+    ROBOTO_REGULAR_ASCII, RunShaper, SetMetrics, ShapedRun, StyledGlyphError, TEXT_RANGES,
+    atlas_capacity, bundled_style_face, highbay_codepoint, msymbols_codepoint,
+};
+#[cfg(feature = "shaper")]
+pub use font::{
+    FontAtlasBuilder, LayoutError, LayoutOptions, NoFaceForStyle, StyledShaper, TextShaper,
 };
 pub use gpu::{BlurPass, GpuSdfRenderer, MsdfCompute, blur_params};
 pub use pane::{PaneGate, PaneMark};

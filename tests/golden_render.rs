@@ -8,7 +8,7 @@
 //!    cargo test -p libmsdf --features gpu-tests --test golden_render`
 //! (the comparison itself is tolerance-based).
 
-#![cfg(feature = "gpu-tests")]
+#![cfg(all(feature = "gpu-tests", feature = "shaper"))]
 
 use libmsdf::drawlist::{DrawList, SdfInstance, SdfKind};
 use libmsdf::font::{FontAtlas, TextShaper};

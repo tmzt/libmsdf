@@ -410,7 +410,7 @@ pub fn is_default_ignorable(ch: char) -> bool {
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "shaper"))]
 mod tests {
     use super::*;
     use crate::font::layout_bake::LayoutOptions;

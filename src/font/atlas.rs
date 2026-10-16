@@ -9,10 +9,12 @@
 //! The atlas packs glyphs into a single texture using shelf-based bin
 //! packing. Each glyph is rendered as a 3-channel (RGB) MSDF bitmap.
 
+#[cfg(feature = "shaper")]
+use crate::font::CellKey;
 use crate::font::glyph_table::GlyphEntry;
 #[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
 use crate::font::packer::ShelfPacker;
-use crate::font::{CellKey, GlyphSet, GlyphStyle};
+use crate::font::{GlyphSet, GlyphStyle};
 
 /// **The first four bytes of a baked atlas.** `hbfa` - highbay font atlas.
 ///
@@ -1504,6 +1506,7 @@ pub struct GlyphProjection {
 /// cmap — upstream hardcoded GID 36) is aligned to 15% from the cell top;
 /// ink is centered horizontally. Returns None for glyphs without outlines
 /// (whitespace) — callers fall back to default cell metrics.
+#[cfg(feature = "shaper")]
 pub fn glyph_projection(
     face: &ttf_parser::Face,
     glyph_id: u16,
@@ -1609,6 +1612,7 @@ pub const FALLBACK_MAX_INK_DESCENT_EM: f32 = 0.25;
 /// off "a cell" rather than off a face, and got whichever cell sorted first.
 /// The cells all agree now, so that read cannot go wrong again, and
 /// [`FontAtlas::set_metrics`] answers it properly on top of that.
+#[cfg(feature = "shaper")]
 pub fn default_cell_metrics(face: &ttf_parser::Face, glyph_size: u32) -> (f32, f32, f32) {
     let gs = glyph_size as f64;
     let upem = face.units_per_em() as f64;
@@ -1627,6 +1631,7 @@ pub fn default_cell_metrics(face: &ttf_parser::Face, glyph_size: u32) -> (f32, f
 /// [`FALLBACK_CAP_HEIGHT_EM`] of the em square for a face that does not draw
 /// one. The one place the cap band is measured, for
 /// [`glyph_projection`] and [`default_cell_metrics`] alike.
+#[cfg(feature = "shaper")]
 pub fn cap_height(face: &ttf_parser::Face) -> f64 {
     face.glyph_index('A')
         .and_then(|a| face.glyph_bounding_box(a))
@@ -1747,6 +1752,7 @@ pub const fn atlas_capacity() -> usize {
 ///
 /// Queueing works on every target; [`FontAtlasBuilder::build`] (the msdfgen
 /// CPU bake) is native-only.
+#[cfg(feature = "shaper")]
 #[derive(Clone)]
 pub struct FontAtlasBuilder {
     font_data: Vec<u8>,
@@ -1783,6 +1789,7 @@ pub struct FontAtlasBuilder {
     licences: Vec<(Vec<GlyphStyle>, String, String)>,
 }
 
+#[cfg(feature = "shaper")]
 impl FontAtlasBuilder {
     /// Create a builder for a given font.
     ///
@@ -2742,7 +2749,7 @@ pub(crate) fn msdf_to_u8(unit_value: f32) -> u8 {
     (unit_value.clamp(0.0, 1.0) * 255.0) as u8
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "shaper"))]
 mod tests {
     use super::*;
 

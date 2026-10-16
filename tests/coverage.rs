@@ -11,6 +11,8 @@
 //! `src/assets/` and `crates/libhbui/assets/` ship, and ask of every codepoint:
 //! does it shape, does it have a cell, and does that cell have ink in it.
 
+#![cfg(feature = "shaper")]
+
 use libmsdf::font::{
     CellKey, FontAtlas, FontAtlasBuilder, GlyphSet, HIGHBAY_ICONS_BLOCK, MARKERS, MSYMBOLS_ICONS,
     PRIVATE_USE, ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII, TEXT_RANGES, TextShaper,
