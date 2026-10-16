@@ -119,3 +119,15 @@ feature. Requested by the owner for the tower defense game, whose atlases
 would then lay out text without a TTF or a shaping dependency. Proposed as
 0.4.0. No code changes until the owner approves the plan and answers its
 open questions (notably Grenze Gotisch's contextual accent rules).
+
+## 2026-10-16 12:41 EDT — Atlas layout tables plan: `LICT` amendment
+
+Plan: `docs/design/20261016_01_ATLAS_LAYOUT_TABLES_PLAN.md` (Draft). On the
+owner's decision, an amendment adds `LICT`, an all-capital libmsdf table
+holding each licence record's strings (SPDX identifier, source, copyright,
+Reserved Font Name) as a decimal length followed by that many printable ASCII
+bytes, with no separator, as Itanium C++ mangling encodes identifiers. `LICS`
+becomes fixed-size (fourcc, version, styles mask, `lict_index`). Non-ASCII
+strings, and strings starting with a digit, are refused at bake. The
+amendment replaces section 4.8's `LICS` layout and adds codec tests to step 2.
+Still no code changes until the owner approves the plan.
