@@ -23,7 +23,7 @@ use libmsdf::font::{
 
 /// The same committed artifact `coverage.rs` reads: the plain face, baked at
 /// 48px, with no styled cell in it. It is the regression bar in file form.
-const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
+const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/legacy/roboto-ascii-48-v3.atlas");
 
 fn atlas() -> FontAtlas {
     FontAtlas::from_bytes(ATLAS_FIXTURE).expect("fixture atlas parses")
@@ -617,14 +617,14 @@ fn an_atlas_from_a_newer_libmsdf_is_refused() {
     let mut bytes = atlas.to_bytes();
     // The last set this build has, plus one: what a future libmsdf writes.
     assert_eq!(
-        bytes[libmsdf::ATLAS_HEADER_SIZE],
+        bytes[libmsdf::ATLAS_HEADER_SIZE_V5 + 4],
         GlyphSet::BoldItalicShapedText as u8
     );
     assert!(
         FontAtlas::from_bytes(&bytes).is_ok(),
         "the set this build does have"
     );
-    bytes[libmsdf::ATLAS_HEADER_SIZE] += 1;
+    bytes[libmsdf::ATLAS_HEADER_SIZE_V5 + 4] += 1;
     let err = FontAtlas::from_bytes(&bytes).expect_err("a newer set must not load");
     assert!(err.contains("newer libmsdf"), "{err}");
 }

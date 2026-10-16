@@ -36,14 +36,15 @@ pub use drawlist::{
     PathBuilder, PathError, PathSegment, SdfFrame, SdfInstance, SdfKind, SdfRotate, rotate_rect,
 };
 pub use font::{
-    ATLAS_COLS, ATLAS_HEADER_SIZE, ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, ATLAS_VERSION_LAYERED,
-    AtlasLayer, AtlasManager, AtlasRegion, CellKey, FALLBACK_BASELINE_FRAC,
-    FALLBACK_MAX_INK_DESCENT_EM, FontAtlas, FontAtlasBuilder, GlyphEntry, GlyphSet, GlyphStyle,
-    HIGHBAY_ICONS, HIGHBAY_ICONS_BLOCK, LayerNotBaked, MARKER_ARROW, MARKERS, MAX_ATLAS_LAYERS,
-    MAX_RAW_GLYPH_ID, MSYMBOLS_ICONS, NoFaceForStyle, OWNED_BLOCKS, ROBOTO_ASCII_MSYMBOLS,
-    ROBOTO_BOLD_ASCII, ROBOTO_ITALIC_ASCII, ROBOTO_REGULAR_ASCII, SetMetrics, ShapedRun,
-    StyledGlyphError, StyledShaper, TEXT_RANGES, TextShaper, atlas_capacity, bundled_style_face,
-    highbay_codepoint, msymbols_codepoint,
+    ATLAS_COLS, ATLAS_FILE_MAJOR, ATLAS_FORMAT_VERSION, ATLAS_HEADER_SIZE, ATLAS_HEADER_SIZE_V5,
+    ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, ATLAS_VERSION_LAYERED, AtlasFileVersion,
+    AtlasFormatVersion, AtlasLayer, AtlasLayout, AtlasManager, AtlasRegion, CellKey,
+    FALLBACK_BASELINE_FRAC, FALLBACK_MAX_INK_DESCENT_EM, FaceLayout, FontAtlas, FontAtlasBuilder,
+    GlyphEntry, GlyphSet, GlyphStyle, HIGHBAY_ICONS, HIGHBAY_ICONS_BLOCK, LayerNotBaked,
+    LicenceRecord, MARKER_ARROW, MARKERS, MAX_ATLAS_LAYERS, MAX_RAW_GLYPH_ID, MSYMBOLS_ICONS,
+    NoFaceForStyle, OWNED_BLOCKS, ROBOTO_ASCII_MSYMBOLS, ROBOTO_BOLD_ASCII, ROBOTO_ITALIC_ASCII,
+    ROBOTO_REGULAR_ASCII, SetMetrics, ShapedRun, StyledGlyphError, StyledShaper, TEXT_RANGES,
+    TextShaper, atlas_capacity, bundled_style_face, highbay_codepoint, msymbols_codepoint,
 };
 pub use gpu::{BlurPass, GpuSdfRenderer, MsdfCompute, blur_params};
 pub use pane::{PaneGate, PaneMark};

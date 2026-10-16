@@ -1,7 +1,7 @@
 ---
 title: Atlas-carried layout tables and a shaper without rustybuzz
 date: 2026-10-16
-status: Draft
+status: In implementation
 covers: >
   A new atlas file generation (file-major 5) with a split version field
   (file-major, major, minor, patch) and version-gated parsing that still reads
@@ -1426,3 +1426,13 @@ by the rows below for the split versions. The legacy rows (`03`, `04`,
 
 The hypothetical-reader rows remain unit tests of the gating and acceptance
 helpers, not of a real 0.2 or 1.0 format.
+
+## Amendment — 2026-10-16 13:17 EDT: implementation started; the document is immutable
+
+The owner approved this plan on 2026-10-16 ("approve and build"), with every
+amendment above in force (the 12:41 and 12:56 EDT `LICT` amendments, the
+13:02 EDT decisions and the 13:03 EDT semver reading). Implementation starts
+with step 1 on the branch `impl/0.4.0`, and the status is now
+`In implementation`. From here the document is immutable (Rule 1.5):
+departures are recorded in `CHANGES.md`, and only the owner's explicit
+instruction changes it.

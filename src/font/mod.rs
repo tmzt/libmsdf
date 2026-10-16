@@ -14,18 +14,26 @@
 
 pub mod atlas;
 pub mod glyph_table;
+pub mod layout;
+pub mod licence;
 pub mod manager;
 pub mod outline;
 pub mod packer;
 pub mod shaper;
 
 pub use atlas::{
-    ATLAS_COLS, ATLAS_HEADER_SIZE, ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, ATLAS_VERSION_LAYERED,
-    AtlasLayer, CAP_TOP_FRAC, CELL_EM_RATIO, FALLBACK_BASELINE_FRAC, FALLBACK_CAP_HEIGHT_EM,
-    FALLBACK_MAX_INK_DESCENT_EM, FontAtlas, FontAtlasBuilder, GlyphProjection, LayerNotBaked,
-    MAX_ATLAS_LAYERS, SetMetrics, StyledGlyphError, atlas_capacity, cap_height, glyph_projection,
+    ATLAS_COLS, ATLAS_FILE_MAJOR, ATLAS_FORMAT_VERSION, ATLAS_HEADER_SIZE, ATLAS_HEADER_SIZE_V5,
+    ATLAS_MAGIC, ATLAS_ROWS, ATLAS_TABLE_FACE_ALL, ATLAS_VERSION, ATLAS_VERSION_LAYERED,
+    AtlasFileVersion, AtlasFormatVersion, AtlasLayer, CAP_TOP_FRAC, CELL_EM_RATIO,
+    FALLBACK_BASELINE_FRAC, FALLBACK_CAP_HEIGHT_EM, FALLBACK_MAX_INK_DESCENT_EM, FontAtlas,
+    FontAtlasBuilder, GlyphProjection, LayerNotBaked, MAX_ATLAS_LAYERS, MAX_ATLAS_TABLE_BYTES,
+    MAX_ATLAS_TABLES, SetMetrics, StyledGlyphError, atlas_capacity, cap_height, glyph_projection,
 };
 pub use glyph_table::GlyphEntry;
+pub use layout::{
+    AtlasLayout, ContextSide, ContextSingle, FaceLayout, GsubLookup, GsubRules, Ligature,
+};
+pub use licence::LicenceRecord;
 pub use manager::{AtlasManager, AtlasRegion};
 pub use outline::{Edge, EdgeKind, GlyphOutline, extract_outline};
 pub use packer::ShelfPacker;

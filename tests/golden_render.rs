@@ -16,7 +16,7 @@ use libmsdf::gpu::GpuSdfRenderer;
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 400;
-const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
+const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/legacy/roboto-ascii-48-v3.atlas");
 /// Distance range the fixture atlas was baked with, in atlas texels.
 const PX_RANGE: f32 = 6.0;
 const GOLDEN_PATH: &str = concat!(

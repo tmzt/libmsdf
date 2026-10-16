@@ -14,7 +14,7 @@ use libmsdf::font::{
     ROBOTO_REGULAR_ASCII, TextShaper,
 };
 
-const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
+const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/legacy/roboto-ascii-48-v3.atlas");
 const PX_RANGE: f32 = 6.0;
 
 fn atlas() -> FontAtlas {

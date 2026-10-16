@@ -8,8 +8,9 @@
 //!
 //! * **Nothing that exists moved.** The layer index went into two bytes of
 //!   `GlyphEntry` that were already pad and into `g1.w`, which was the literal
-//!   `0` and was read nowhere - so a single-layer atlas is still written at
-//!   `ATLAS_VERSION`, and the committed fixture round-trips byte for byte.
+//!   `0` and was read nowhere. (Since file-major 5 every atlas is written at
+//!   `ATLAS_FORMAT_VERSION`; the v3 fixture still loads and survives a v5
+//!   round trip unchanged.)
 //! * **A styled bake fits.** `add_shipped_coverage` plus both bundled style
 //!   faces is 669 cells, which no single grid holds and three layers do.
 //! * **A layer the atlas lacks is REFUSED**, never answered with layer 0 - the
@@ -17,14 +18,20 @@
 //! * **An older file loads, and a newer one is refused cleanly.**
 
 use libmsdf::font::{
-    ATLAS_VERSION, ATLAS_VERSION_LAYERED, AtlasLayer, FontAtlas, GlyphEntry, GlyphStyle,
-    LayerNotBaked, MAX_ATLAS_LAYERS,
+    ATLAS_FORMAT_VERSION, ATLAS_VERSION, ATLAS_VERSION_LAYERED, AtlasFileVersion, AtlasLayer,
+    FontAtlas, GlyphEntry, GlyphStyle, LayerNotBaked, MAX_ATLAS_LAYERS,
 };
+
+/// The version bytes this build writes.
+fn written_version() -> [u8; 4] {
+    let v = ATLAS_FORMAT_VERSION;
+    [v.file_major, v.major, v.minor, v.patch]
+}
 
 /// The same committed artifact `coverage.rs` and `styled_faces.rs` read: the
 /// plain face at 48px, baked before layers existed. It is the regression bar
 /// in file form.
-const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
+const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/legacy/roboto-ascii-48-v3.atlas");
 
 fn atlas() -> FontAtlas {
     FontAtlas::from_bytes(ATLAS_FIXTURE).expect("fixture atlas parses")
@@ -32,28 +39,36 @@ fn atlas() -> FontAtlas {
 
 // ── nothing that exists moved ───────────────────────────────────────────
 
-/// **A file baked before layers existed round-trips byte for byte.**
+/// **A file baked before layers existed still loads, and survives the move
+/// to file-major 5 unchanged.**
 ///
-/// The strongest available form of "no atlas moved", and it needs no bake: the
-/// committed bytes are parsed and re-serialized, and the result is compared to
-/// the file. A version bump, a widened header, a widened entry or a second
-/// layer written where there was one would each show up here as a length or a
-/// byte, and none of them may.
+/// The committed legacy fixture is a v3 file. It loads as `Legacy(3)`, is
+/// re-serialized at `ATLAS_FORMAT_VERSION` (the only version this build
+/// writes), and the v5 file reads back identical in every field and every
+/// pixel; the v5 bytes are then a fixed point.
 #[test]
-fn the_committed_atlas_round_trips_byte_for_byte() {
+fn the_legacy_fixture_survives_a_v5_round_trip() {
     let atlas = atlas();
+    assert_eq!(atlas.read_version, AtlasFileVersion::Legacy(ATLAS_VERSION));
+    assert_eq!(&ATLAS_FIXTURE[4..8], &[3, 0, 0, 0]);
     let out = atlas.to_bytes();
+    let v = ATLAS_FORMAT_VERSION;
+    assert_eq!(&out[4..8], &[v.file_major, v.major, v.minor, v.patch]);
+    let back = FontAtlas::from_bytes(&out).expect("the v5 copy loads");
     assert_eq!(
-        out.len(),
-        ATLAS_FIXTURE.len(),
-        "the serialized length moved"
+        back.read_version,
+        AtlasFileVersion::Split(ATLAS_FORMAT_VERSION)
     );
-    assert!(out == ATLAS_FIXTURE, "the serialized bytes moved");
-    assert_eq!(
-        u32::from_le_bytes(out[4..8].try_into().unwrap()),
-        ATLAS_VERSION,
-        "a single-layer atlas must still be written at the version it always was"
-    );
+    assert_eq!(back.width, atlas.width);
+    assert_eq!(back.height, atlas.height);
+    assert_eq!(back.channels, atlas.channels);
+    assert_eq!(back.layers, atlas.layers);
+    assert_eq!(back.sets, atlas.sets);
+    assert_eq!(back.glyphs, atlas.glyphs);
+    assert_eq!(back.layout, atlas.layout);
+    assert_eq!(back.licences, atlas.licences);
+    assert!(back.pixel_data == atlas.pixel_data, "a pixel moved");
+    assert!(back.to_bytes() == out, "the v5 bytes are not a fixed point");
 }
 
 /// **The shipped atlas is one layer, and every cell is in it.**
@@ -269,19 +284,15 @@ fn two_layer_atlas() -> FontAtlas {
     atlas
 }
 
-/// **A multi-layer atlas is written at v4 and read back whole** - the layer
-/// table, every entry's layer, and every layer's pixels.
+/// **A multi-layer atlas is written at file-major 5 and read back whole** -
+/// the layer table, every entry's layer, and every layer's pixels.
 #[test]
 fn a_layered_atlas_round_trips() {
     let atlas = two_layer_atlas();
     let bytes = atlas.to_bytes();
-    assert_eq!(
-        u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
-        ATLAS_VERSION_LAYERED,
-        "more than one layer must not be written at the single-layer version"
-    );
+    assert_eq!(bytes[4..8], written_version());
 
-    let back = FontAtlas::from_bytes(&bytes).expect("a v4 atlas loads");
+    let back = FontAtlas::from_bytes(&bytes).expect("a v5 atlas loads");
     assert_eq!(back.layers, atlas.layers);
     assert_eq!(back.glyphs, atlas.glyphs);
     assert_eq!(back.pixel_data, atlas.pixel_data);
@@ -313,10 +324,10 @@ fn a_layered_file_could_not_have_been_read_as_a_single_layer_one() {
         bytes.len() > libmsdf::ATLAS_HEADER_SIZE + single_layer_pixels,
         "vacuity: this file is not longer than a single-layer one"
     );
-    assert_ne!(
-        u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
-        ATLAS_VERSION,
-        "a v3 reader would have accepted this file's version and misread its pixels"
+    let as_legacy = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+    assert!(
+        as_legacy != ATLAS_VERSION && as_legacy != ATLAS_VERSION_LAYERED,
+        "a v3/v4 reader would have accepted this file's version and misread it"
     );
 }
 
@@ -345,15 +356,15 @@ fn a_file_declaring_more_layers_than_the_guarantee_is_refused() {
     assert!(err.contains("256"), "{err}");
 }
 
-/// **A runtime shell gains its measured size through the file.**
+/// **A runtime shell round-trips through the file**, layer table and all.
 ///
 /// `FontAtlas::empty` declares `size_px: 0` because nothing was baked at a
-/// declared size; a v3 file has no layer table, so the size is read off the
-/// cells on the way back in. Stated here because it is the one place a
-/// round trip is deliberately not a fixed point, and an undocumented
-/// not-a-fixed-point is how a "harmless" normalisation gets added later.
+/// declared size. Until file-major 5 a single-layer atlas was written at v3,
+/// which has no layer table, so the size came back MEASURED off the cells;
+/// every file now carries its layer table, so the declared zero survives and
+/// the round trip is a fixed point.
 #[test]
-fn a_runtime_shell_gains_its_measured_size_through_the_file() {
+fn a_runtime_shell_round_trips_through_the_file() {
     let mut atlas = FontAtlas::empty(64, 64, 3);
     assert_eq!(atlas.layers, vec![AtlasLayer::new(0, GlyphStyle::Regular)]);
     atlas.insert_entry(GlyphEntry {
@@ -369,7 +380,7 @@ fn a_runtime_shell_gains_its_measured_size_through_the_file() {
         x_margin: 4.8,
     });
     let back = FontAtlas::from_bytes(&atlas.to_bytes()).expect("a runtime shell serializes");
-    assert_eq!(back.layers, vec![AtlasLayer::new(32, GlyphStyle::Regular)]);
+    assert_eq!(back.layers, vec![AtlasLayer::new(0, GlyphStyle::Regular)]);
     assert_eq!(back.glyphs, atlas.glyphs);
     assert_eq!(back.pixel_data, atlas.pixel_data);
 }
@@ -563,10 +574,7 @@ mod baked {
     fn a_styled_bake_round_trips_through_the_file() {
         let atlas = shipped_with_both_styles();
         let bytes = atlas.to_bytes();
-        assert_eq!(
-            u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
-            ATLAS_VERSION_LAYERED
-        );
+        assert_eq!(bytes[4..8], written_version());
         let back = FontAtlas::from_bytes(&bytes).expect("a styled atlas loads");
         assert_eq!(back.layers, atlas.layers);
         assert_eq!(back.glyphs, atlas.glyphs);

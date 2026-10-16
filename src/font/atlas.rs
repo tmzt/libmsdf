@@ -21,8 +21,9 @@ use crate::font::{CellKey, GlyphSet, GlyphStyle};
 /// plausible-looking atlas instead of failing.
 pub const ATLAS_MAGIC: &[u8; 4] = b"hbfa";
 
-/// **The version a SINGLE-LAYER atlas is written at**, and one of the two this
-/// build reads - see [`ATLAS_VERSION_LAYERED`] for the other.
+/// **The LEGACY version a single-layer atlas was written at** until 0.4.0.
+/// Still read; no longer written - every file is now written at
+/// [`ATLAS_FORMAT_VERSION`] (file-major 5).
 ///
 /// * v1 had neither magic nor a set header.
 /// * v2 added [`ATLAS_MAGIC`] and the [`SetMetrics`] table at 32 bytes a row.
@@ -42,9 +43,8 @@ pub const ATLAS_MAGIC: &[u8; 4] = b"hbfa";
 /// re-baked.
 pub const ATLAS_VERSION: u32 = 3;
 
-/// **The version a MULTI-LAYER atlas is written at.** Written only when
-/// [`FontAtlas::layers`] holds more than one; read alongside
-/// [`ATLAS_VERSION`].
+/// **The LEGACY version a multi-layer atlas was written at** until 0.4.0.
+/// Still read alongside [`ATLAS_VERSION`]; no longer written.
 ///
 /// # Why layers cost a version at all, when the ENTRY did not
 ///
@@ -188,9 +188,228 @@ impl core::fmt::Display for LayerNotBaked {
     }
 }
 
-/// Fixed part of the header, before the [`SetMetrics`] table: magic, version,
-/// width, height, glyph count, channels, set count.
+/// Fixed part of a LEGACY (v3 and v4) header, before the [`SetMetrics`]
+/// table: magic, version, width, height, glyph count, channels, set count.
+/// A file-major 5 header is [`ATLAS_HEADER_SIZE_V5`].
 pub const ATLAS_HEADER_SIZE: usize = 28;
+
+// ── The split version field (file-major 5) ──────────────────────────────
+
+/// **File-major of the generation this build writes.** Bytes 4..8 of a file
+/// of this generation are `[file_major, major, minor, patch]`; a legacy v3 or
+/// v4 file's little-endian u32 reads as file-major 3 or 4 with zeros after
+/// it, which is how one reader tells them apart (plan section 4.1).
+pub const ATLAS_FILE_MAJOR: u8 = 5;
+
+/// The newest `(major, minor, patch)` of [`ATLAS_FILE_MAJOR`] this build
+/// reads, and the one it writes.
+pub const ATLAS_FORMAT_VERSION: AtlasFormatVersion = AtlasFormatVersion {
+    file_major: ATLAS_FILE_MAJOR,
+    major: 0,
+    minor: 1,
+    patch: 0,
+};
+
+/// Fixed part of a file-major 5 header: the legacy 28 bytes plus the layer
+/// count and the table count.
+pub const ATLAS_HEADER_SIZE_V5: usize = 36;
+
+/// The most tables a file-major 5 atlas may carry.
+pub const MAX_ATLAS_TABLES: usize = 64;
+
+/// The most table bytes (bodies, unpadded) a file-major 5 atlas may carry.
+pub const MAX_ATLAS_TABLE_BYTES: usize = 16 << 20;
+
+/// The `face` byte of a table that belongs to the whole atlas rather than to
+/// one style's face.
+pub const ATLAS_TABLE_FACE_ALL: u8 = 0xFF;
+
+/// Bytes of one table directory record.
+const TABLE_RECORD_SIZE: usize = 16;
+
+/// All-capital tags that are registered OpenType tables. A table of ours is
+/// never named one of these, so a raw OpenType table cannot pass as ours.
+const OPENTYPE_UPPER_TAGS: &[&[u8; 4]] = &[
+    b"BASE", b"CBDT", b"CBLC", b"CFF ", b"CFF2", b"COLR", b"CPAL", b"DSIG", b"EBDT", b"EBLC",
+    b"EBSC", b"GDEF", b"GPOS", b"GSUB", b"HVAR", b"JSTF", b"MATH", b"MERG", b"MVAR", b"STAT",
+    b"SVG ", b"VARC", b"VORG", b"VVAR",
+];
+
+/// **A file-major 5 format version**: `file_major` then semver
+/// `major.minor.patch`, read the way Cargo reads semver (plan section 4.1 and
+/// its 13:02 and 13:03 EDT amendments).
+///
+/// * From 1.0: a newer major is refused, a newer minor is accepted (it may
+///   only add tables an older reader skips), patch never changes the format.
+/// * Before 1.0 the meanings move one place left: a newer minor is refused,
+///   a newer patch is accepted with any unknown tables skipped.
+/// * 0.0.x is never written and is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AtlasFormatVersion {
+    /// The format generation (5 for this one).
+    pub file_major: u8,
+    /// Semver major, starting at 0.
+    pub major: u8,
+    /// Semver minor.
+    pub minor: u8,
+    /// Semver patch.
+    pub patch: u8,
+}
+
+impl AtlasFormatVersion {
+    /// Whether a reader whose newest known version is `self` reads a file at
+    /// `file`, of the same file-major.
+    pub(crate) fn reads(self, file: AtlasFormatVersion) -> Result<(), &'static str> {
+        if file.file_major != self.file_major {
+            return Err("atlas file-major is not one this build reads");
+        }
+        if file.major == 0 {
+            if (file.major, file.minor) < (0, 1) {
+                return Err("atlas format version 0.0.x was never written by libmsdf");
+            }
+            if (file.major, file.minor) > (self.major, self.minor) {
+                return Err(
+                    "atlas format version is newer than this build reads (a newer minor at \
+                     major 0); update libmsdf",
+                );
+            }
+            return Ok(());
+        }
+        if file.major > self.major {
+            return Err(
+                "atlas format version has a newer major than this build reads; update libmsdf",
+            );
+        }
+        Ok(())
+    }
+}
+
+impl core::fmt::Display for AtlasFormatVersion {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "{}:{}.{}.{}",
+            self.file_major, self.major, self.minor, self.patch
+        )
+    }
+}
+
+/// **The version gate**: whether a field added after `since` is present in a
+/// file at `v` (both `(major, minor)` within one file-major). Every field
+/// added after 0.1 is read behind one of these.
+#[allow(dead_code)]
+pub(crate) const fn gate(v: (u8, u8), since: (u8, u8)) -> bool {
+    v.0 > since.0 || (v.0 == since.0 && v.1 > since.1)
+}
+
+/// **What the version field of a file says**, before anything else is
+/// parsed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AtlasFileVersion {
+    /// A pre-split file: [`ATLAS_VERSION`] (3) or [`ATLAS_VERSION_LAYERED`]
+    /// (4).
+    Legacy(u32),
+    /// File-major 5 and later.
+    Split(AtlasFormatVersion),
+}
+
+impl AtlasFileVersion {
+    /// Reads bytes 0..8 (magic and version) and decides whether this build
+    /// reads the file. Refuses a bad magic, a legacy version other than 3 or
+    /// 4 or with non-zero high bytes, an unknown file-major, a 0.0.x version
+    /// and a version newer than [`ATLAS_FORMAT_VERSION`].
+    pub fn of(data: &[u8]) -> Result<Self, &'static str> {
+        if data.len() < 8 {
+            return Err("atlas data too short");
+        }
+        if &data[0..4] != ATLAS_MAGIC {
+            return Err(
+                "not an 'hbfa' atlas - this is a headerless pre-v2 file, and reading it as v2 \
+                 would silently misparse rather than fail. Re-bake it: cargo run -p libmsdf \
+                 --features cpu-bake --example bake_atlas -- <font.ttf> <out.atlas> 48 6.0",
+            );
+        }
+        let v = [data[4], data[5], data[6], data[7]];
+        match v[0] {
+            3 | 4 => {
+                if v[1..] != [0, 0, 0] {
+                    return Err(
+                        "legacy atlas version with non-zero high bytes; not written by any libmsdf",
+                    );
+                }
+                Ok(Self::Legacy(v[0] as u32))
+            }
+            1 | 2 => Err(
+                "atlas version is not one this build reads - re-bake it with this libmsdf's \
+                 bake_atlas example",
+            ),
+            ATLAS_FILE_MAJOR => {
+                let file = AtlasFormatVersion {
+                    file_major: v[0],
+                    major: v[1],
+                    minor: v[2],
+                    patch: v[3],
+                };
+                ATLAS_FORMAT_VERSION.reads(file)?;
+                Ok(Self::Split(file))
+            }
+            _ => Err(
+                "atlas file-major is not one this build reads; it was written by a newer \
+                 libmsdf, or is not an atlas",
+            ),
+        }
+    }
+}
+
+/// One record of a file-major 5 table directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TableRecord {
+    tag: [u8; 4],
+    face: u8,
+    offset: u32,
+    length: u32,
+}
+
+/// A table body to write: tag, face byte and unpadded bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TableBody {
+    pub(crate) tag: [u8; 4],
+    pub(crate) face: u8,
+    pub(crate) body: Vec<u8>,
+}
+
+/// **Whether `tag` may name a table** (plan section 4.2): first-capital
+/// (`[A-Z][a-z0-9]*` padded with spaces) or all-capital (`[A-Z0-9]*` padded
+/// with spaces), at least one character, and not a registered OpenType
+/// all-capital tag.
+fn check_tag(tag: &[u8; 4]) -> Result<(), &'static str> {
+    let len = tag.iter().position(|&b| b == b' ').unwrap_or(4);
+    if len == 0 || tag[len..].iter().any(|&b| b != b' ') {
+        return Err("atlas table tag is malformed (empty, or a space before a character)");
+    }
+    let body = &tag[..len];
+    let first_capital = body[0].is_ascii_uppercase()
+        && body[1..]
+            .iter()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit());
+    let all_capital = body
+        .iter()
+        .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
+    if !first_capital && !all_capital {
+        return Err(
+            "atlas table tag is neither first-capital nor all-capital (OpenType's lowercase \
+             tables such as cmap, fpgm, prep and cvt are never carried)",
+        );
+    }
+    if OPENTYPE_UPPER_TAGS.contains(&tag) {
+        return Err("atlas table tag is a registered OpenType table tag, which is never carried");
+    }
+    Ok(())
+}
+
+const fn align4(n: usize) -> usize {
+    (n + 3) & !3
+}
 
 /// **What one [`GlyphSet`]'s cells were baked FROM**, in units that do not
 /// mention the bake size.
@@ -456,9 +675,30 @@ pub struct FontAtlas {
     /// [`AtlasLayer`] for what a layer is and [`FontAtlas::layer_index`] for
     /// the lookup that goes the other way.
     pub layers: Vec<AtlasLayer>,
+    /// Layout tables, if the atlas was baked with them
+    /// ([`crate::font::AtlasShaper`] reads them).
+    pub layout: Option<crate::font::AtlasLayout>,
+    /// One record per licence of a baked face (empty for a runtime atlas and
+    /// for a legacy file).
+    pub licences: Vec<crate::font::LicenceRecord>,
+    /// **The version this atlas was read at** - [`ATLAS_FORMAT_VERSION`] for
+    /// one built in memory. [`FontAtlas::to_bytes`] always writes
+    /// [`ATLAS_FORMAT_VERSION`] whatever this says.
+    pub read_version: AtlasFileVersion,
 }
 
 impl FontAtlas {
+    /// The version this atlas was read at ([`ATLAS_FORMAT_VERSION`] for one
+    /// built in memory).
+    pub fn file_version(&self) -> AtlasFileVersion {
+        self.read_version
+    }
+
+    /// Every licence record of this atlas.
+    pub fn licences(&self) -> &[crate::font::LicenceRecord] {
+        &self.licences
+    }
+
     /// The metrics of one glyph set, or `None` for a set this atlas has no
     /// cells from - and for every set of a runtime-populated atlas.
     pub fn set_metrics(&self, set: GlyphSet) -> Option<&SetMetrics> {
@@ -699,68 +939,69 @@ impl FontAtlas {
         rgba
     }
 
-    /// Serialize the atlas to bytes for embedding / baking to disk.
+    /// Serialize the atlas to bytes for embedding / baking to disk, at
+    /// [`ATLAS_FORMAT_VERSION`] (file-major 5), whatever version it was read
+    /// at:
     ///
-    /// Format ([`ATLAS_MAGIC`]), at [`ATLAS_VERSION`] for one layer:
     /// ```text
-    /// [4b magic "hbfa"][4b version]                      -- 8
-    /// [4b width][4b height][4b num_glyphs][4b channels]  -- 16
-    /// [4b set_count]                                     -- 4   = 28 byte header
-    /// [SetMetrics * set_count]                           -- 36 bytes each
-    /// [GlyphEntry * num_glyphs]                          -- 32 bytes each
-    /// [pixel_data]                                       -- width*height*channels bytes
+    /// offset  size
+    /// 0       4    magic "hbfa"
+    /// 4       4    version [5, 0, 1, 0]
+    /// 8       4    width          12  4  height
+    /// 16      4    num_glyphs     20  4  channels
+    /// 24      4    set_count      28  4  layer_count (1..=256)
+    /// 32      4    table_count (0..=64)
+    /// 36           [AtlasLayer   x layer_count]   4 bytes each
+    ///              [SetMetrics   x set_count]    36 bytes each
+    ///              [GlyphEntry   x num_glyphs]   32 bytes each
+    ///              [TableRecord  x table_count]  16 bytes each
+    ///              zero padding to a multiple of 4
+    ///              table bodies, in directory order, each 4-aligned and
+    ///              zero-padded
+    ///              pixel data: width * height * channels * layer_count bytes
     /// ```
     ///
-    /// ...and at [`ATLAS_VERSION_LAYERED`] for more than one, which inserts a
-    /// layer count and the [`AtlasLayer`] table between the fixed header and
-    /// the sets, and multiplies the pixel data by the layer count:
-    /// ```text
-    /// [ ...the 28 byte header, version 4... ]
-    /// [4b layer_count]                                   -- 4   = 32 byte header
-    /// [AtlasLayer * layer_count]                         -- 4 bytes each
-    /// [SetMetrics * set_count]                           -- 36 bytes each
-    /// [GlyphEntry * num_glyphs]                          -- 32 bytes each
-    /// [pixel_data]                                       -- w*h*channels*layers bytes
-    /// ```
+    /// A TableRecord is `tag [u8; 4]`, `face u8` (a [`GlyphStyle`] ordinal, or
+    /// [`ATLAS_TABLE_FACE_ALL`]), `flags u8 = 0`, `reserved u16 = 0`,
+    /// `offset u32`, `length u32` (unpadded). Records are sorted by
+    /// `(face, tag)`.
     ///
-    /// **The version follows the CONTENT.** A single-layer atlas is written at
-    /// v3, byte for byte what it was before layers existed - which is why the
-    /// three committed artifacts still pass `bake_atlas --check` without being
-    /// re-baked. [`ATLAS_VERSION_LAYERED`] says why the multi-layer case
-    /// cannot share that version.
+    /// **Every file is written at one version.** Until 0.4.0 a single-layer
+    /// atlas was written at v3 and a layered one at v4; both are still read
+    /// ([`FontAtlas::from_bytes`]), and neither is written any more.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let layered = self.layers.len() > 1;
-        let layer_table_size = if layered {
-            4 + self.layers.len() * AtlasLayer::PACKED_SIZE
-        } else {
-            0
-        };
-        let sets_size = self.sets.len() * SetMetrics::PACKED_SIZE;
-        let entries_size = self.glyphs.len() * GlyphEntry::PACKED_SIZE;
-        let total =
-            ATLAS_HEADER_SIZE + layer_table_size + sets_size + entries_size + self.pixel_data.len();
+        self.write_v5(&self.table_bodies())
+    }
 
-        let mut buf = Vec::with_capacity(total);
+    /// The tables this atlas carries, sorted by `(face, tag)`.
+    pub(crate) fn table_bodies(&self) -> Vec<TableBody> {
+        let mut tables: Vec<TableBody> = Vec::new();
+        tables.extend(crate::font::layout::encode_tables(self.layout.as_ref()));
+        tables.extend(crate::font::licence::encode_tables(&self.licences));
+        tables.sort_by(|a, b| (a.face, a.tag).cmp(&(b.face, b.tag)));
+        tables
+    }
+
+    /// The file-major 5 writer, over an explicit list of table bodies.
+    pub(crate) fn write_v5(&self, tables: &[TableBody]) -> Vec<u8> {
+        let layers: Vec<AtlasLayer> = if self.layers.is_empty() {
+            vec![AtlasLayer::new(0, GlyphStyle::Regular)]
+        } else {
+            self.layers.clone()
+        };
+        let v = ATLAS_FORMAT_VERSION;
+        let mut buf = Vec::new();
         buf.extend_from_slice(ATLAS_MAGIC);
-        buf.extend_from_slice(
-            &if layered {
-                ATLAS_VERSION_LAYERED
-            } else {
-                ATLAS_VERSION
-            }
-            .to_le_bytes(),
-        );
+        buf.extend_from_slice(&[v.file_major, v.major, v.minor, v.patch]);
         buf.extend_from_slice(&self.width.to_le_bytes());
         buf.extend_from_slice(&self.height.to_le_bytes());
         buf.extend_from_slice(&(self.glyphs.len() as u32).to_le_bytes());
         buf.extend_from_slice(&self.channels.to_le_bytes());
         buf.extend_from_slice(&(self.sets.len() as u32).to_le_bytes());
-
-        if layered {
-            buf.extend_from_slice(&(self.layers.len() as u32).to_le_bytes());
-            for layer in &self.layers {
-                buf.extend_from_slice(&layer.to_bytes());
-            }
+        buf.extend_from_slice(&(layers.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&(tables.len() as u32).to_le_bytes());
+        for layer in &layers {
+            buf.extend_from_slice(&layer.to_bytes());
         }
         for set in &self.sets {
             buf.extend_from_slice(&set.to_bytes());
@@ -768,12 +1009,29 @@ impl FontAtlas {
         for entry in &self.glyphs {
             buf.extend_from_slice(&entry.to_bytes());
         }
-
+        let dir_end = buf.len() + tables.len() * TABLE_RECORD_SIZE;
+        let mut offset = align4(dir_end);
+        for t in tables {
+            buf.extend_from_slice(&t.tag);
+            buf.push(t.face);
+            buf.push(0);
+            buf.extend_from_slice(&0u16.to_le_bytes());
+            buf.extend_from_slice(&(offset as u32).to_le_bytes());
+            buf.extend_from_slice(&(t.body.len() as u32).to_le_bytes());
+            offset = align4(offset + t.body.len());
+        }
+        buf.resize(align4(buf.len()), 0);
+        for t in tables {
+            buf.extend_from_slice(&t.body);
+            buf.resize(align4(buf.len()), 0);
+        }
         buf.extend_from_slice(&self.pixel_data);
         buf
     }
 
-    /// Deserialize from bytes.
+    /// Deserialize from bytes: a legacy v3 or v4 file, or file-major 5 up to
+    /// [`ATLAS_FORMAT_VERSION`] ([`AtlasFileVersion::of`] says which, and
+    /// refuses everything else).
     ///
     /// # The first eight bytes are a REFUSAL, not decoration
     ///
@@ -787,63 +1045,73 @@ impl FontAtlas {
     /// the failure this repo has already paid for twice (see `bake_atlas`'s
     /// `--check`), so the break here is deliberate and loud, and the message
     /// says which command fixes it.
+    ///
+    /// # Tables
+    ///
+    /// A file-major 5 directory is checked before any body is read: sorted
+    /// unique `(face, tag)` records, bodies back to back at 4-byte alignment,
+    /// zero padding, at most [`MAX_ATLAS_TABLES`] tables and
+    /// [`MAX_ATLAS_TABLE_BYTES`] bytes, well-formed tags that are not OpenType
+    /// tables. A table whose tag this build does not know is skipped; a known
+    /// one that fails to parse refuses the file.
     pub fn from_bytes(data: &[u8]) -> Result<Self, &'static str> {
-        if data.len() < ATLAS_HEADER_SIZE {
+        let version = AtlasFileVersion::of(data)?;
+        let header_size = match version {
+            AtlasFileVersion::Legacy(_) => ATLAS_HEADER_SIZE,
+            AtlasFileVersion::Split(_) => ATLAS_HEADER_SIZE_V5,
+        };
+        if data.len() < header_size {
             return Err("atlas data too short");
         }
-        if &data[0..4] != ATLAS_MAGIC {
-            return Err(
-                "not an 'hbfa' atlas - this is a headerless pre-v2 file, and reading it as v2 \
-                 would silently misparse rather than fail. Re-bake it: cargo run -p libmsdf \
-                 --features cpu-bake --example bake_atlas -- <font.ttf> <out.atlas> 48 6.0",
-            );
-        }
-        let version = u32::from_le_bytes(data[4..8].try_into().unwrap());
-        if version != ATLAS_VERSION && version != ATLAS_VERSION_LAYERED {
-            return Err(
-                "atlas version is not one this build reads - re-bake it with this libmsdf's \
-                 bake_atlas example",
-            );
-        }
+        let u32_at = |o: usize| u32::from_le_bytes(data[o..o + 4].try_into().unwrap());
+        let width = u32_at(8);
+        let height = u32_at(12);
+        let num_glyphs = u32_at(16) as usize;
+        let channels = u32_at(20);
+        let set_count = u32_at(24) as usize;
 
-        let width = u32::from_le_bytes(data[8..12].try_into().unwrap());
-        let height = u32::from_le_bytes(data[12..16].try_into().unwrap());
-        let num_glyphs = u32::from_le_bytes(data[16..20].try_into().unwrap()) as usize;
-        let channels = u32::from_le_bytes(data[20..24].try_into().unwrap());
-        let set_count = u32::from_le_bytes(data[24..28].try_into().unwrap()) as usize;
-
-        // **The layer table, present only at v4.** A v3 file is single-layer
-        // by definition; its one layer is read off the cells below rather than
-        // guessed at, so the two paths converge on the same `layers` vector
-        // and nothing downstream has to ask which version it came from.
-        let (layer_count, layers_end) = if version == ATLAS_VERSION_LAYERED {
-            if data.len() < ATLAS_HEADER_SIZE + 4 {
-                return Err("atlas data too short for the layer count");
+        // **The layer table**: absent at v3 (one layer, measured off the
+        // cells below), after a count at v4, after the v5 header at v5.
+        let (layer_count, layers_start, table_count) = match version {
+            AtlasFileVersion::Legacy(ATLAS_VERSION) => (1, ATLAS_HEADER_SIZE, 0),
+            AtlasFileVersion::Legacy(_) => {
+                if data.len() < ATLAS_HEADER_SIZE + 4 {
+                    return Err("atlas data too short for the layer count");
+                }
+                (u32_at(ATLAS_HEADER_SIZE) as usize, ATLAS_HEADER_SIZE + 4, 0)
             }
-            let n = u32::from_le_bytes(
-                data[ATLAS_HEADER_SIZE..ATLAS_HEADER_SIZE + 4]
-                    .try_into()
-                    .unwrap(),
-            ) as usize;
-            if n == 0 {
+            AtlasFileVersion::Split(_) => (
+                u32_at(28) as usize,
+                ATLAS_HEADER_SIZE_V5,
+                u32_at(32) as usize,
+            ),
+        };
+        let has_layer_table = version != AtlasFileVersion::Legacy(ATLAS_VERSION);
+        if has_layer_table {
+            if layer_count == 0 {
                 return Err("atlas declares zero layers - every atlas has at least one");
             }
-            if n > MAX_ATLAS_LAYERS {
+            if layer_count > MAX_ATLAS_LAYERS {
                 return Err(
                     "atlas declares more layers than maxTextureArrayLayers guarantees (256)",
                 );
             }
-            (n, ATLAS_HEADER_SIZE + 4 + n * AtlasLayer::PACKED_SIZE)
+        }
+        if table_count > MAX_ATLAS_TABLES {
+            return Err("atlas declares more than 64 tables");
+        }
+        let layers_end = if has_layer_table {
+            layers_start + layer_count * AtlasLayer::PACKED_SIZE
         } else {
-            (1, ATLAS_HEADER_SIZE)
+            layers_start
         };
         if data.len() < layers_end {
             return Err("atlas data too short for the layer table");
         }
         let mut layers = Vec::with_capacity(layer_count);
-        if version == ATLAS_VERSION_LAYERED {
+        if has_layer_table {
             for i in 0..layer_count {
-                let offset = ATLAS_HEADER_SIZE + 4 + i * AtlasLayer::PACKED_SIZE;
+                let offset = layers_start + i * AtlasLayer::PACKED_SIZE;
                 layers.push(AtlasLayer::from_bytes(
                     &data[offset..offset + AtlasLayer::PACKED_SIZE],
                 )?);
@@ -921,7 +1189,14 @@ impl FontAtlas {
             layers.push(AtlasLayer::new(size_px, style));
         }
 
-        let pixel_start = entries_end;
+        // **The table directory and bodies** (file-major 5 only).
+        let (pixel_start, records) = if table_count > 0 || header_size == ATLAS_HEADER_SIZE_V5 {
+            Self::read_directory(data, entries_end, table_count)?
+        } else {
+            (entries_end, Vec::new())
+        };
+        let (layout, licences) = Self::read_tables(data, &records)?;
+
         let expected_pixels =
             (width as usize) * (height as usize) * (channels as usize) * layer_count;
         if data.len() < pixel_start + expected_pixels {
@@ -938,7 +1213,104 @@ impl FontAtlas {
             glyphs,
             sets,
             layers,
+            layout,
+            licences,
+            read_version: version,
         })
+    }
+
+    /// Read and check a file-major 5 table directory that starts at
+    /// `dir_start`, returning where the pixel data starts and the records.
+    fn read_directory(
+        data: &[u8],
+        dir_start: usize,
+        table_count: usize,
+    ) -> Result<(usize, Vec<TableRecord>), &'static str> {
+        let dir_end = dir_start + table_count * TABLE_RECORD_SIZE;
+        if data.len() < dir_end {
+            return Err("atlas data too short for the table directory");
+        }
+        let mut records: Vec<TableRecord> = Vec::with_capacity(table_count);
+        for i in 0..table_count {
+            let r = &data[dir_start + i * TABLE_RECORD_SIZE..][..TABLE_RECORD_SIZE];
+            let tag: [u8; 4] = r[0..4].try_into().unwrap();
+            check_tag(&tag)?;
+            let face = r[4];
+            if face != ATLAS_TABLE_FACE_ALL && GlyphStyle::try_from_ordinal(face).is_none() {
+                return Err("atlas table names a face that is neither a style nor the atlas");
+            }
+            if r[5] != 0 {
+                return Err("atlas table record has non-zero flags (reserved)");
+            }
+            if r[6] != 0 || r[7] != 0 {
+                return Err("atlas table record has non-zero reserved bytes");
+            }
+            let rec = TableRecord {
+                tag,
+                face,
+                offset: u32::from_le_bytes(r[8..12].try_into().unwrap()),
+                length: u32::from_le_bytes(r[12..16].try_into().unwrap()),
+            };
+            if let Some(prev) = records.last()
+                && (prev.face, prev.tag) >= (rec.face, rec.tag)
+            {
+                return Err("atlas table records are not sorted by (face, tag), or one repeats");
+            }
+            records.push(rec);
+        }
+        let total: usize = records.iter().map(|r| r.length as usize).sum();
+        if total > MAX_ATLAS_TABLE_BYTES {
+            return Err("atlas tables exceed 16 MiB");
+        }
+        // Bodies back to back, each at the 4-aligned end of the one before;
+        // every byte between them is padding and must be zero.
+        let mut cursor = dir_end;
+        for rec in &records {
+            let expected = align4(cursor);
+            if rec.offset as usize != expected {
+                return Err(
+                    "atlas table body is not where the directory rule puts it (misaligned, \
+                     overlapping or out of order)",
+                );
+            }
+            if data.len() < expected || data[cursor..expected].iter().any(|&b| b != 0) {
+                return Err("atlas table padding is not zero");
+            }
+            cursor = expected + rec.length as usize;
+            if data.len() < cursor {
+                return Err("atlas data too short for a table body");
+            }
+        }
+        let pixel_start = align4(cursor);
+        if data.len() < pixel_start || data[cursor..pixel_start].iter().any(|&b| b != 0) {
+            return Err("atlas table padding is not zero");
+        }
+        Ok((pixel_start, records))
+    }
+
+    /// Parse the tables this build knows; skip the rest (their bounds were
+    /// checked by [`FontAtlas::read_directory`]).
+    #[allow(clippy::type_complexity)]
+    fn read_tables(
+        data: &[u8],
+        records: &[TableRecord],
+    ) -> Result<
+        (
+            Option<crate::font::AtlasLayout>,
+            Vec<crate::font::LicenceRecord>,
+        ),
+        &'static str,
+    > {
+        let bodies: Vec<(&[u8; 4], u8, &[u8])> = records
+            .iter()
+            .map(|r| {
+                let start = r.offset as usize;
+                (&r.tag, r.face, &data[start..start + r.length as usize])
+            })
+            .collect();
+        let layout = crate::font::layout::decode_tables(&bodies)?;
+        let licences = crate::font::licence::decode_tables(&bodies)?;
+        Ok((layout, licences))
     }
 
     /// Build an atlas shell (no pixel data yet) for dynamic population via
@@ -996,6 +1368,9 @@ impl FontAtlas {
             // knows it is a fallback, rather than a plausible-looking number
             // it cannot tell apart from a measured one.
             sets: Vec::new(),
+            layout: None,
+            licences: Vec::new(),
+            read_version: AtlasFileVersion::Split(ATLAS_FORMAT_VERSION),
         }
     }
 
@@ -2117,6 +2492,9 @@ impl FontAtlasBuilder {
             glyphs,
             sets,
             layers,
+            layout: None,
+            licences: Vec::new(),
+            read_version: AtlasFileVersion::Split(ATLAS_FORMAT_VERSION),
         })
     }
 
@@ -2229,19 +2607,15 @@ mod tests {
         );
     }
 
-    /// A file whose version is neither of ours stops too, for the same reason.
-    ///
-    /// Written against [`ATLAS_VERSION_LAYERED`] rather than
-    /// [`ATLAS_VERSION`] because "one past what this build writes" is now two
-    /// numbers, and the one that must be refused is the one past the HIGHER.
+    /// A file whose file-major is past ours stops too, for the same reason.
     #[test]
-    fn a_future_version_is_refused() {
+    fn a_future_file_major_is_refused() {
         let mut buf = Vec::new();
         buf.extend_from_slice(ATLAS_MAGIC);
-        buf.extend_from_slice(&(ATLAS_VERSION_LAYERED + 1).to_le_bytes());
-        buf.resize(ATLAS_HEADER_SIZE, 0);
-        let err = FontAtlas::from_bytes(&buf).expect_err("a v5 atlas must not load");
-        assert!(err.contains("version"), "{err}");
+        buf.extend_from_slice(&[ATLAS_FILE_MAJOR + 1, 0, 0, 0]);
+        buf.resize(ATLAS_HEADER_SIZE_V5, 0);
+        let err = FontAtlas::from_bytes(&buf).expect_err("a file-major 6 atlas must not load");
+        assert!(err.contains("file-major"), "{err}");
     }
 
     /// **Both versions this build reads are read, and nothing between them is
@@ -2670,5 +3044,236 @@ mod tests {
             "adding a letter should push the marker's cell along - if it does not, \
              this test cannot see movement and the assertions above prove nothing"
         );
+    }
+}
+
+/// **The file-major 5 container**: the version field and the table
+/// directory (plan section 4.1 with its 13:03 EDT test table, and 4.2).
+#[cfg(test)]
+mod format_v5 {
+    use super::*;
+
+    /// A minimal one-layer 1x1 atlas at file-major 5, version bytes replaced.
+    fn v5_with_version(v: [u8; 4], tables: &[TableBody]) -> Vec<u8> {
+        let mut bytes = FontAtlas::empty(1, 1, 3).write_v5(tables);
+        bytes[4..8].copy_from_slice(&v);
+        bytes
+    }
+
+    /// A minimal legacy file: 28-byte header, (v4: layer count and one
+    /// layer), no sets, no glyphs, 1x1x3 pixels.
+    fn legacy(v: [u8; 4]) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(ATLAS_MAGIC);
+        b.extend_from_slice(&v);
+        for n in [1u32, 1, 0, 3, 0] {
+            b.extend_from_slice(&n.to_le_bytes());
+        }
+        if v[0] == 4 {
+            b.extend_from_slice(&1u32.to_le_bytes());
+            b.extend_from_slice(&AtlasLayer::new(48, GlyphStyle::Bold).to_bytes());
+        }
+        b.extend_from_slice(&[7, 8, 9]);
+        b
+    }
+
+    fn table(tag: &[u8; 4], face: u8, body: &[u8]) -> TableBody {
+        TableBody {
+            tag: *tag,
+            face,
+            body: body.to_vec(),
+        }
+    }
+
+    #[test]
+    fn legacy_rows() {
+        let v3 = FontAtlas::from_bytes(&legacy([3, 0, 0, 0])).expect("legacy v3");
+        assert_eq!(v3.read_version, AtlasFileVersion::Legacy(3));
+        // One layer, measured off the (absent) cells.
+        assert_eq!(v3.layers, vec![AtlasLayer::new(0, GlyphStyle::Regular)]);
+        assert_eq!(v3.pixel_data, vec![7, 8, 9]);
+
+        let v4 = FontAtlas::from_bytes(&legacy([4, 0, 0, 0])).expect("legacy v4");
+        assert_eq!(v4.read_version, AtlasFileVersion::Legacy(4));
+        assert_eq!(v4.layers, vec![AtlasLayer::new(48, GlyphStyle::Bold)]);
+        assert_eq!(v4.pixel_data, vec![7, 8, 9]);
+
+        let err = FontAtlas::from_bytes(&legacy([3, 0, 1, 0])).expect_err("high bytes");
+        assert!(err.contains("non-zero high bytes"), "{err}");
+        assert!(FontAtlas::from_bytes(&legacy([2, 0, 0, 0])).is_err());
+        let err = FontAtlas::from_bytes(&v5_with_version([0, 0, 0, 0], &[])).expect_err("0");
+        assert!(err.contains("file-major"), "{err}");
+    }
+
+    #[test]
+    fn split_rows_against_this_reader() {
+        let ok = FontAtlas::from_bytes(&v5_with_version([5, 0, 1, 0], &[])).expect("5:0.1.0");
+        assert_eq!(
+            ok.read_version,
+            AtlasFileVersion::Split(ATLAS_FORMAT_VERSION)
+        );
+        assert_eq!(ok.layers, vec![AtlasLayer::new(0, GlyphStyle::Regular)]);
+        assert_eq!(ok.pixel_data, vec![0, 0, 0]);
+
+        // 0.1.1 with one table this reader does not know: skipped.
+        let newer_patch = v5_with_version(
+            [5, 0, 1, 1],
+            &[table(b"Zzzz", ATLAS_TABLE_FACE_ALL, b"abcde")],
+        );
+        let a = FontAtlas::from_bytes(&newer_patch).expect("5:0.1.1 with an unknown table");
+        assert_eq!(a.layout, None);
+        assert!(a.licences.is_empty());
+        assert_eq!(a.pixel_data, vec![0, 0, 0]);
+
+        // 0.1.7 parses as 0.1.0 does.
+        let p7 = FontAtlas::from_bytes(&v5_with_version([5, 0, 1, 7], &[])).expect("5:0.1.7");
+        assert_eq!(p7.layers, ok.layers);
+        assert_eq!(p7.pixel_data, ok.pixel_data);
+
+        for (v, why) in [
+            ([5, 0, 0, 3], "0.0.x"),
+            ([5, 0, 2, 0], "newer"),
+            ([5, 1, 0, 0], "newer major"),
+            ([6, 0, 0, 0], "file-major"),
+        ] {
+            let err = FontAtlas::from_bytes(&v5_with_version(v, &[])).expect_err("refused");
+            assert!(err.contains(why), "{v:?}: {err}");
+        }
+    }
+
+    /// The hypothetical-reader rows: unit tests of the acceptance rule and the
+    /// gate, not of a real 0.2 or 1.0 format.
+    #[test]
+    fn hypothetical_readers() {
+        let fv = |major, minor, patch| AtlasFormatVersion {
+            file_major: 5,
+            major,
+            minor,
+            patch,
+        };
+        // A 5:0.2 reader with a field X gated on `v > (0, 1)`.
+        let reader_02 = fv(0, 2, 0);
+        let read_x = |file: AtlasFormatVersion| -> Option<u32> {
+            reader_02.reads(file).ok()?;
+            Some(if gate((file.major, file.minor), (0, 1)) {
+                42
+            } else {
+                0
+            })
+        };
+        assert_eq!(read_x(fv(0, 1, 0)), Some(0), "0.1: X takes its default");
+        assert_eq!(read_x(fv(0, 2, 0)), Some(42), "0.2: X is read");
+        // A 5:1.0 reader.
+        let reader_10 = fv(1, 0, 0);
+        assert!(reader_10.reads(fv(1, 2, 0)).is_ok(), "newer minor from 1.0");
+        assert!(reader_10.reads(fv(1, 0, 5)).is_ok(), "newer patch");
+        assert!(reader_10.reads(fv(2, 0, 0)).is_err(), "newer major");
+        assert!(reader_10.reads(fv(0, 1, 0)).is_ok(), "older 0.x file");
+        assert!(reader_10.reads(fv(0, 0, 1)).is_err(), "0.0.x");
+        assert!(!gate((0, 1), (0, 1)) && gate((1, 0), (0, 9)));
+    }
+
+    #[test]
+    fn unknown_tags_are_skipped() {
+        let bytes = FontAtlas::empty(2, 2, 3).write_v5(&[
+            table(b"ABC1", 0, b"x"),
+            table(b"Zz  ", 1, b"0123456789"),
+            table(b"Qqqq", ATLAS_TABLE_FACE_ALL, b""),
+        ]);
+        let a = FontAtlas::from_bytes(&bytes).expect("unknown tables are skipped");
+        assert_eq!(a.pixel_data.len(), 12);
+    }
+
+    #[test]
+    fn forbidden_and_malformed_tags_are_refused() {
+        for (tag, why) in [
+            (b"GSUB", "registered OpenType"),
+            (b"CFF ", "registered OpenType"),
+            (b"cmap", "neither first-capital"),
+            (b"fpgm", "neither first-capital"),
+            (b"prep", "neither first-capital"),
+            (b"cvt ", "neither first-capital"),
+            (b"GsuB", "neither first-capital"),
+            (b" Abc", "malformed"),
+            (b"A Bc", "malformed"),
+        ] {
+            let bytes = FontAtlas::empty(1, 1, 3).write_v5(&[table(tag, 0, b"data")]);
+            let err = FontAtlas::from_bytes(&bytes).expect_err("refused");
+            assert!(err.contains(why), "{tag:?}: {err}");
+        }
+    }
+
+    /// The offset of the first directory record in a minimal 1x1 atlas.
+    const DIR: usize = ATLAS_HEADER_SIZE_V5 + AtlasLayer::PACKED_SIZE;
+
+    #[test]
+    fn misplaced_bodies_and_dirty_padding_are_refused() {
+        let two = [table(b"Aaaa", 0, b"xyz"), table(b"Bbbb", 0, b"pq")];
+        let good = FontAtlas::empty(1, 1, 3).write_v5(&two);
+        assert!(FontAtlas::from_bytes(&good).is_ok());
+        let off = |b: &[u8], i: usize| {
+            u32::from_le_bytes(b[DIR + i * 16 + 8..DIR + i * 16 + 12].try_into().unwrap())
+        };
+        let set_off = |b: &mut Vec<u8>, i: usize, v: u32| {
+            b[DIR + i * 16 + 8..DIR + i * 16 + 12].copy_from_slice(&v.to_le_bytes())
+        };
+
+        // Overlapping: the second body starts inside the first.
+        let mut overlap = good.clone();
+        let first = off(&good, 0);
+        set_off(&mut overlap, 1, first);
+        let err = FontAtlas::from_bytes(&overlap).expect_err("overlap");
+        assert!(err.contains("directory rule"), "{err}");
+
+        // Misaligned: the first body starts 1 byte late.
+        let mut misaligned = good.clone();
+        set_off(&mut misaligned, 0, first + 1);
+        let err = FontAtlas::from_bytes(&misaligned).expect_err("misaligned");
+        assert!(err.contains("directory rule"), "{err}");
+
+        // Non-zero padding after the 3-byte first body.
+        let mut dirty = good.clone();
+        dirty[first as usize + 3] = 1;
+        let err = FontAtlas::from_bytes(&dirty).expect_err("padding");
+        assert!(err.contains("padding"), "{err}");
+
+        // Records out of order.
+        let unsorted = FontAtlas::empty(1, 1, 3).write_v5(&[two[1].clone(), two[0].clone()]);
+        let err = FontAtlas::from_bytes(&unsorted).expect_err("unsorted");
+        assert!(err.contains("sorted"), "{err}");
+
+        // A repeated (face, tag).
+        let repeated = FontAtlas::empty(1, 1, 3).write_v5(&[two[0].clone(), two[0].clone()]);
+        let err = FontAtlas::from_bytes(&repeated).expect_err("repeat");
+        assert!(err.contains("repeats"), "{err}");
+
+        // Non-zero flags.
+        let mut flagged = good.clone();
+        flagged[DIR + 5] = 1;
+        let err = FontAtlas::from_bytes(&flagged).expect_err("flags");
+        assert!(err.contains("flags"), "{err}");
+
+        // A face byte that is neither a style nor the atlas.
+        let err =
+            FontAtlas::from_bytes(&FontAtlas::empty(1, 1, 3).write_v5(&[table(b"Aaaa", 9, b"")]))
+                .expect_err("face");
+        assert!(err.contains("face"), "{err}");
+    }
+
+    #[test]
+    fn too_many_tables_is_refused() {
+        let mut bytes = FontAtlas::empty(1, 1, 3).write_v5(&[]);
+        bytes[32..36].copy_from_slice(&65u32.to_le_bytes());
+        let err = FontAtlas::from_bytes(&bytes).expect_err("65 tables");
+        assert!(err.contains("64"), "{err}");
+    }
+
+    #[test]
+    fn a_built_atlas_says_it_is_current() {
+        assert_eq!(
+            FontAtlas::empty(1, 1, 3).file_version(),
+            AtlasFileVersion::Split(ATLAS_FORMAT_VERSION)
+        );
+        assert_eq!(ATLAS_FORMAT_VERSION.to_string(), "5:0.1.0");
     }
 }
