@@ -290,3 +290,13 @@ the 16-column bake stands.
 read-only highbay review ("it will adapt, its custom symbols aren't font
 sourced"). highbay needs only feature lines; its icon and marker codepoint
 tables stay ungated. No code changes for the bundled fonts plan yet.
+
+## 2026-10-16 13:42 EDT — Bundled fonts plan: `CVRG` confirmed; correction
+
+Plan: `docs/design/20261016_02_BUNDLED_FONT_FEATURES_PLAN.md` (Draft;
+approved). A note-amendment records the owner's confirmation ("keep CVRG")
+of the separate `CVRG` coverage table, rather than new `Head` fields.
+
+**Correction:** the previous addendum ("Atlas layout tables: coverage
+parameter (departure); bundled fonts coverage groups") refers to the
+plan's "13:4x EDT amendment". It is the **13:40 EDT** amendment.
