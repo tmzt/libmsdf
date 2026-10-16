@@ -61,3 +61,88 @@ which cannot name its own hash. No dependency changed version.
   sd_path_fill}`, re-exported from `core`; the crate root re-exports
   `DRAW_TYPE_PATH_FILL` and `PARAM_BANK_CAPACITY`. `sdf_eval_with_params`
   evaluates draw type 12.
+
+## 0.4.0 — 2026-10-16 (tag `v0.4.0`)
+
+Atlas-carried layout tables (`docs/design/20261016_01_ATLAS_LAYOUT_TABLES_PLAN.md`)
+and bundled fonts as optional features
+(`docs/design/20261016_02_BUNDLED_FONT_FEATURES_PLAN.md`), in one release.
+The workspace now has two crates versioned in lockstep, `libmsdf` and
+`libmsdf-font`, both 0.4.0 and both covered by this entry and this tag. The
+commit is the one tagged `v0.4.0`. No dependency changed version (Rule
+5.5): msdfgen and ttf-parser 0.18 are pinned to the versions already in use.
+
+**Format:** writes atlas format 5:0.1.0 (file-major 5; tables `Head`,
+`Cmap`, `Hmtx`, `Gsub`, `Gpos`, `LICS`, `LICT`, `CVRG`); reads the legacy
+v3 and v4 files and 5:0.1.x (unknown tables skipped). Releases before 0.4.0
+refuse every file this one writes.
+
+- **Breaking (format):** every atlas is written at 5:0.1.0, whatever its
+  layer count; v3 and v4 are no longer written. A runtime shell
+  (`FontAtlas::empty`) now keeps its declared `size_px: 0` through a round
+  trip instead of having the size measured off its cells.
+- **Breaking:** `FontAtlas` gains the public fields `layout:
+  Option<AtlasLayout>`, `licences: Vec<LicenceRecord>`, `read_version:
+  AtlasFileVersion` and `coverage: Vec<FaceCoverage>`: a struct literal
+  outside libmsdf needs them (or `..FontAtlas::empty(..)`).
+- **Breaking:** `FontAtlasBuilder::build` refuses a bake with a style that
+  no licence covers; call `add_licence` (`bake_atlas --licence`).
+- **Breaking:** rustybuzz and ttf-parser 0.25 are optional behind a new
+  `shaper` feature, on by default. A consumer with `default-features =
+  false` loses `TextShaper`, `StyledShaper`, `NoFaceForStyle`,
+  `FontAtlasBuilder`, `glyph_projection`, `cap_height`, `extract_outline`,
+  `bundled_style_face` and the layout extraction until it enables `shaper`.
+- **Breaking:** `ROBOTO_REGULAR_ASCII`, `ROBOTO_BOLD_ASCII`,
+  `ROBOTO_ITALIC_ASCII` and `ROBOTO_ASCII_MSYMBOLS` exist only with their
+  `font-apache-roboto-*` feature and `shaper`. Migration: enable
+  `fonts-apache-roboto`, or the single features used.
+- **Breaking:** `bundled_style_face` returns `None`, and
+  `StyledShaper::bundled` carries no face, for a style whose feature is off.
+- Changed: the font module is the `libmsdf-font` crate, re-exported as
+  `libmsdf::font` with every path unchanged; `LINE_BOX_RATIO` is defined
+  there and re-exported as `libmsdf::drawlist::LINE_BOX_RATIO`; `cpu-bake`
+  enables `shaper` and `libmsdf-font/bake`.
+- Changed (not API): `fonts/LICENSE-Roboto.txt` and
+  `fonts/LICENSE-MaterialSymbols.txt` are replaced by
+  `FONTS-LICENSE-APACHE.txt`; `FONTS-LICENSE-OFL.txt` is added.
+- Added, the format: `AtlasFormatVersion`, `AtlasFileVersion` (`of`),
+  `ATLAS_FILE_MAJOR`, `ATLAS_FORMAT_VERSION`, `ATLAS_HEADER_SIZE_V5`,
+  `MAX_ATLAS_TABLES`, `MAX_ATLAS_TABLE_BYTES`, `ATLAS_TABLE_FACE_ALL`;
+  `FontAtlas::{file_version, licences, coverage, try_to_bytes, padded_to}`.
+- Added, layout: `AtlasLayout` (`from_faces`, `face`, `faces`, `styles`),
+  `FaceLayout` (`validate`; `extract` with `shaper`), `GsubLookup`,
+  `GsubRules`, `Ligature`, `ContextSide`, `ContextSingle` and the layout
+  limits (`MIN_UNITS_PER_EM`, `MAX_UNITS_PER_EM`, `MAX_GSUB_LOOKUPS`,
+  `MIN_LIGATURE_COMPONENTS`, `MAX_LIGATURE_COMPONENTS`, `LAYOUT_TAGS`);
+  `AtlasShaper` (`new`, `from_face`, `style`, `face`, `glyph_id_for_char`,
+  `shape`), `RunShaper` (implemented by `AtlasShaper` and `TextShaper`),
+  `NoLayout`, `is_default_ignorable`; with `shaper`: `LayoutOptions`
+  (`extra_features`, `coverage`), `LayoutError`, and
+  `layout_bake::{check_equivalence, LAYOUT_CHECK_PANGRAMS,
+  LAYOUT_CHECK_LEDGER, LAYOUT_CHECK_NO_LETTERS, RUSTYBUZZ_DEFAULT_FEATURES,
+  TEXT_SHAPER_DEFAULT_FEATURES}`; `ShapedGlyph` and `ShapedRun` derive
+  `PartialEq` and `Eq`.
+- Added, licences and coverage: `LicenceRecord`, `LICENCE_REGISTRY`,
+  `LicenceKind`, `licence_by_spdx`, `licence_by_key`, `LicenceTextError`;
+  `CoverageGroupId`, `MissingPolicy`, `CoverageGroup`, `COVERAGE_TEXT`,
+  `COVERAGE_SYMBOLS`, `COVERAGE_MATH`, `Coverage`, `FaceCoverage`,
+  `GroupCoverage`.
+- Added, the builder: `FontAtlasBuilder::{with_layout, with_style_layout,
+  bakes_layout, add_licence, face_data, with_columns, columns,
+  add_styled_face}`.
+- Added, bundled fonts: the features `font-apache-roboto-regular`,
+  `font-apache-roboto-bold`, `font-apache-roboto-italic`,
+  `font-apache-roboto-msymbols`, `font-ofl-grenze-gotisch`,
+  `font-ofl-texturina` and the groups `fonts-apache-roboto`,
+  `fonts-ofl-ledger` (all off by default); `GRENZE_GOTISCH_TTF`,
+  `TEXTURINA_TTF`; `ROBOTO_REGULAR_ATLAS`, `ROBOTO_BOLD_ATLAS`,
+  `ROBOTO_ITALIC_ATLAS`, `ROBOTO_MSYMBOLS_ATLAS`,
+  `ROBOTO_MSYMBOLS_STYLED_ATLAS`, `GRENZE_GOTISCH_ATLAS`,
+  `TEXTURINA_ATLAS`; `BUNDLED_ATLAS_GLYPH_SIZE`, `BUNDLED_ATLAS_PX_RANGE`;
+  `libmsdf::bundled`; `libmsdf::font::faces`;
+  `libmsdf::font::bundled` (`BundledAtlas`, `BundledFace`, `hex_of`).
+- Added, the baker, with `cpu-bake` (`libmsdf-font`'s `bake`):
+  `libmsdf::bake` (`Baker` with `bake_face`, `bake_face_report`,
+  `bake_bundled`, `bake_bundled_report`, `bundled_options`; `BakeOptions`,
+  `LicenceSpec`, `BakeError`, `BakeReport`, `FaceReport`, `GroupReport`,
+  `sha256`), and the `libmsdf-bake` binary of `libmsdf-font`.
