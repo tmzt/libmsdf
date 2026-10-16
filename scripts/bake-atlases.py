@@ -5,6 +5,8 @@
     ./scripts/bake-atlases.py --reference-dir D # ...comparing against D/<name>.atlas too
     ./scripts/bake-atlases.py --update-fixture  # ...and refresh tests/fixtures from out/
     ./scripts/bake-atlases.py --check           # verify the fixture only; writes nothing
+    ./scripts/bake-atlases.py --bundled         # bake the seven bundled atlases into
+                                                # out/bundled/ and check fonts/bundled.sha256
 
 **This is libmsdf's copy of highbay's `scripts/bake-atlases.py`.** That one
 writes each artifact straight into the crate that commits it; this one writes
@@ -85,6 +87,7 @@ import pathlib
 import struct
 import subprocess
 import sys
+import shutil
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent  # libmsdf
@@ -222,7 +225,51 @@ def report(name: str, before, after) -> bool:
     return False
 
 
+HASHES = ROOT / "fonts" / "bundled.sha256"
+
+
+def bundled(reference_dir: pathlib.Path | None) -> int:
+    """`libmsdf-bake bundled`: every bundled atlas into out/bundled/, its
+    digests compared with fonts/bundled.sha256 for this host, and each one's
+    cell index delta against --reference-dir when it has a file of that name
+    (bundled fonts plan, step 5)."""
+    out = OUT / "bundled"
+    cmd = [
+        "cargo", "run", "--quiet", "--manifest-path", str(ROOT / "Cargo.toml"),
+        "-p", "libmsdf-font", "--features", "bake", "--bin", "libmsdf-bake", "--",
+        "bundled", "--out", str(out), "--hashes",
+    ]
+    sys.stdout.flush()
+    result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
+                            env={**os.environ, "CARGO_INCREMENTAL": "0"})
+    sys.stderr.write(result.stderr)
+    if result.returncode != 0:
+        raise SystemExit(f"libmsdf-bake bundled failed (exit {result.returncode})")
+    baked = [line.split() for line in result.stdout.splitlines() if line.strip()]
+    recorded = {}
+    for line in HASHES.read_text().splitlines():
+        if line.strip() and not line.startswith("#"):
+            digest, name, host = line.split()
+            recorded[(name, host)] = digest
+    failures = 0
+    for digest, name, host in baked:
+        want = recorded.get((name, host))
+        if want is None:
+            print(f"{name}: no reference recorded for {host}: {digest}")
+        elif want == digest:
+            print(f"{name}: OK - matches fonts/bundled.sha256 ({host})")
+        else:
+            print(f"{name}: DIFFERS - baked {digest}, recorded {want} ({host})")
+            failures += 1
+        if reference_dir is not None and (reference_dir / name).is_file():
+            print(f"  against {reference_dir / name}")
+            report(name, index(reference_dir / name), index(out / name))
+    return 1 if failures else 0
+
+
 def main() -> int:
+    if shutil.which("uv") is None:
+        raise SystemExit("this needs `uv` (https://docs.astral.sh/uv/) on PATH")
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument(
         "--check", action="store_true",
@@ -237,7 +284,14 @@ def main() -> int:
         "--update-fixture", action="store_true",
         help=f"after baking, copy out/roboto-ascii-48.atlas over {FIXTURE}",
     )
+    ap.add_argument(
+        "--bundled", action="store_true",
+        help="bake the seven bundled atlases with libmsdf-bake into out/bundled/ and "
+             "compare their digests with fonts/bundled.sha256",
+    )
     args = ap.parse_args()
+    if args.bundled:
+        return bundled(args.reference_dir)
 
     any_moved = False
     failures = []

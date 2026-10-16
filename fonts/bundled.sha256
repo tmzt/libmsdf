@@ -1,0 +1,12 @@
+# The reference bake of every bundled atlas: <sha256>  <atlas>  <host triple>.
+# Produced by `libmsdf-bake bundled --hashes` (bundled fonts plan, section
+# 4.8); `tests/bundled_fonts.rs` checks the build-time atlases against the
+# lines for its host. Update only with the owner's agreement, in its own
+# commit (AGENTS.md, "Bundled fonts and atlases").
+a9c68bb5fa93229e38f05bcba8a89df8a61d54520a998bf4fbc7e97004bbbe8a  roboto-regular-48.atlas  aarch64-apple-darwin
+91d17496c8542fd8cd7141bbc7b5359d5a12512625dff07c26d87e03d7a6c036  roboto-bold-48.atlas  aarch64-apple-darwin
+7a8bc79d18db494f4b84aeae99305d2438fc1b8114ab1b10ae9e5d7553e186ae  roboto-italic-48.atlas  aarch64-apple-darwin
+a86a6edaa5c4795118a921c05e56d29f628f5f74bf727110829ec9edb793db79  roboto-msymbols-48.atlas  aarch64-apple-darwin
+f56d593edcb24b9411b584b86acd750f46390fb2ef9e032d1fbedaf8eada54f4  roboto-msymbols-styled-48.atlas  aarch64-apple-darwin
+1a8992d71624ab4cf41dce993325b0a09fdb201f3174d00f9d32057fcff994f7  grenze-gotisch-48.atlas  aarch64-apple-darwin
+ee9d817cfe22e469fd2e1e9598dee49255759cbd17cd89773bd460a43a8f4152  texturina-48.atlas  aarch64-apple-darwin
