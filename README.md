@@ -37,3 +37,4 @@ dual licensed as above, without any additional terms or conditions.
 | Document | Date | Status | Decision |
 |---|---|---|---|
 | [Filled Bézier paths as an SDF primitive](docs/design/20261015_01_FILLED_BEZIER_PATH_PLAN.md) | 2026-10-15 | Implemented | Adds `SdfKind::PathFill`: closed line/quadratic/cubic paths filled by an exact even-odd signed distance, segments in the aux param bank; every step done, released as 0.3.0 (`v0.3.0`). |
+| [Atlas-carried layout tables and a shaper without rustybuzz](docs/design/20261016_01_ATLAS_LAYOUT_TABLES_PLAN.md) | 2026-10-16 | Draft | Atlas format 5 (split, version-gated field) with tagged `Head`/`Cmap`/`Hmtx`/`Gsub`/`Gpos` and `LICS` tables, no VM data, and a pure-Rust `AtlasShaper` proven equal to rustybuzz at bake; Draft pending the owner's answers to its open questions. |
