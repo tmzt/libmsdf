@@ -129,6 +129,14 @@ re-bakes them in memory and compares, and
 `cargo test --features fonts-apache-roboto,fonts-ofl-ledger --test bundled_fonts`
 checks them against `fonts/bundled.sha256`.
 
+**Rebuilding the bundled faces:** `scripts/fetch-upstream-fonts.sh` fetches
+the upstream faces (google/fonts, Roboto v2.138, Material Symbols) at pinned
+sources with SHA-256 checks, and `scripts/rebuild-fonts.sh` rebuilds the
+OFL subsets and the Roboto Bold and Italic faces from them and compares them
+with the committed bytes, checks that the scripts behind the two Regular
+faces return them unchanged, and with `--atlases` also runs the atlas check
+above. It needs `uv`.
+
 ## Architectural decisions
 
 | Document | Date | Status | Decision |
