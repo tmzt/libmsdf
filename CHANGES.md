@@ -180,3 +180,31 @@ The amendment refines decision 6 of the 13:02 EDT amendment and the earlier
 "patch never changes parsing". It replaces step 1's test-table rows for split
 versions: a 0.1.0 reader accepts 0.1.1 and skips its unknown table, and
 refuses 0.2.0.
+
+## 2026-10-16 13:28 EDT — Bundled fonts plan (Draft); the 0.4.0 tag is held
+
+Plan: `docs/design/20261016_02_BUNDLED_FONT_FEATURES_PLAN.md` (Draft, new).
+On the owner's direction, every bundled face becomes an opt-in cargo
+feature, off by default, whose name carries its licence:
+`font-apache-roboto-{regular,bold,italic,msymbols}` (group
+`fonts-apache-roboto`) and `font-ofl-{grenze-gotisch,texturina}` (group
+`fonts-ofl-ledger`), the two OFL faces moving in from the tower defense
+game. Each feature brings its face's format-5 atlas, baked from the
+committed TTF by `build.rs` into `OUT_DIR` through a public
+`libmsdf::bake::Baker::bake_face`. That entry point lives in a proposed
+wgpu-free `libmsdf-font` crate split out of `src/font`, so a build script
+can depend on it. The TTF bytes are compiled in only with `shaper`. A
+fallback (an explicit `libmsdf-bake` command and committed atlases) has
+exact switch criteria, and AGENTS.md gains instructions for agents never to
+hand-edit or substitute an atlas. `FONTS-LICENSE-OFL.txt` and
+`FONTS-LICENSE-APACHE.txt` go at the root, replacing `fonts/LICENSE-*.txt`,
+and the README states that with no font feature the crate is purely
+MIT OR Apache-2.0.
+
+**Held tag.** On the owner's instruction ("hold the tag"), step 8 of
+`docs/design/20261016_01_ATLAS_LAYOUT_TABLES_PLAN.md` (version 0.4.0,
+`VERSIONS.md`, tag `v0.4.0`) is not carried out when that plan's other
+steps are done. It is performed once, as step 10 of the bundled fonts plan,
+so that both plans land in one 0.4.0. This records a departure from that
+frozen plan's step order (Rule 1.7); its text is unchanged. No code changes
+until the owner approves the bundled fonts plan.
