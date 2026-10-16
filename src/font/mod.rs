@@ -33,7 +33,9 @@ pub use glyph_table::GlyphEntry;
 pub use layout::{
     AtlasLayout, ContextSide, ContextSingle, FaceLayout, GsubLookup, GsubRules, Ligature,
 };
-pub use licence::LicenceRecord;
+pub use licence::{
+    LICENCE_REGISTRY, LicenceKind, LicenceRecord, LicenceTextError, licence_by_key, licence_by_spdx,
+};
 pub use manager::{AtlasManager, AtlasRegion};
 pub use outline::{Edge, EdgeKind, GlyphOutline, extract_outline};
 pub use packer::ShelfPacker;

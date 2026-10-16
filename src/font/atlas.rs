@@ -969,17 +969,33 @@ impl FontAtlas {
     /// **Every file is written at one version.** Until 0.4.0 a single-layer
     /// atlas was written at v3 and a layered one at v4; both are still read
     /// ([`FontAtlas::from_bytes`]), and neither is written any more.
+    ///
+    /// # Panics
+    ///
+    /// When [`FontAtlas::layout`] or [`FontAtlas::licences`] break a table
+    /// rule ([`FontAtlas::try_to_bytes`] says which). An atlas from
+    /// [`FontAtlasBuilder::build`] or [`FontAtlas::from_bytes`] never does.
     pub fn to_bytes(&self) -> Vec<u8> {
-        self.write_v5(&self.table_bodies())
+        self.try_to_bytes()
+            .unwrap_or_else(|e| panic!("this atlas cannot be serialized: {e}"))
+    }
+
+    /// [`FontAtlas::to_bytes`], refusing layout or licence data that breaks
+    /// a table rule instead of panicking.
+    pub fn try_to_bytes(&self) -> Result<Vec<u8>, &'static str> {
+        Ok(self.write_v5(&self.table_bodies()?))
     }
 
     /// The tables this atlas carries, sorted by `(face, tag)`.
-    pub(crate) fn table_bodies(&self) -> Vec<TableBody> {
+    pub(crate) fn table_bodies(&self) -> Result<Vec<TableBody>, &'static str> {
         let mut tables: Vec<TableBody> = Vec::new();
-        tables.extend(crate::font::layout::encode_tables(self.layout.as_ref()));
-        tables.extend(crate::font::licence::encode_tables(&self.licences));
+        tables.extend(crate::font::layout::encode_tables(self.layout.as_ref())?);
+        tables.extend(crate::font::licence::encode_tables(&self.licences)?);
         tables.sort_by(|a, b| (a.face, a.tag).cmp(&(b.face, b.tag)));
-        tables
+        if tables.len() > MAX_ATLAS_TABLES {
+            return Err("atlas would carry more than 64 tables");
+        }
+        Ok(tables)
     }
 
     /// The file-major 5 writer, over an explicit list of table bodies.
