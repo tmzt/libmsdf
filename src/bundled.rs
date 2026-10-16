@@ -8,6 +8,8 @@
 //! | `font-apache-roboto-bold` | [`ROBOTO_BOLD_ASCII`] | Apache-2.0 |
 //! | `font-apache-roboto-italic` | [`ROBOTO_ITALIC_ASCII`] | Apache-2.0 |
 //! | `font-apache-roboto-msymbols` | [`ROBOTO_ASCII_MSYMBOLS`] | Apache-2.0 |
+//! | `font-ofl-grenze-gotisch` | [`GRENZE_GOTISCH_TTF`] | OFL-1.1 |
+//! | `font-ofl-texturina` | [`TEXTURINA_TTF`] | OFL-1.1 |
 //!
 //! A TTF constant also needs the `shaper` feature (on by default), since
 //! nothing else in libmsdf reads a TTF. With no font feature enabled the
@@ -29,7 +31,7 @@
 /// `fonts/marker.py` and `fonts/icon.py`.
 ///
 /// Roboto is © The Roboto Project Authors, licensed Apache-2.0 — see
-/// `fonts/LICENSE-Roboto.txt`. Used as the deterministic test fixture and
+/// `FONTS-LICENSE-APACHE.txt`. Used as the deterministic test fixture and
 /// as the default face for the M3 demo theme.
 ///
 /// (The file is still named `-ascii` and so is this constant; the bake widened
@@ -113,7 +115,7 @@ pub const ROBOTO_REGULAR_ASCII: &[u8] = include_bytes!("../fonts/Roboto-Regular-
 /// face is loaded, and only the borrowed half is what makes this one merged.
 ///
 /// Material Symbols is © Google, licensed Apache-2.0 — see
-/// `fonts/LICENSE-MaterialSymbols.txt`.
+/// `FONTS-LICENSE-APACHE.txt`.
 #[cfg(all(feature = "font-apache-roboto-msymbols", feature = "shaper"))]
 pub const ROBOTO_ASCII_MSYMBOLS: &[u8] =
     include_bytes!("../fonts/Roboto-Regular-ascii-msymbols.ttf");
@@ -138,7 +140,7 @@ pub const ROBOTO_ASCII_MSYMBOLS: &[u8] =
 ///   so a styled `.notdef` would be a cell nothing can reach.
 ///
 /// 19,628 bytes; 13,084 gzipped. Roboto is (c) The Roboto Project Authors,
-/// licensed Apache-2.0 - see `fonts/LICENSE-Roboto.txt`.
+/// licensed Apache-2.0 - see `FONTS-LICENSE-APACHE.txt`.
 #[cfg(all(feature = "font-apache-roboto-bold", feature = "shaper"))]
 pub const ROBOTO_BOLD_ASCII: &[u8] = include_bytes!("../fonts/Roboto-Bold-ascii.ttf");
 
@@ -155,3 +157,17 @@ pub const ROBOTO_BOLD_ASCII: &[u8] = include_bytes!("../fonts/Roboto-Bold-ascii.
 /// 21,520 bytes; 14,833 gzipped.
 #[cfg(all(feature = "font-apache-roboto-italic", feature = "shaper"))]
 pub const ROBOTO_ITALIC_ASCII: &[u8] = include_bytes!("../fonts/Roboto-Italic-ascii.ttf");
+
+/// **Grenze Gotisch**, a blackletter (SIL OFL 1.1, no Reserved Font Name),
+/// subset by `fonts/ofl_subset.py` to the TEXT, SYMBOLS and MATH coverage
+/// groups (`fonts/coverage-groups.txt`): an OFL Modified Version, with every
+/// layout feature and the variation data kept and hinting removed.
+/// Provenance and licence: `FONTS-LICENSE-OFL.txt`.
+#[cfg(all(feature = "font-ofl-grenze-gotisch", feature = "shaper"))]
+pub const GRENZE_GOTISCH_TTF: &[u8] = include_bytes!("../fonts/GrenzeGotisch[wght]-subset.ttf");
+
+/// **Texturina**, a book face (SIL OFL 1.1, no Reserved Font Name), subset
+/// like [`GRENZE_GOTISCH_TTF`]. Provenance and licence:
+/// `FONTS-LICENSE-OFL.txt`.
+#[cfg(all(feature = "font-ofl-texturina", feature = "shaper"))]
+pub const TEXTURINA_TTF: &[u8] = include_bytes!("../fonts/Texturina[opsz,wght]-subset.ttf");

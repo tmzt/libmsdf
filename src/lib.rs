@@ -32,6 +32,8 @@ pub use crate::core::{
     DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_PATH_FILL, DRAW_TYPE_SLAB, DRAW_TYPE_TEXT,
     GpuFont, PARAM_BANK_CAPACITY, RenderFrame, SdfDrawCmd,
 };
+#[cfg(all(feature = "font-ofl-grenze-gotisch", feature = "shaper"))]
+pub use bundled::GRENZE_GOTISCH_TTF;
 #[cfg(all(feature = "font-apache-roboto-msymbols", feature = "shaper"))]
 pub use bundled::ROBOTO_ASCII_MSYMBOLS;
 #[cfg(all(feature = "font-apache-roboto-bold", feature = "shaper"))]
@@ -40,6 +42,8 @@ pub use bundled::ROBOTO_BOLD_ASCII;
 pub use bundled::ROBOTO_ITALIC_ASCII;
 #[cfg(all(feature = "font-apache-roboto-regular", feature = "shaper"))]
 pub use bundled::ROBOTO_REGULAR_ASCII;
+#[cfg(all(feature = "font-ofl-texturina", feature = "shaper"))]
+pub use bundled::TEXTURINA_TTF;
 pub use drawlist::{
     Contour, DrawEffects, DrawList, Elevation, PATH_CUBIC_TOLERANCE, PATH_MAX_SEGMENTS, Path,
     PathBuilder, PathError, PathSegment, SdfFrame, SdfInstance, SdfKind, SdfRotate, rotate_rect,

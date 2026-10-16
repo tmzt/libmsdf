@@ -706,6 +706,8 @@ pub const fn bundled_style_face(style: GlyphStyle) -> Option<&'static [u8]> {
 }
 
 /// The bundled TTF constants, re-exported under their old paths.
+#[cfg(all(feature = "font-ofl-grenze-gotisch", feature = "shaper"))]
+pub use crate::bundled::GRENZE_GOTISCH_TTF;
 #[cfg(all(feature = "font-apache-roboto-msymbols", feature = "shaper"))]
 pub use crate::bundled::ROBOTO_ASCII_MSYMBOLS;
 #[cfg(all(feature = "font-apache-roboto-bold", feature = "shaper"))]
@@ -714,6 +716,8 @@ pub use crate::bundled::ROBOTO_BOLD_ASCII;
 pub use crate::bundled::ROBOTO_ITALIC_ASCII;
 #[cfg(all(feature = "font-apache-roboto-regular", feature = "shaper"))]
 pub use crate::bundled::ROBOTO_REGULAR_ASCII;
+#[cfg(all(feature = "font-ofl-texturina", feature = "shaper"))]
+pub use crate::bundled::TEXTURINA_TTF;
 
 /// The bundled Roboto faces for libmsdf's own unit tests, whatever features
 /// are on (`cfg(test)` is never set in a consumer's build).

@@ -1,0 +1,56 @@
+# The coverage groups of the bundled OFL faces, one range per line:
+#   <group> <policy> U+XXXX[-YYYY]
+# Read by fonts/ofl_subset.py (the subset keeps their union) and compared,
+# range for range, with libmsdf-font's COVERAGE_TEXT, COVERAGE_SYMBOLS and
+# COVERAGE_MATH by a test, so the two cannot drift
+# (docs/design/20261016_02_BUNDLED_FONT_FEATURES_PLAN.md, 13:40 EDT amendment).
+TEXT fail U+0020-007E
+TEXT fail U+00A0
+TEXT fail U+00AD
+TEXT fail U+00C0-00D6
+TEXT fail U+00D8-00F6
+TEXT fail U+00F8-00FF
+TEXT fail U+0100-017F
+SYMBOLS skip U+00A1-00AC
+SYMBOLS skip U+00AE-00BF
+SYMBOLS skip U+00D7
+SYMBOLS skip U+00F7
+SYMBOLS skip U+2010-2015
+SYMBOLS skip U+2018-201F
+SYMBOLS skip U+2020-2022
+SYMBOLS skip U+2026
+SYMBOLS skip U+2030
+SYMBOLS skip U+2032-2033
+SYMBOLS skip U+2039-203A
+SYMBOLS skip U+20AC
+SYMBOLS skip U+20B4
+SYMBOLS skip U+20BA
+SYMBOLS skip U+20BD-20BE
+SYMBOLS skip U+2116
+SYMBOLS skip U+2122
+SYMBOLS skip U+212E
+MATH skip U+00AC
+MATH skip U+00B0-00B3
+MATH skip U+00B5
+MATH skip U+00B7
+MATH skip U+00B9
+MATH skip U+00BC-00BE
+MATH skip U+00D7
+MATH skip U+00F7
+MATH skip U+2030
+MATH skip U+2032-2033
+MATH skip U+2070
+MATH skip U+2074-207F
+MATH skip U+2080-208E
+MATH skip U+2153-215E
+MATH skip U+2202
+MATH skip U+2205-2209
+MATH skip U+220F
+MATH skip U+2211-2213
+MATH skip U+221A
+MATH skip U+221E
+MATH skip U+2229-222B
+MATH skip U+2248
+MATH skip U+2260
+MATH skip U+2264-2265
+MATH skip U+2282-2283

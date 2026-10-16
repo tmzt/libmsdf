@@ -57,7 +57,7 @@ this repo owns, and the two vocabularies never fall through to one another -
 `../src/font/mod.rs`'s `highbay_codepoint` says why at length.
 
 Material Symbols is (c) Google, licensed Apache-2.0 - see
-`LICENSE-MaterialSymbols.txt`.
+`../FONTS-LICENSE-APACHE.txt`.
 """
 
 import sys

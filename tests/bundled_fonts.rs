@@ -86,3 +86,87 @@ fn every_roboto_style_is_bundled() {
         vec![GlyphStyle::Regular, GlyphStyle::Bold, GlyphStyle::Italic]
     );
 }
+
+/// The OFL faces: the committed subsets, their copyright lines, their
+/// Modified Version marks, no hinting, and text that shapes to real glyphs
+/// (bundled fonts plan, step 2 with its 13:34 and 13:40 EDT amendments).
+#[cfg(any(feature = "font-ofl-grenze-gotisch", feature = "font-ofl-texturina"))]
+mod ofl {
+    use libmsdf::TextShaper;
+
+    fn faces() -> Vec<(&'static str, &'static [u8], &'static str)> {
+        let mut v = Vec::new();
+        #[cfg(feature = "font-ofl-grenze-gotisch")]
+        v.push((
+            "Grenze Gotisch",
+            libmsdf::GRENZE_GOTISCH_TTF,
+            "Copyright 2020 The Grenze Gotisch Project Authors \
+             (https://github.com/Omnibus-Type/Grenze-Gotisch)",
+        ));
+        #[cfg(feature = "font-ofl-texturina")]
+        v.push((
+            "Texturina",
+            libmsdf::TEXTURINA_TTF,
+            "Copyright 2020 The Texturina Project Authors \
+             (https://github.com/Omnibus-Type/Texturina)",
+        ));
+        v
+    }
+
+    fn name(face: &ttf_parser::Face, id: u16) -> Option<String> {
+        face.names()
+            .into_iter()
+            .filter(|n| n.name_id == id)
+            .find_map(|n| n.to_string())
+    }
+
+    #[test]
+    fn the_subsets_carry_their_provenance() {
+        for (family, data, copyright) in faces() {
+            let face = ttf_parser::Face::parse(data, 0).unwrap();
+            assert_eq!(name(&face, 0).as_deref(), Some(copyright), "{family}");
+            assert!(
+                name(&face, 5)
+                    .unwrap()
+                    .ends_with("; libmsdf subset (U+0020-017F, punctuation)"),
+                "{family}"
+            );
+            assert!(
+                name(&face, 10).unwrap().starts_with("Subset by libmsdf"),
+                "{family}"
+            );
+            for tag in [b"prep", b"fpgm", b"cvt ", b"gasp", b"DSIG"] {
+                let tag = ttf_parser::Tag::from_bytes(tag);
+                assert!(face.raw_face().table(tag).is_none(), "{family} keeps {tag}");
+            }
+        }
+    }
+
+    #[test]
+    fn european_text_shapes_to_real_glyphs() {
+        for (family, data, _) in faces() {
+            let shaper = TextShaper::new(data.to_vec()).unwrap();
+            for s in [
+                "Treasury 50G",
+                "\u{141}\u{f3}d\u{17a}",
+                "\u{152}uvre",
+                "\u{160}\u{165}astn\u{fd}",
+                "\u{2039} 25 \u{2030} \u{203a}",
+                "x\u{b2} H\u{2082}O",
+                "\u{bd} \u{215b}",
+                "2\u{2212}5 \u{2264} 7",
+                "\u{2116} 5",
+                "5 \u{20ac} \u{20bd}",
+            ] {
+                let run = shaper.shape(s);
+                // Grenze Gotisch has no ⅛ (U+215B); the MATH group skips it.
+                let allowed = if family == "Grenze Gotisch" && s.contains('\u{215b}') {
+                    1
+                } else {
+                    0
+                };
+                assert!(run.notdef_count() <= allowed, "{family} {s:?}: {run:?}");
+            }
+        }
+    }
+}

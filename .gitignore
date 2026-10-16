@@ -2,7 +2,7 @@
 Cargo.lock
 
 # The upstream Material Symbols variable font: a BUILD INPUT to `fonts/msymbols.py`,
-# not an artifact of this repo. Apache-2.0, (c) Google - `fonts/LICENSE-MaterialSymbols.txt`
+# not an artifact of this repo. Apache-2.0, (c) Google - `FONTS-LICENSE-APACHE.txt`
 # is committed and is what records the provenance.
 #
 # Fetch it to this exact path before re-baking the merged face:
@@ -14,6 +14,11 @@ Cargo.lock
 # it outline-for-outline, so a wrong or moved upstream aborts the run rather than
 # silently producing a face built half from one build and half from another.
 fonts/MaterialSymbolsOutlined*.ttf
+
+# The upstream OFL faces: BUILD INPUTS to `fonts/ofl_subset.py`, fetched from
+# google/fonts at the commits named in `FONTS-LICENSE-OFL.txt`. Only the
+# subsets (`fonts/*-subset.ttf`) are committed.
+fonts/upstream/
 
 # Bake output: `scripts/bake-atlases.py` writes here and nowhere else, so a
 # bake never dirties the tree. Committed copies are made from it deliberately.
