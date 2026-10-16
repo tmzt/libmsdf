@@ -95,3 +95,10 @@ depend on:
   - The tower defense game has no Cargo workspace yet and was skipped.
   - Under Rule 5.5, libcontrols bumps to 0.4.0 when it takes libmsdf 0.3.0.
 - `cargo check --target wasm32-unknown-unknown` passes.
+
+## 2026-10-16 02:36 EDT — Correction to the 02:36 EDT addendum
+
+Plan: filled Bézier path plan. In the 02:36 EDT addendum, the departure
+about `CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm` is labelled "Step 5". It
+belongs to the preamble of the plan's section 5 (Steps), which gives the GPU
+test command, not to step 5.
