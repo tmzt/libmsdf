@@ -208,3 +208,36 @@ steps are done. It is performed once, as step 10 of the bundled fonts plan,
 so that both plans land in one 0.4.0. This records a departure from that
 frozen plan's step order (Rule 1.7); its text is unchanged. No code changes
 until the owner approves the bundled fonts plan.
+
+## 2026-10-16 13:35 EDT — Bundled fonts plan: approved; OFL faces subset
+
+Plan: `docs/design/20261016_02_BUNDLED_FONT_FEATURES_PLAN.md` (Draft;
+approved, not yet in implementation). An amendment records the owner's
+approval with the recommendations:
+
+- the `libmsdf-font` split is approved;
+- `libmsdf-font` is versioned in lockstep with libmsdf;
+- no `tnum` in the bundled atlases;
+- Linux reference hashes are recorded in step 6;
+- standalone Bold and Italic atlases ship.
+
+One recommendation is reversed: Grenze Gotisch and Texturina are subset to
+`EUROPEAN_TEXT_RANGES`, which is U+0020–007E, U+00A0–017F, U+2010–2027,
+U+2030–203A, U+20AC and U+2122 (356 codepoints; Grenze maps 340, Texturina
+338). The new `fonts/ofl_subset.py` does the subsetting with fontTools
+4.67.0, keeping every layout feature, glyph names, the `name` table and the
+variation data, and dropping hinting, `gasp` and `DSIG`. It is reproducible
+and checks provenance against the upstream sha256. The result is an OFL
+Modified Version, recorded in `FONTS-LICENSE-OFL.txt` and in `name` IDs 5
+and 10. The two OFL atlases need about 360 cells, more than a 320-cell
+layer, so they are baked at 16 columns (800 × 2000 texels, about 4.8 MB
+each) through new `BakeOptions::{coverage, columns}`, and
+`FontAtlas::padded_to` lets consumers stack them with 8-column atlases.
+
+**Pending the owner (Rule 1.7):** the atlas layout tables plan (In
+implementation) defines its `Cmap` scope and equivalence corpus over
+`TEXT_RANGES`. Baking the subset faces needs both over the bake's declared
+coverage, which means `LayoutOptions` / `FaceLayout::extract` take a
+coverage parameter. That is an interface departure from that frozen plan.
+It must be agreed with the owner, and recorded here, before that plan's
+step 3 fixes the scope. No code changes for the bundled fonts plan yet.
