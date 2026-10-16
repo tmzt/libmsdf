@@ -1379,3 +1379,346 @@ data.
 - **Section 5** gains, under Added: `EUROPEAN_TEXT_RANGES`, `Coverage`,
   `BakeOptions::{coverage, columns}`, `FontAtlasBuilder::with_columns`,
   `FontAtlas::padded_to`, `BundledFace::upstream_sha256`.
+
+## Amendment — 2026-10-16 13:40 EDT: the coverage parameter and the TEXT, SYMBOLS and MATH groups
+
+The owner's decision, relayed by the coordinating agent: "yes, add the
+coverage parameter but symbols and text have different ranges, common
+symbols are extended ascii and unicode with common european symbols and
+math".
+
+### 1. The coverage parameter: an agreed departure from the atlas layout tables plan
+
+The owner agrees to the departure the 13:34 EDT amendment raised (Rule
+1.7). In the atlas layout tables plan, three things were hard-coded to
+`TEXT_RANGES` and now take a coverage parameter:
+
+- the layout extraction (`LayoutOptions`, `FaceLayout::extract`);
+- the `Cmap` scope (its section 4.6);
+- the equivalence corpus (its section 4.9).
+
+The `Cmap` holds every codepoint of the bake's declared coverage that the
+face maps, plus the C0/C1 controls the face maps, as before. The corpus's
+single codepoints and ordered pairs run over those `Cmap` codepoints. The
+interface change is one public field:
+
+```rust
+pub struct LayoutOptions {
+    pub extra_features: Vec<[u8; 4]>,
+    /// The declared text coverage: inclusive codepoint ranges. Defaults to
+    /// TEXT_RANGES, so every existing caller and result is unchanged.
+    pub coverage: Vec<(char, char)>,
+}
+```
+
+with `Default` giving `TEXT_RANGES`. `pub(crate) fn cmap_scope()` becomes
+`cmap_scope(&[(char, char)])`. The Roboto faces' extracted tables and check
+results do not change.
+
+**This changes committed code.** That plan's step 3 (`7c00f63`, bake
+extraction, with `cmap_scope()` over `TEXT_RANGES` in
+`src/font/layout_bake.rs`) and step 4 (`6d18eab`, `AtlasShaper`) were both
+committed before this decision. The change is its own commit, titled
+"Atlas layout tables: coverage parameter (departure, see CHANGES.md)":
+
+- It lands after that plan's step 5 (the equivalence check) is committed
+  and before this plan's step 4.
+- If step 5 is not yet committed when this is picked up, it takes the
+  parameter directly.
+- Its test: the Roboto Regular tables extracted with the default coverage
+  equal those of `7c00f63`; with `coverage = TEXT_RANGES` minus U+2026,
+  `Cmap` lacks U+2026 and the check still passes.
+
+**Correction to the 13:34 EDT amendment.** Its sentence "It is recorded in
+`CHANGES.md` once agreed, before that plan's step 3 fixes the scope" was out
+of date when written: step 3 (`7c00f63`) and step 4 (`6d18eab`) were already
+committed. The scope was fixed in committed code and is changed by the
+commit above. Its "raised with the owner" is settled by this amendment.
+
+### 2. Coverage groups
+
+Coverage is declared as named groups with different ranges and different
+rules for a codepoint the face lacks. This replaces the 13:34 EDT
+amendment's `EUROPEAN_TEXT_RANGES` and its `Coverage::Ranges` (both
+withdrawn) and its subset codepoint list. `TEXT_RANGES`, the Roboto faces'
+coverage, is unchanged, and the Roboto rows keep `Coverage::Shipped`.
+
+In `libmsdf-font`:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
+pub enum CoverageGroupId { Text = 0, Symbols = 1, Math = 2 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MissingPolicy {
+    /// A codepoint the face lacks fails the bake, unless waived for that face.
+    Fail,
+    /// A codepoint the face lacks is skipped and listed in the bake report.
+    Skip,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoverageGroup {
+    pub id: CoverageGroupId,
+    pub ranges: &'static [(char, char)],
+    pub missing: MissingPolicy,
+}
+
+pub const COVERAGE_TEXT: CoverageGroup;     // Fail
+pub const COVERAGE_SYMBOLS: CoverageGroup;  // Skip
+pub const COVERAGE_MATH: CoverageGroup;     // Skip
+
+pub enum Coverage {
+    /// TEXT_RANGES plus what the face defines in the Private Use Area:
+    /// today's add_shipped_coverage, for the Roboto faces.
+    Shipped,
+    /// The union of these groups.
+    Groups(Vec<CoverageGroup>),
+}
+```
+
+Groups may overlap: SYMBOLS and MATH share the Latin-1 and General
+Punctuation signs that are both, such as `±`, `×`, `°` and `‰`. A codepoint
+in TEXT and in another group follows TEXT's rule. `BakeOptions` keeps
+`coverage: Coverage` and gains
+`waive: Vec<(GlyphStyle, char, &'static str)>`: a TEXT codepoint the face
+lacks, with the reason, which turns that one failure into a listed waiver.
+
+**`COVERAGE_TEXT`**: letters with their digits, punctuation and spaces, for
+Western and Central/Eastern European languages. 287 codepoints:
+
+```text
+U+0020-007E   Basic Latin, all printable (letters, digits, ASCII punctuation
+              and signs)
+U+00A0        no-break space
+U+00AD        soft hyphen
+U+00C0-00D6   Latin-1 letters
+U+00D8-00F6   Latin-1 letters
+U+00F8-00FF   Latin-1 letters
+U+0100-017F   Latin Extended-A
+```
+
+**`COVERAGE_SYMBOLS`**: common symbols, being the extended-ASCII (Latin-1)
+symbols and the common European Unicode ones. 63 codepoints:
+
+```text
+U+00A1-00AC   ¡ ¢ £ ¤ ¥ ¦ § ¨ © ª « ¬
+U+00AE-00BF   ® ¯ ° ± ² ³ ´ µ ¶ · ¸ ¹ º » ¼ ½ ¾ ¿
+U+00D7 U+00F7 × ÷
+U+2010-2015   hyphen, non-breaking hyphen, figure dash, en dash, em dash,
+              horizontal bar
+U+2018-201F   ‘ ’ ‚ ‛ “ ” „ ‟
+U+2020-2022   † ‡ •
+U+2026        …
+U+2030        ‰
+U+2032-2033   ′ ″
+U+2039-203A   ‹ ›
+U+20AC        € euro
+U+20B4        ₴ hryvnia (Ukraine)
+U+20BA        ₺ lira (Turkey)
+U+20BD        ₽ ruble (Russia)
+U+20BE        ₾ lari (Georgia)
+U+2116        № numero sign (used in Central and Eastern Europe)
+U+2122        ™
+U+212E        ℮ estimated sign (EU prepackaging)
+```
+
+The currencies are the ones in current use in Europe that Latin-1 lacks:
+`£`, `¥`, `¢` and the generic `¤` are already in Latin-1, and the obsolete
+franc and lira signs are left out. Left out of General Punctuation, as
+rarely used and missing from both faces: U+2016, U+2017, U+2023 to U+2025,
+U+2027, U+2031 and U+2034 to U+2038.
+
+**`COVERAGE_MATH`**: common mathematical signs. 78 codepoints:
+
+```text
+U+00AC U+00B0-00B3 U+00B5 U+00B7 U+00B9 U+00BC-00BE U+00D7 U+00F7
+              ¬ ° ± ² ³ µ · ¹ ¼ ½ ¾ × ÷
+U+2030 U+2032-2033   ‰ ′ ″
+U+2070 U+2074-207F   superscript 0, 4-9, + − = ( ) n
+U+2080-208E   subscript 0-9, + − = ( )
+U+2153-215E   ⅓ ⅔ ⅕ ⅖ ⅗ ⅘ ⅙ ⅚ ⅛ ⅜ ⅝ ⅞
+U+2202        ∂
+U+2205-2209   ∅ ∆ ∇ ∈ ∉
+U+220F        ∏
+U+2211-2213   ∑ − ∓
+U+221A U+221E √ ∞
+U+2229-222B   ∩ ∪ ∫
+U+2248 U+2260 ≈ ≠
+U+2264-2265   ≤ ≥
+U+2282-2283   ⊂ ⊃
+```
+
+The ASCII signs (`+ < = > ^ |`) are in TEXT. **U+2044 FRACTION SLASH is
+deliberately excluded.** HarfBuzz, and rustybuzz with it, applies automatic
+`numr`/`dnom` fractions to the digits around it. Measured in both faces,
+"1⁄2" shapes to `one.numr fraction two.dnom` and "12⁄34" to two numerators,
+the slash and two denominators. That is contextual on digit runs, which the
+atlas layout tables cannot express, so the bake would fail its equivalence
+check. Including it would need an automatic-fraction rule in `AtlasShaper`,
+a further format change that is not proposed here. The precomposed
+fractions (`½`, `⅛`, ...) are single glyphs and are unaffected.
+
+The bundled OFL rows use
+`Coverage::Groups(vec![COVERAGE_TEXT, COVERAGE_SYMBOLS, COVERAGE_MATH])`.
+Texturina has the waiver
+`(Regular, 'ſ', "long s (U+017F): Texturina has no glyph; archaic")`.
+
+**Measured coverage** (fontTools 4.67.0, upstream files of section 3.1):
+
+| Group | Grenze Gotisch | Texturina |
+|---|---|---|
+| TEXT (287) | 287, complete | 286: lacks U+017F (waived) |
+| SYMBOLS (63) | 57: lacks U+2012, U+2015, U+201B, U+201F, U+20B4, U+20BE | 55: lacks U+2011, U+2012, U+2015, U+201B, U+201F, U+20B4, U+20BE, U+212E |
+| MATH (78) | 48: lacks U+207A-207E, U+208A-208E, U+2153-215E, U+2207-2209, U+2213, U+2229, U+222A, U+2282, U+2283 | 50: lacks U+207A-207F, U+208A-208E, U+2153-215A, U+2205, U+2207-2209, U+2213, U+2229, U+222A, U+2282, U+2283 |
+
+Neither face makes any codepoint of the three groups a GDEF mark. Shaping
+every mapped codepoint alone, after `A`, doubled and between digits
+(uharfbuzz 0.56.3, `lnum` and `pnum`) changes nothing beyond what the 13:34
+EDT amendment found: the `liga` forms, the lining figures and the soft
+hyphen. For example, "x²+H₂O", "2−5", "№ 5" and "5 €" map glyph for glyph.
+The only exception was U+2044, excluded above.
+
+### 3. What the atlas records
+
+- **`Cmap`** carries exactly the codepoints the atlas covers (section 1).
+- **A new all-capital libmsdf table, `CVRG`**, per face (`face` = style
+  ordinal), records the declared groups and what was missing. It is absent
+  for `Coverage::Shipped`.
+  - It is a new table rather than new `Head` fields, because `Head`'s
+    layout is already in the committed codec (`f15a308`). A table that a
+    reader does not know is skipped under the atlas layout tables plan's
+    section 4.2, and `Cmap` alone cannot tell "declared but missing" from
+    "not declared".
+  - `CVRG` is not a registered OpenType tag. It is added to format 5:0.1.0
+    before that version is released, so the format version does not move.
+
+```text
+0   2  group_count u16
+2   2  reserved 0
+then group_count groups, ascending by id, each:
+0   1  group id      u8: 0 TEXT, 1 SYMBOLS, 2 MATH (a reader keeps an unknown
+                     id raw)
+1   1  policy        u8: 0 fail, 1 skip
+2   2  range_count   u16
+4   2  missing_count u16
+6   2  reserved 0
+8      ranges   [lo u32, hi u32] x range_count, ascending, non-overlapping
+       missing  [codepoint u32, kind u8 (0 skipped, 1 waived), 3 reserved]
+                x missing_count, ascending
+```
+
+`FontAtlas` gains `pub coverage: Vec<FaceCoverage>` (one per face that has
+a `CVRG`) and `FontAtlas::coverage(style) -> Option<&FaceCoverage>`, where
+`FaceCoverage { style, groups: Vec<GroupCoverage> }` and
+`GroupCoverage { id, policy, ranges, skipped: Vec<char>, waived: Vec<char> }`.
+Reading checks that every codepoint in `Cmap` lies in a declared range, and
+that no missing codepoint is in `Cmap`.
+
+### 4. Missing codepoints and the bake report
+
+- **TEXT** (`MissingPolicy::Fail`): a codepoint the face lacks fails the
+  bake with
+  `BakeError::MissingText { style, codepoints: Vec<char> }`, listing all of
+  them, unless `BakeOptions::waive` names that style and codepoint.
+- **SYMBOLS, MATH** (`MissingPolicy::Skip`): a codepoint the face lacks is
+  skipped, recorded in `CVRG` and listed in the bake report.
+- `Baker::bake_face_report(ttf, opts) -> Result<(Vec<u8>, BakeReport), BakeError>`
+  is added. `bake_face` and `bake_bundled` call it and return the bytes.
+
+```rust
+pub struct BakeReport { pub faces: Vec<FaceReport> }
+pub struct FaceReport { pub style: GlyphStyle, pub groups: Vec<GroupReport> }
+pub struct GroupReport {
+    pub id: CoverageGroupId,
+    pub declared: usize,
+    pub carried: usize,
+    pub skipped: Vec<char>,
+    pub waived: Vec<(char, &'static str)>,
+}
+```
+
+`BakeReport` implements `Display`: one line per group, then the skipped and
+waived codepoints as `U+XXXX`. `build.rs` writes it to
+`OUT_DIR/bundled/<atlas>.report.txt`; the `libmsdf-bake` CLI prints it; the
+`bundled` subcommand writes it beside each atlas under `out/bundled/`.
+
+### 5. The subset and the cells, recomputed
+
+The subset TTFs keep TEXT ∪ SYMBOLS ∪ MATH. That is 411 codepoints, which
+replaces the 13:34 EDT amendment's 356-codepoint set and its `--unicodes`
+argument:
+
+```text
+--unicodes="U+0020-007E,U+00A0-017F,U+2010-2015,U+2018-2022,U+2026,U+2030,U+2032-2033,U+2039-203A,U+2070,U+2074-208E,U+20AC,U+20B4,U+20BA,U+20BD-20BE,U+2116,U+2122,U+212E,U+2153-215E,U+2202,U+2205-2209,U+220F,U+2211-2213,U+221A,U+221E,U+2229-222B,U+2248,U+2260,U+2264-2265,U+2282-2283"
+```
+
+All other subsetting options, the name edits, the provenance check and the
+file names stay as the 13:34 EDT amendment says. `ofl_subset.py` takes the
+ranges from the same three group definitions, read from a generated list
+that a test compares with the Rust constants, so there is one source.
+Compared with the 13:34 EDT set, the subset drops U+2016-2017, U+2023-2025,
+U+2027, U+2031 and U+2034-2038 (neither face maps any of them). It adds the
+MATH signs, the four currencies, `№` and `℮`.
+
+**Measured** with fontTools 4.67.0, using the same options plus U+2044,
+which is now excluded; removing it changes the files only slightly, and
+step 2 records the final sizes:
+
+| Face | upstream | subset |
+|---|---|---|
+| Grenze Gotisch | 193,492 bytes, 1,111 glyphs | 132,048 bytes, 659 glyphs |
+| Texturina | 288,320 bytes, 722 glyphs | 213,648 bytes, 467 glyphs |
+
+**Cells.** Mapped codepoints without U+2044: Grenze 375, Texturina 374.
+Adding the shaped closure that fires (the `liga` forms, ten lining figures,
+and Grenze's contextual `.case` accents) and glyph 0 gives roughly 390 to
+400 cells per face. That is still more than one 8-column layer (320) and
+well inside 16 columns (640), so the 13:34 EDT amendment's 16-column bake,
+800 × 2000 texels and about 4.8 MB per OFL atlas, stands. The exact counts
+are logged in step 4. The equivalence corpus grows to about 140,000 pair
+strings per face, which switch criterion 2 measures.
+
+### Steps affected
+
+- **The coverage-parameter commit** of section 1, before step 4.
+- **Step 2**: its 13:34 EDT **Done when:** reads, for "each subset maps
+  exactly the codepoints listed above for its face", the codepoints of
+  TEXT ∪ SYMBOLS ∪ MATH that the face maps, per the table in section 2
+  above. Its shaping strings gain "x² H₂O", "½ ⅛", "2−5 ≤ 7", "№ 5" and
+  "5 € ₽".
+- **Step 4**: adds `CoverageGroupId`, `MissingPolicy`, `CoverageGroup`,
+  the three `COVERAGE_*` constants, `Coverage::Groups`, `BakeOptions::waive`,
+  `BakeError::MissingText`, `BakeReport` and `Baker::bake_face_report`, the
+  `CVRG` codec and `FontAtlas::coverage`. **Done when** gains:
+  - each OFL atlas's `CVRG` and bake report list exactly the missing
+    codepoints of the table in section 2;
+  - removing Texturina's waiver fails its bake with
+    `MissingText { codepoints: ['ſ'] }`;
+  - a `CVRG` whose missing codepoint is in `Cmap` is refused on read.
+- **Section 5**, Added, gains the same items. `EUROPEAN_TEXT_RANGES` and
+  `Coverage::Ranges` are removed from it.
+
+### Owner approval after the highbay review
+
+The owner, relayed by the coordinating agent: "approve libmsdf plan after
+quick review of highbay usage but it will adapt, its custom symbols aren't
+font sourced". The plan, with this amendment, is approved. Its status stays
+`Draft` until its first implementing commit (Rule 1.5).
+
+The coordinating agent's read-only review of highbay found:
+
+- It uses `ROBOTO_REGULAR_ASCII` and `ROBOTO_ASCII_MSYMBOLS` with
+  `TextShaper`, so it enables `fonts-apache-roboto` with `shaper` (the
+  default), as section 7 already says.
+- It uses `MSYMBOLS_ICONS`, `HIGHBAY_ICONS`, `highbay_codepoint` and
+  `MARKER_ARROW`. These are codepoint tables for symbols drawn by libmsdf's
+  own font scripts, not font bytes. They stay ungated by the font features,
+  as section 4.4 says of the manifests and resolvers. `MARKER_ARROW` joins
+  that list explicitly.
+- It uses `TEXT_RANGES` in a few tests, which is unchanged.
+
+highbay therefore adapts with feature lines in its manifest only. Its
+custom symbols are not sourced from the bundled fonts, so the coverage
+groups do not affect them.
