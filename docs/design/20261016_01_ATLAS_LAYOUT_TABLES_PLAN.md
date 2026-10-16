@@ -1267,3 +1267,106 @@ fn take_pstr<'a>(data: &'a [u8], pos: &mut usize) -> Result<&'a str, LicenceText
   faces;
 - a `LICS` whose `lict_index` differs from its position, or whose count
   differs from `LICT`'s, is refused; a `LICS` without a `LICT` is refused.
+
+## Amendment — 2026-10-16 13:02 EDT: open questions decided; file-major comes first
+
+The owner asked the coordinating agent to decide the seven open questions of
+section 6 ("decide those"). The decisions below are relayed from it and
+replace section 6: **section 6 has no open questions left.** Each decision
+states which earlier text it replaces or settles. This amendment also records
+a question the owner asked about the version field, with its answer.
+
+### Owner's question: "does file-major need to be last for back compat?"
+
+**No. It must be first,** as section 4.1 already has it (byte 4 = file-major,
+then major, minor, patch). The reasons:
+
+- Old files store the version as a little-endian u32 at bytes 4..8, so v3 is
+  `03 00 00 00` and v4 is `04 00 00 00`. Read as
+  `[file_major, major, minor, patch]`, they land exactly on file-major 3 or 4
+  with version 0.0.0, which is what lets one reader tell legacy from split
+  without guessing.
+- Old readers read a new file's `05 00 01 00` as the u32 65541
+  (5 + 1 × 65536). That is neither 3 nor 4, so every libmsdf before this one
+  refuses it cleanly with its existing "atlas version is not one this build
+  reads" error, instead of misparsing it.
+- If file-major were last, a v3 file (`03 00 00 00`) would read as major 3,
+  minor 0, patch 0 of file-major 0: a legacy file would be taken for a
+  split version, the opposite of what the field is for.
+
+Section 4.1's text stands unchanged; this records why.
+
+### Decisions
+
+1. **Grenze's contextual accents: `Gsub` kind 3 is accepted.** The narrow
+   "context single" kind (one input glyph, one context glyph on one side,
+   single substitution, flattened over the glyph classes) is part of the
+   format, proven by the equivalence check like every other kind, so Grenze
+   Gotisch bakes. This settles section 4.6's "proposed, pending the owner's
+   answer to open question 1", section 4.7's comment "only if open question 1
+   is accepted" on `GsubRules::ContextSingle`, section 4.9's "if accepted"
+   and the expected result there (Grenze passes), and step 5's "Grenze passes
+   or fails exactly as open question 1 decides" (Grenze passes). Any other
+   contextual shape still fails the bake.
+2. **Kerning is in integer font units**, with `Head.units_per_em`, as section
+   4.6 proposes. This settles that refinement of decision 2 of section 2.
+3. **Optional features are chosen per face** and recorded in that face's
+   `Head.features`, as section 4.5 already lays out. This replaces section
+   4.9's "chosen at bake for all faces alike via `--feature`":
+   `bake_atlas --feature <tag>[@<style>,...]` (repeatable) applies the
+   feature to the listed styles, defaulting to `regular`, and
+   `LayoutOptions.extra_features` is applied to the face it is passed with.
+   An atlas does not carry two variants of one face.
+4. **`Head` carries vertical metrics.** This replaces section 4.5's `Head`
+   layout. The new layout, 20 + 4 × feature_count bytes, all values in font
+   units:
+
+   ```text
+   0   2  units_per_em    u16 (16..=16384)
+   2   2  hidden_glyph    u16 (as before)
+   4   2  ascender        i16, hhea ascender (positive above the baseline)
+   6   2  descender       i16, hhea descender (negative below it)
+   8   2  line_gap        i16, hhea lineGap
+   10  2  cap_height      i16: OS/2 sCapHeight when the OS/2 table is version
+                          2 or later and the value is non-zero; otherwise the
+                          yMax of the bounding box of 'H'; 0 if neither exists
+   12  2  x_height        i16: OS/2 sxHeight under the same rule; otherwise the
+                          yMax of the bounding box of 'x'; 0 if neither exists
+   14  2  feature_count   u16
+   16  4  reserved        0
+   20     feature tags    [u8; 4] x feature_count, ascending, unique
+   ```
+
+   `FaceLayout` gains `ascender`, `descender`, `line_gap`, `cap_height` and
+   `x_height` (all `i16`). They are per face and in font units, so a
+   layout-only consumer can set lines without the set table; `SetMetrics`
+   stays as it is (per set, in em, with the measured ink descent). Step 3's
+   **Done when:** gains: for the three Roboto faces the five values equal
+   fontTools' readings of `hhea` and `OS/2` (or the stated fallback).
+5. **Keep the real legacy fixture.** The existing
+   `tests/fixtures/roboto-ascii-48.atlas` (a real v3 file, already in
+   history) moves to `tests/fixtures/legacy/roboto-ascii-48-v3.atlas` as
+   step 1 says; tests do not synthesise legacy bytes. This settles step 7's
+   fixture arrangement as written.
+6. **Semver past major 0.** While major is 0 a reader refuses a newer minor,
+   as section 4.1 says. From major 1 a reader **accepts** a newer minor within
+   its own major, and minor releases from 1.0 may then only add tables that an
+   older reader skips (section 4.2's rule for unknown tags), never change the
+   layout of the fixed prefix or of an existing table; a newer major is
+   refused. Patch never affects reading. This replaces section 4.1's sentence
+   "Semver past major 0 (what a minor bump may and may not do from 1.0) is
+   left open (open question 6); this plan writes only 0.1.0." (the plan still
+   writes only 0.1.0), and extends its acceptance rule: for `F.major >= 1`
+   the refusal condition is `F.major > K.major`, not
+   `(F.major, F.minor) > K`. Step 1's test table gains two rows, run against
+   a hypothetical 5:1.0 reader through the gating helper: `05 01 02 00` is
+   accepted (unknown tables skipped) and `05 02 00 00` is refused.
+7. **The Format line becomes part of Rule 5.** libmsdf's Rule 5 gains the
+   rule of section 4.12: every `VERSIONS.md` entry has a **Format** line
+   naming the atlas format version it writes and the versions it reads, and
+   a release that starts writing a format older releases cannot read bumps
+   the minor version even without a public API change. This is a separate
+   change to AGENTS.md that this plan proposes; **it is not written now**,
+   and is made as its own commit, with its own CHANGES.md addendum, when the
+   owner approves the wording. Until then section 4.12 applies to the 0.4.0
+   entry as written there.
