@@ -1064,3 +1064,124 @@ the commits are made, or as one squash, as the 0.3.0 landing did.
    release that starts writing a format older releases refuse bumps the
    minor version), or put it into AGENTS.md Rule 5 for all repositories that
    share it?
+
+## Amendment — 2026-10-16 12:41 EDT: `LICT`, the text companion to `LICS`
+
+Owner's decision, relayed: "LICT is n-count and ascii of the copyright/license
+name (like a c++ symbol)". The licence strings move out of `LICS` into a new
+all-capital table, `LICT`, so `LICS` becomes fixed-size.
+
+**What this replaces.** In section 4.8, the `LICS` byte layout (the block
+from "0   2  count u16" to "zero padding to a multiple of 4") and the
+sentence "Strings are at most 4096 bytes; records are in bake order; at least
+one record per style the atlas carries cells for." are replaced by the two
+layouts below. Section 4.3's list of all-capital tags becomes `LICS` and
+`LICT`. Everything else in section 4.8 stands: the registry, the bake rules,
+the reader's handling of unknown fourccs, and `LicenceRecord`, whose public
+fields are unchanged and whose strings are now read from `LICT`. Step 2's
+**Done when:** gains the `LICT` tests listed at the end of this amendment.
+
+**`LICS`** (one per atlas, `face` = 0xFF), 4 + 12 × count bytes:
+
+```text
+0   2  count u16 (at least 1 in a baked atlas)
+2   2  reserved 0
+then count records, 12 bytes each, in bake order:
+0   4  licence fourcc   [u8; 4], registry of section 4.8
+4   4  licence version  [major, minor, patch, subpatch]
+8   1  styles           bitmask of GlyphStyle ordinals covered
+9   1  reserved 0
+10  2  lict_index       u16: index of this record's entry in LICT
+```
+
+At least one record covers each style the atlas has cells for.
+
+**`LICT`** (one per atlas, `face` = 0xFF), required whenever `LICS` is
+present and absent otherwise:
+
+```text
+0   2  count u16, equal to LICS's count
+2   2  reserved 0
+4      count entries, back to back, in the same order as LICS's records.
+       Each entry is four strings in this fixed order:
+         spdx, source, copyright, rfn
+       and each string is written as its length in decimal ASCII digits
+       followed immediately by that many bytes of text, with no separator,
+       the way Itanium C++ mangled names encode identifiers.
+then zero padding to a multiple of 4 (outside the table's length)
+```
+
+Example entry for Grenze Gotisch, whose `name` ID 0 is 98 characters long
+and which has no Reserved Font Name:
+
+```text
+7OFL-1.114Grenze Gotisch98Copyright 2020 The Grenze Gotisch Project Authors (https://github.com/Omnibus-Type/Grenze-Gotisch)0
+```
+
+**Reference between the two.** LICS record `i` names its entry with
+`lict_index`, and entries are written in LICS order, so a valid file always
+has `lict_index == i`. A reader refuses a file where any `lict_index` differs
+from its position, where the two counts differ, or where `LICT` has bytes
+left over after the last entry. The index is stored explicitly anyway so a
+later minor version can let records share an entry (for example two faces
+with the same licence and copyright) without changing `LICS`'s record size;
+that would be gated on the version, as section 4.1 describes.
+
+**Encoding rules.** Each is checked by the encoder at bake and by the decoder
+on read:
+
+1. **Counts.** Decimal ASCII digits `0`-`9`, no sign, no leading zeros: a
+   count that starts with `0` is exactly `0` (the empty string). A count is at
+   most 4096, so at most four digits. A count over 4096, or a fifth digit, is
+   refused.
+2. **Text.** Printable ASCII only, bytes 0x20 to 0x7E. **A string that is not
+   ASCII is refused at bake**, naming the face, the field and the first
+   non-ASCII character; the bake does not escape it. Escaping (for example
+   `\u{...}` sequences or Punycode) was considered and is not recommended: it
+   would make the stored text differ from the face's own copyright line,
+   which is the text a licence like OFL asks to be carried, and every face
+   measured for this plan (section 3.5) is plain ASCII in every field the
+   bake reads.
+3. **No leading digit.** Because a count runs into its text with no
+   separator, a string whose first character is a digit cannot be told apart
+   from the end of its count (`"3D"` would be written `23D`, which reads back
+   as a count of 23). C++ identifiers avoid this by never starting with a
+   digit, and so do these strings: a non-empty string whose first byte is
+   `0`-`9` is refused at bake with an error naming the field. None of the
+   measured values starts with a digit (copyright lines start with
+   "Copyright", SPDX identifiers with a letter).
+4. **Truncation.** A count that runs past the end of the table, digits with no
+   text after them, or a table that ends in the middle of an entry, is
+   refused.
+
+The codec is a pair of functions in `src/font/licence.rs`:
+
+```rust
+/// Append `s` as <decimal length><bytes>. Errors: not printable ASCII,
+/// starts with a digit, longer than 4096.
+fn put_counted(out: &mut Vec<u8>, s: &str) -> Result<(), LicenceTextError>;
+/// Read one counted string at `*pos`, advancing it. Errors: no digits,
+/// leading zero, more than four digits or over 4096, truncated, non-ASCII,
+/// leading digit in the text.
+fn take_counted<'a>(data: &'a [u8], pos: &mut usize) -> Result<&'a str, LicenceTextError>;
+```
+
+**Tests added to step 2's Done when:**
+
+- `7OFL-1.1` reads as `OFL-1.1`, leaving the position after it;
+- counts of two, three and four digits read correctly (a 52-byte copyright
+  line, a 98-byte one, a 4096-byte string), and a whole Grenze-style entry
+  reads back as its four strings;
+- `0` reads as the empty string and the next count follows immediately
+  (`0` then `7OFL-1.1` in one buffer gives `""` then `OFL-1.1`);
+- refused: a leading zero (`07OFL-1.1`), a count over 4096 (`4097...`), a
+  fifth digit (`10000...`), a missing count (text where digits should be),
+  truncated text (`10abc` at the end of the table), digits at the very end
+  with no text, a non-ASCII byte in the text, and a text starting with a
+  digit;
+- the encoder refuses non-ASCII text, a leading digit and an over-long
+  string, and its output round-trips through the decoder for every licence
+  string of the bundled faces;
+- a `LICS` with a `lict_index` that differs from its position, or with a
+  count that differs from `LICT`'s, is refused; a `LICS` without a `LICT` is
+  refused.
