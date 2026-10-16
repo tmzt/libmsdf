@@ -32,11 +32,17 @@ shaper = ["libmsdf-font/shaper", "dep:ttf-parser"]
 # CPU msdfgen reference baking. Off by default for two reasons:
 # 1. msdfgen is C++ FFI — it can never build for wasm32 (the compute-shader
 #    MSDF path is the runtime generator there);
-# 2. under the workspace's Cranelift dev profile on macOS, cranelift emits
-#    the C++ extern references with a doubled Mach-O underscore prefix
-#    (`___ZN7msdfgen…` vs the archive's `__ZN7msdfgen…`), so linking fails.
-#    Enable together with the LLVM backend, e.g.:
-#    CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm cargo test -p libmsdf --features cpu-bake
+# 2. under a Cranelift dev profile on macOS, cranelift emits the C++ extern
+#    references with a doubled Mach-O underscore prefix (`___ZN7msdfgen…` vs
+#    the archive's `__ZN7msdfgen…`), so linking fails. A workspace on a
+#    nightly Cranelift profile builds msdfgen with LLVM by adding, to its own
+#    manifest (a dependency cannot set profiles):
+#        [profile.dev]
+#        codegen-backend = "llvm"
+#    or, for a build script that bakes with libmsdf-font's `bake`:
+#        [profile.dev.build-override]
+#        codegen-backend = "llvm"
+#    On stable Rust (which builds with LLVM) nothing is needed.
 cpu-bake = ["shaper", "libmsdf-font/bake"]
 # GPU integration tests (headless wgpu). Gated for the same reason: under
 # the Cranelift dev profile, wgpu init aborts at runtime on aarch64
