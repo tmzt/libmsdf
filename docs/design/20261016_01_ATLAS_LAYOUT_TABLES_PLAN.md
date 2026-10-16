@@ -1185,3 +1185,85 @@ fn take_counted<'a>(data: &'a [u8], pos: &mut usize) -> Result<&'a str, LicenceT
 - a `LICS` with a `lict_index` that differs from its position, or with a
   count that differs from `LICT`'s, is refused; a `LICS` without a `LICT` is
   refused.
+
+## Amendment — 2026-10-16 12:56 EDT: `LICT` strings are length-byte prefixed
+
+Owner's correction, relayed: "I stated that wrong, it should be a byte length
+followed by ascii". Each `LICT` string is one binary length byte followed by
+that many printable ASCII bytes (a Pascal-style string), not a decimal count.
+
+**What this replaces.** In the 12:41 EDT amendment:
+
+- in the `LICT` layout, the text "each string is written as its length in
+  decimal ASCII digits followed immediately by that many bytes of text, with
+  no separator, the way Itanium C++ mangled names encode identifiers" is
+  replaced by "each string is written as one length byte (u8, 0 to 255)
+  followed by that many bytes of text";
+- the worked Grenze example is replaced by the one below;
+- the **Encoding rules** (1 to 4) are replaced by the rules below. Rule 1
+  (decimal counts, no leading zeros, at most four digits, at most 4096) and
+  rule 3 (no string may start with a digit) are withdrawn, since a binary
+  length byte cannot run into its text;
+- the codec signatures and step 2's added tests are replaced by the ones
+  below.
+
+Everything else in the 12:41 amendment stands: the fixed-size `LICS` record,
+`LICT`'s header and entry order (spdx, source, copyright, rfn), the
+`lict_index` reference and its checks.
+
+**Worked example** (Grenze Gotisch, no Reserved Font Name), as bytes:
+
+```text
+0x07 "OFL-1.1"
+0x0E "Grenze Gotisch"
+0x62 "Copyright 2020 The Grenze Gotisch Project Authors (https://github.com/Omnibus-Type/Grenze-Gotisch)"
+0x00
+```
+
+(0x62 = 98, the length of that `name` ID 0 line.)
+
+**Encoding rules**, checked by the encoder at bake and by the decoder on
+read:
+
+1. **Length.** One byte, 0 to 255. 0 is the empty string. **A string longer
+   than 255 bytes is refused at bake**, naming the face and the field. Every
+   string measured for this plan fits: the longest is Grenze Gotisch's
+   98-byte copyright line (section 3.5); Texturina's is 88 bytes and Roboto's
+   47.
+2. **Text.** Printable ASCII only, bytes 0x20 to 0x7E. A string that is not
+   ASCII is refused at bake, not escaped, for the reason the 12:41 amendment
+   gives.
+3. **Truncation.** A length byte that runs past the end of the table, or a
+   table that ends in the middle of an entry (including right after a length
+   byte), is refused.
+4. **Structure** (unchanged from 12:41): `LICT`'s count equals `LICS`'s;
+   every `lict_index` equals its record's position; no bytes are left over
+   after the last entry; a `LICS` without a `LICT` is refused.
+
+**Codec**, in `src/font/licence.rs`:
+
+```rust
+/// Append `s` as <u8 length><bytes>. Errors: not printable ASCII, longer
+/// than 255 bytes.
+fn put_pstr(out: &mut Vec<u8>, s: &str) -> Result<(), LicenceTextError>;
+/// Read one length-prefixed string at `*pos`, advancing it. Errors: no
+/// length byte, length past the end, non-ASCII byte.
+fn take_pstr<'a>(data: &'a [u8], pos: &mut usize) -> Result<&'a str, LicenceTextError>;
+```
+
+**Tests added to step 2's Done when** (replacing the 12:41 list):
+
+- `0x07 "OFL-1.1"` reads as `OFL-1.1`, leaving the position after it;
+- length 0 reads as the empty string and the next string follows
+  immediately (`0x00` then `0x07 "OFL-1.1"` gives `""` then `OFL-1.1`);
+- length 255 with 255 bytes of text reads back whole;
+- the whole Grenze example entry above reads back as its four strings;
+- refused: a length past the end of the table (`0x0A "abc"` at the end),
+  a length byte with nothing after it, a table ending before an entry's
+  fourth string, and a non-ASCII byte (0x80 and above, or a control byte
+  below 0x20) in the text;
+- the encoder refuses non-ASCII text and a 256-byte string, and its output
+  round-trips through the decoder for every licence string of the bundled
+  faces;
+- a `LICS` whose `lict_index` differs from its position, or whose count
+  differs from `LICT`'s, is refused; a `LICS` without a `LICT` is refused.
