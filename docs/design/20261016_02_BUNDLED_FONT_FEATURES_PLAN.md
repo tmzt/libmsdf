@@ -1722,3 +1722,12 @@ The coordinating agent's read-only review of highbay found:
 highbay therefore adapts with feature lines in its manifest only. Its
 custom symbols are not sourced from the bundled fonts, so the coverage
 groups do not affect them.
+
+## Amendment — 2026-10-16 13:42 EDT: the owner confirms `CVRG`
+
+The owner confirmed, relayed by the coordinating agent: "keep CVRG". The
+separate all-capital `CVRG` table of the 13:40 EDT amendment, section 3,
+stands as written. Coverage groups and missing codepoints are not folded
+into `Head`. The amendment's text carried no open caveat on this point;
+this note records the confirmation, which was asked for when it was
+reported. Nothing else changes.
