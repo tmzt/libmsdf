@@ -265,6 +265,37 @@ fn main() {
             "bake_atlas: layout extracted and checked in {:.2?} (whole bake)",
             started.elapsed()
         );
+        // The check once more per face, timed on its own, for the log: the
+        // corpus size and how long one face's check takes.
+        if let Some(layout) = &atlas.layout {
+            for face in layout.faces() {
+                let data = builder
+                    .face_data(face.style)
+                    .expect("a baked style has a face");
+                let opts = libmsdf::LayoutOptions {
+                    extra_features: features
+                        .iter()
+                        .filter(|(s, _)| *s == face.style)
+                        .map(|(_, t)| *t)
+                        .collect(),
+                };
+                let t = std::time::Instant::now();
+                let n = libmsdf::font::layout_bake::check_equivalence(data, face, &opts)
+                    .expect("the bake's own check passed");
+                eprintln!(
+                    "bake_atlas: {:?}: {n} corpus strings shape identically with rustybuzz and \
+                     AtlasShaper ({:.2?}); features {:?}; {} Gsub lookups, {} Gpos pairs",
+                    face.style,
+                    t.elapsed(),
+                    face.features
+                        .iter()
+                        .map(|f| String::from_utf8_lossy(f).into_owned())
+                        .collect::<Vec<_>>(),
+                    face.gsub.len(),
+                    face.gpos.len()
+                );
+            }
+        }
         return finish(atlas, check, &out_path);
     }
     let atlas = builder.build().unwrap_or_else(|e| {

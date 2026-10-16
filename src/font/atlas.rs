@@ -1821,6 +1821,11 @@ impl FontAtlasBuilder {
         list.push((style, opts));
     }
 
+    /// The face a style's cells are baked from, if one is registered.
+    pub fn face_data(&self, style: GlyphStyle) -> Option<&[u8]> {
+        self.style_face(style)
+    }
+
     /// Whether this builder bakes layout tables.
     pub fn bakes_layout(&self) -> bool {
         self.layout.is_some()

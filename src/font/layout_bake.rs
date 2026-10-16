@@ -692,7 +692,9 @@ pub(crate) fn declared_licence(face: &ttf_parser::Face) -> Option<&'static str> 
 }
 
 impl FaceLayout {
-    /// **Extract one face's tables.**
+    /// **Extract one face's tables and run the equivalence check on them**
+    /// ([`check_equivalence`]): a face whose layout the tables cannot carry
+    /// exactly is an error, never an approximate table.
     ///
     /// `style` is the style the face is baked as; `opts` adds optional
     /// features to this face only.
@@ -701,7 +703,9 @@ impl FaceLayout {
         style: GlyphStyle,
         opts: &LayoutOptions,
     ) -> Result<FaceLayout, LayoutError> {
-        Self::extract_tables(face_data, style, opts)
+        let layout = Self::extract_tables(face_data, style, opts)?;
+        check_equivalence(face_data, &layout, opts)?;
+        Ok(layout)
     }
 
     /// [`FaceLayout::extract`] without the equivalence check.
@@ -906,6 +910,173 @@ impl FaceLayout {
     }
 }
 
+/// The pangrams of the equivalence corpus.
+pub const LAYOUT_CHECK_PANGRAMS: &[&str] = &[
+    "The quick brown fox jumps over the lazy dog",
+    "Sphinx of black quartz, judge my vow",
+    "Pack my box with five dozen liquor jugs",
+    "Waltz, bad nymph, for quick jigs vex",
+    "Falsches \u{dc}ben von Xylophonmusik qu\u{e4}lt jeden gr\u{f6}\u{df}eren Zwerg",
+    "Portez ce vieux whisky au juge blond qui fume",
+];
+
+/// The ledger-style strings of the equivalence corpus.
+pub const LAYOUT_CHECK_LEDGER: &[&str] = &[
+    "Treasury 50G",
+    "Population 5",
+    "fifty florins",
+    "affluent office baffle",
+    "flagon of fine fish",
+    "To the Toll",
+    "T T T",
+    "Tax: +12G",
+    "Total \u{2013} 1,250G",
+    "\u{201c}Summa\u{201d} \u{2026} 100%",
+    "\u{bd} \u{bc} \u{be} 1/2",
+    "AVA Ty To Te",
+    "`T` \u{b4}A\u{b4} \u{a8}E\u{a8} \u{af}O\u{af}",
+    "line\nbreak\ttab\r",
+    "soft\u{ad}hyphen of\u{ad}fice",
+];
+
+/// Strings with no letter at all, which rustybuzz shapes under the `DFLT`
+/// script rather than `latn`.
+pub const LAYOUT_CHECK_NO_LETTERS: &[&str] = &[
+    "0123456789",
+    "1/2 - 3.50, (42)!",
+    "12:30 #7 $5 @3 %9 &1 *2",
+    "+-=<>[]{}|\\~^_",
+    "\u{a7}1 \u{b6}2 \u{b0}3 \u{b1}4 \u{d7}5 \u{f7}6 \u{a9}\u{ae}\u{2122}",
+    "1\u{ad}2 . , ; : ' \"",
+];
+
+/// **The equivalence check** (plan section 4.9): shape the corpus with
+/// [`crate::font::TextShaper`] (with the bake's features) and with an
+/// [`crate::font::AtlasShaper`] over `layout`, and require every field of
+/// every run to agree. Returns the corpus size.
+///
+/// The corpus: every `Cmap` codepoint alone and every ordered pair of them;
+/// every `Gsub` rule's sequence (with its context) with every `Cmap`
+/// codepoint before and after it, and with U+00AD between each two of its
+/// characters; every `Gpos` pair with U+00AD between; the pangrams, the
+/// ledger strings and strings with no letter at all.
+pub fn check_equivalence(
+    face_data: &[u8],
+    layout: &FaceLayout,
+    opts: &LayoutOptions,
+) -> Result<usize, LayoutError> {
+    let mut text = crate::font::TextShaper::new(face_data.to_vec())
+        .map_err(|e| LayoutError::Face(e.to_string()))?;
+    text.set_default_features(opts.text_shaper_features());
+    let atlas = crate::font::AtlasShaper::from_face(layout.clone());
+    let style = layout.style;
+
+    let chars: Vec<char> = layout
+        .cmap
+        .iter()
+        .filter_map(|&(cp, _)| char::from_u32(cp))
+        .collect();
+    // A codepoint for a glyph, where the Cmap names one.
+    let char_of = |g: u16| -> Option<char> {
+        layout
+            .cmap
+            .iter()
+            .find(|c| c.1 == g)
+            .and_then(|c| char::from_u32(c.0))
+    };
+
+    let mut count = 0usize;
+    let mut check = |s: &str| -> Result<(), LayoutError> {
+        count += 1;
+        let mut want = text.shape(s);
+        for g in &mut want.glyphs {
+            g.glyph_id = style.styled_glyph_id(g.glyph_id).unwrap_or(0);
+        }
+        let got = atlas.shape(s);
+        if got != want {
+            return Err(LayoutError::Mismatch {
+                text: s.to_string(),
+                rustybuzz: want,
+                atlas: got,
+            });
+        }
+        Ok(())
+    };
+
+    let mut buf = String::new();
+    for &a in &chars {
+        buf.clear();
+        buf.push(a);
+        check(&buf)?;
+        for &b in &chars {
+            buf.clear();
+            buf.push(a);
+            buf.push(b);
+            check(&buf)?;
+        }
+    }
+
+    // Rule sequences, as text.
+    let mut sequences: Vec<Vec<char>> = Vec::new();
+    for lookup in &layout.gsub {
+        match &lookup.rules {
+            GsubRules::Single(r) => {
+                for &(from, _) in r {
+                    sequences.extend(char_of(from).map(|c| vec![c]));
+                }
+            }
+            GsubRules::Ligature(r) => {
+                for lig in r {
+                    let seq: Option<Vec<char>> =
+                        lig.components.iter().map(|&g| char_of(g)).collect();
+                    sequences.extend(seq);
+                }
+            }
+            GsubRules::ContextSingle(r) => {
+                for rec in r {
+                    let (Some(c), Some(i)) = (char_of(rec.context), char_of(rec.input)) else {
+                        continue;
+                    };
+                    sequences.push(match rec.side {
+                        ContextSide::Before => vec![c, i],
+                        ContextSide::After => vec![i, c],
+                    });
+                }
+            }
+        }
+    }
+    sequences.sort();
+    sequences.dedup();
+    for seq in &sequences {
+        let body: String = seq.iter().collect();
+        for &x in &chars {
+            check(&format!("{x}{body}"))?;
+            check(&format!("{body}{x}"))?;
+        }
+        if seq.len() > 1 {
+            let shy: String = seq
+                .iter()
+                .map(|c| c.to_string())
+                .collect::<Vec<_>>()
+                .join("\u{ad}");
+            check(&shy)?;
+        }
+    }
+    for &(key, _) in &layout.gpos {
+        if let (Some(l), Some(r)) = (char_of((key >> 16) as u16), char_of(key as u16)) {
+            check(&format!("{l}\u{ad}{r}"))?;
+        }
+    }
+    for s in LAYOUT_CHECK_PANGRAMS
+        .iter()
+        .chain(LAYOUT_CHECK_LEDGER)
+        .chain(LAYOUT_CHECK_NO_LETTERS)
+    {
+        check(s)?;
+    }
+    Ok(count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1032,5 +1203,60 @@ mod tests {
             "Foo Sans"
         );
         assert_eq!(reserved_font_name("Copyright 2011 Google Inc."), "");
+    }
+}
+
+/// The equivalence check (atlas layout tables plan, step 5).
+#[cfg(test)]
+mod equivalence {
+    use super::*;
+
+    #[test]
+    fn the_bundled_faces_pass() {
+        for (face, style) in [
+            (crate::font::ROBOTO_REGULAR_ASCII, GlyphStyle::Regular),
+            (crate::font::ROBOTO_BOLD_ASCII, GlyphStyle::Bold),
+            (crate::font::ROBOTO_ITALIC_ASCII, GlyphStyle::Italic),
+            (crate::font::ROBOTO_ASCII_MSYMBOLS, GlyphStyle::Regular),
+        ] {
+            let opts = LayoutOptions::default();
+            let layout = FaceLayout::extract_tables(face, style, &opts).expect("extracts");
+            let n = check_equivalence(face, &layout, &opts)
+                .unwrap_or_else(|e| panic!("{style:?}: {e}"));
+            assert!(n > 40_401, "the corpus is at least every pair: {n}");
+            eprintln!("{style:?}: {n} strings agree");
+        }
+    }
+
+    #[test]
+    fn a_corrupted_gpos_value_is_caught() {
+        let face = crate::font::ROBOTO_REGULAR_ASCII;
+        let opts = LayoutOptions::default();
+        let mut layout = FaceLayout::extract_tables(face, GlyphStyle::Regular, &opts).unwrap();
+        layout.gpos[0].1 += 1;
+        match check_equivalence(face, &layout, &opts) {
+            Err(e @ LayoutError::Mismatch { .. }) => {
+                let LayoutError::Mismatch { text, .. } = &e else {
+                    unreachable!()
+                };
+                assert!(e.to_string().contains(&format!("{text:?}")), "{e}");
+            }
+            other => panic!("expected a mismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reordered_gsub_lookups_are_caught() {
+        // Two single substitutions whose order matters: a -> b, then b -> c.
+        let face = include_bytes!("../../tests/fixtures/layout/roboto-ordered-singles.ttf");
+        let opts = LayoutOptions::default();
+        let mut layout = FaceLayout::extract_tables(face, GlyphStyle::Regular, &opts).unwrap();
+        assert_eq!(layout.gsub.len(), 2);
+        check_equivalence(face, &layout, &opts).expect("in font order, the shapers agree");
+        layout.gsub.swap(0, 1);
+        match check_equivalence(face, &layout, &opts) {
+            Err(LayoutError::Mismatch { text, .. }) => assert!(text.contains('a'), "{text:?}"),
+            other => panic!("expected a mismatch, got {other:?}"),
+        }
     }
 }
