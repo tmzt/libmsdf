@@ -251,7 +251,13 @@ fn main() {
                 .filter(|(s, _)| *s == style)
                 .map(|(_, t)| *t)
                 .collect();
-            builder.with_style_layout(style, libmsdf::LayoutOptions { extra_features });
+            builder.with_style_layout(
+                style,
+                libmsdf::LayoutOptions {
+                    extra_features,
+                    ..Default::default()
+                },
+            );
         }
         eprintln!(
             "bake_atlas: layout tables requested for {:?}",
@@ -273,6 +279,7 @@ fn main() {
                     .face_data(face.style)
                     .expect("a baked style has a face");
                 let opts = libmsdf::LayoutOptions {
+                    coverage: libmsdf::TEXT_RANGES.to_vec(),
                     extra_features: features
                         .iter()
                         .filter(|(s, _)| *s == face.style)

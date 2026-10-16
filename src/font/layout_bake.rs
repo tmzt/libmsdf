@@ -41,10 +41,24 @@ pub const RUSTYBUZZ_DEFAULT_FEATURES: &[[u8; 4]] = &[
 pub const TEXT_SHAPER_DEFAULT_FEATURES: &[[u8; 4]] = &[*b"lnum", *b"pnum"];
 
 /// What to extract beyond the defaults.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LayoutOptions {
     /// Optional features to apply beyond the defaults, e.g. `*b"tnum"`.
     pub extra_features: Vec<[u8; 4]>,
+    /// The declared text coverage: inclusive codepoint ranges. The `Cmap`
+    /// holds every codepoint of it the face maps (plus the C0/C1 controls the
+    /// face maps), and the equivalence corpus runs over those. Defaults to
+    /// [`TEXT_RANGES`], so every existing caller and result is unchanged.
+    pub coverage: Vec<(char, char)>,
+}
+
+impl Default for LayoutOptions {
+    fn default() -> Self {
+        Self {
+            extra_features: Vec::new(),
+            coverage: TEXT_RANGES.to_vec(),
+        }
+    }
 }
 
 impl LayoutOptions {
@@ -173,10 +187,11 @@ impl core::fmt::Display for LayoutError {
 
 impl std::error::Error for LayoutError {}
 
-/// The codepoints a `Cmap` covers: [`TEXT_RANGES`] and the C0/C1 controls.
-pub(crate) fn cmap_scope() -> impl Iterator<Item = char> {
+/// The codepoints a `Cmap` covers: the declared `coverage` and the C0/C1
+/// controls.
+pub(crate) fn cmap_scope(coverage: &[(char, char)]) -> impl Iterator<Item = char> + use<> {
     let controls = [('\u{0}', '\u{1F}'), ('\u{7F}', '\u{9F}')];
-    let mut cps: Vec<char> = TEXT_RANGES
+    let mut cps: Vec<char> = coverage
         .iter()
         .chain(controls.iter())
         .flat_map(|&(lo, hi)| (lo as u32..=hi as u32).filter_map(char::from_u32))
@@ -751,7 +766,7 @@ impl FaceLayout {
 
         // Cmap over the scope.
         let mut cmap: Vec<(u32, u16)> = Vec::new();
-        for ch in cmap_scope() {
+        for ch in cmap_scope(&opts.coverage) {
             if let Some(g) = face.glyph_index(ch)
                 && g.0 != 0
             {
@@ -1067,12 +1082,22 @@ pub fn check_equivalence(
             check(&format!("{l}\u{ad}{r}"))?;
         }
     }
+    // The fixed strings, except one with a character the face maps but the
+    // declared coverage leaves out: that is outside AtlasShaper's contract
+    // (it draws the placeholder at the .notdef advance).
+    let in_contract = |s: &str| {
+        s.chars().all(|c| {
+            layout.cmap.binary_search_by_key(&(c as u32), |m| m.0).is_ok() || !text.covers(c)
+        })
+    };
     for s in LAYOUT_CHECK_PANGRAMS
         .iter()
         .chain(LAYOUT_CHECK_LEDGER)
         .chain(LAYOUT_CHECK_NO_LETTERS)
     {
-        check(s)?;
+        if in_contract(s) {
+            check(s)?;
+        }
     }
     Ok(count)
 }
@@ -1192,6 +1217,37 @@ mod tests {
             }
             other => panic!("expected UnsupportedLookup, got {other:?}"),
         }
+    }
+
+    /// The coverage parameter (bundled fonts plan, 13:40 EDT amendment): the
+    /// default is TEXT_RANGES, and a narrower coverage narrows the Cmap
+    /// while the check still passes.
+    #[test]
+    fn the_coverage_parameter_scopes_the_cmap() {
+        let face = crate::font::ROBOTO_REGULAR_ASCII;
+        let default = extract(face);
+        let explicit = FaceLayout::extract_tables(
+            face,
+            GlyphStyle::Regular,
+            &LayoutOptions {
+                extra_features: Vec::new(),
+                coverage: TEXT_RANGES.to_vec(),
+            },
+        )
+        .unwrap();
+        assert_eq!(default, explicit);
+        let narrower: Vec<(char, char)> = TEXT_RANGES
+            .iter()
+            .copied()
+            .filter(|r| *r != ('\u{2026}', '\u{2026}'))
+            .collect();
+        let opts = LayoutOptions {
+            extra_features: Vec::new(),
+            coverage: narrower,
+        };
+        let l = FaceLayout::extract(face, GlyphStyle::Regular, &opts).expect("still passes");
+        assert!(!l.cmap.iter().any(|c| c.0 == 0x2026));
+        assert_eq!(l.cmap.len(), default.cmap.len() - 1);
     }
 
     #[test]
