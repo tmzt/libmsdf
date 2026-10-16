@@ -6,7 +6,7 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 /// A single positioned glyph from shaping.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShapedGlyph {
     /// Font-internal glyph ID (u16, matches ttf-parser/OpenType glyph index)
     pub glyph_id: u16,
@@ -21,7 +21,7 @@ pub struct ShapedGlyph {
 }
 
 /// Result of shaping a text run.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShapedRun {
     pub glyphs: Vec<ShapedGlyph>,
     /// Total advance width in font units
@@ -275,6 +275,18 @@ impl TextShaper {
             0x30A0..=0x30FF |        // Katakana
             0xFF00..=0xFFEF          // Halfwidth and Fullwidth Forms
         )
+    }
+}
+
+impl crate::font::RunShaper for TextShaper {
+    fn shape(&self, text: &str) -> ShapedRun {
+        TextShaper::shape(self, text)
+    }
+    fn units_per_em(&self) -> u16 {
+        TextShaper::units_per_em(self)
+    }
+    fn covers(&self, ch: char) -> bool {
+        TextShaper::covers(self, ch)
     }
 }
 

@@ -13,6 +13,7 @@
 //! - **`outline`** — glyph outline → colored edge list (compute MSDF input)
 
 pub mod atlas;
+pub mod atlas_shaper;
 pub mod glyph_table;
 pub mod layout;
 pub mod layout_bake;
@@ -30,6 +31,7 @@ pub use atlas::{
     FontAtlasBuilder, GlyphProjection, LayerNotBaked, MAX_ATLAS_LAYERS, MAX_ATLAS_TABLE_BYTES,
     MAX_ATLAS_TABLES, SetMetrics, StyledGlyphError, atlas_capacity, cap_height, glyph_projection,
 };
+pub use atlas_shaper::{AtlasShaper, NoLayout, RunShaper, is_default_ignorable};
 pub use glyph_table::GlyphEntry;
 pub use layout::{
     AtlasLayout, ContextSide, ContextSingle, FaceLayout, GsubLookup, GsubRules, Ligature,
