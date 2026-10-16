@@ -241,3 +241,52 @@ coverage, which means `LayoutOptions` / `FaceLayout::extract` take a
 coverage parameter. That is an interface departure from that frozen plan.
 It must be agreed with the owner, and recorded here, before that plan's
 step 3 fixes the scope. No code changes for the bundled fonts plan yet.
+
+## 2026-10-16 13:41 EDT — Atlas layout tables: coverage parameter (departure); bundled fonts coverage groups
+
+Plans: `docs/design/20261016_01_ATLAS_LAYOUT_TABLES_PLAN.md` (In
+implementation) and `docs/design/20261016_02_BUNDLED_FONT_FEATURES_PLAN.md`
+(Draft; approved).
+
+**Departure from the atlas layout tables plan (Rule 1.7), agreed by the
+owner:** "yes, add the coverage parameter". The layout extraction, the
+`Cmap` scope and the equivalence corpus take the declared coverage instead
+of the hard-coded `TEXT_RANGES`, through a new
+`LayoutOptions::coverage: Vec<(char, char)>` that defaults to `TEXT_RANGES`,
+so the Roboto results do not change. This changes committed code: that
+plan's step 3 (`7c00f63`) and step 4 (`6d18eab`). The change lands as its
+own commit after that plan's step 5 and before the bundled fonts plan's
+step 4. The format also gains `CVRG`, an all-capital per-face table
+recording the declared coverage groups and the missing codepoints. It is
+added within 5:0.1.0, before that version is released. The bundled fonts
+plan's 13:34 EDT amendment said this would be settled "before that plan's
+step 3 fixes the scope"; that was already out of date, and its 13:4x EDT
+amendment corrects it.
+
+**Bundled fonts plan:** coverage is split into groups with different
+ranges and rules:
+
+- `COVERAGE_TEXT` (287 codepoints: Basic Latin, the Latin-1 letters, NBSP,
+  soft hyphen, Latin Extended-A). A missing codepoint fails the bake unless
+  waived per face; Texturina's U+017F is waived.
+- `COVERAGE_SYMBOLS` (63: the Latin-1 symbols, General Punctuation dashes,
+  quotes, daggers, bullet, ellipsis, per mille, primes and guillemets,
+  € ₴ ₺ ₽ ₾, № ™ ℮). Missing codepoints are skipped and reported.
+- `COVERAGE_MATH` (78: common operators and relations, superscript and
+  subscript digits and signs, vulgar fractions). Missing codepoints are
+  skipped and reported.
+
+U+2044 FRACTION SLASH is excluded, because rustybuzz's automatic
+`numr`/`dnom` fractions cannot be carried by the tables. Measured:
+
+- Grenze Gotisch: TEXT 287/287, SYMBOLS 57/63, MATH 48/78.
+- Texturina: TEXT 286/287, SYMBOLS 55/63, MATH 50/78.
+
+The OFL subsets keep the 411-codepoint union (Grenze about 132 KB,
+Texturina about 214 KB). Each atlas carries roughly 390 to 400 cells, so
+the 16-column bake stands.
+
+**Approval:** the owner approved the plan after the coordinating agent's
+read-only highbay review ("it will adapt, its custom symbols aren't font
+sourced"). highbay needs only feature lines; its icon and marker codepoint
+tables stay ungated. No code changes for the bundled fonts plan yet.
