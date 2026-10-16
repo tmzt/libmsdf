@@ -300,3 +300,73 @@ of the separate `CVRG` coverage table, rather than new `Head` fields.
 **Correction:** the previous addendum ("Atlas layout tables: coverage
 parameter (departure); bundled fonts coverage groups") refers to the
 plan's "13:4x EDT amendment". It is the **13:40 EDT** amendment.
+
+## 2026-10-16 13:50 EDT — Atlas layout tables: steps 1 to 7 landed on impl/0.4.0, and departures
+
+Plan: [Atlas-carried layout tables and a shaper without rustybuzz](docs/design/20261016_01_ATLAS_LAYOUT_TABLES_PLAN.md)
+(In implementation). Steps 1 to 7 are committed on `impl/0.4.0`:
+`ba766d8` (1), `f15a308` (2), `7c00f63` (3), `6d18eab` (4), `aab4ff2`
+(5), `d4faeb9` (6), `720cd24` (the agreed coverage parameter, 13:41 EDT
+addendum), `46e3c74` (7), with the repository-level script commits
+`6393a23`, `d59ea40` and `fdf18c5`. Step 8 (the release) is held, as the
+13:28 EDT addendum records; it becomes step 10 of the bundled fonts plan.
+Small departures, none changing behaviour others depend on beyond what the
+plan already changes:
+
+- **Step 1, `FontAtlas::file_version`.** The version a file was read at
+  needs storage, so `FontAtlas` gains a third public field,
+  `read_version: AtlasFileVersion`, beside `layout` and `licences`. It is
+  public because the tower defense game builds `FontAtlas` with a struct
+  literal; a private field would make that impossible rather than a
+  one-line change.
+- **Step 1, messages.** `from_bytes` returns `&'static str`, so refusals
+  name the rule but not the numbers ("newer than this build reads (a newer
+  minor at major 0)" rather than "5:0.2.0 is newer than 5:0.1").
+- **Step 2, additions.** `FontAtlas::try_to_bytes` (the writer refuses
+  layout or licence data that breaks a table rule; `to_bytes` panics on
+  it), `FaceLayout::validate`, `AtlasLayout::{from_faces, faces}` (the
+  plan's `faces` field is private, so it needs a constructor),
+  `LicenceKind`, `licence_by_spdx`, `licence_by_key` and
+  `LicenceTextError`'s public type. All additive.
+- **Step 3, per-face options.** Decision 3 of the 13:02 amendment (options
+  per face) is `FontAtlasBuilder::with_layout(opts)` for the regular face
+  plus `with_style_layout(style, opts)` for another style; also
+  `bakes_layout` and `face_data`. Glyph 0 is queued as the placeholder
+  cell when layout is baked, since `AtlasShaper` can output it.
+- **Step 3, extraction details** the plan leaves implicit, all checked by
+  the equivalence check: rustybuzz 0.20.1's full default feature list
+  (including `ltra`, `ltrm`, `rand`, `abvm`, `blwm`, `curs`, `dist`);
+  the first feature per tag in the language system, as HarfBuzz does;
+  contextual rules for one glyph that substitute differently, or a rule
+  that matches without substituting ahead of one that does, are refused
+  (rule order would matter); faces with AAT tables, a legacy `kern` table
+  or a FeatureVariations record live at the default instance are refused.
+- **Step 3, test faces.** The unsupported-lookup face, and step 5's
+  reordered-lookups face, are made by `scripts/make-layout-test-face.py`
+  from the bundled Roboto subset and committed under
+  `tests/fixtures/layout/`. Reordering two of Roboto's own lookups changes
+  nothing (they commute), so step 5's reorder test uses the second face.
+- **Step 4.** `AtlasShaper::from_face` and `face` are added, and
+  `is_default_ignorable` is public. `ShapedGlyph` and `ShapedRun` derive
+  `PartialEq` and `Eq` (additive) so runs compare whole.
+- **Step 5.** The "strings with no letter at all" are a constant,
+  `LAYOUT_CHECK_NO_LETTERS`. After the coverage parameter, a fixed corpus
+  string with a character the face maps outside the declared coverage is
+  skipped, since that case is outside `AtlasShaper`'s contract.
+- **Step 6.** `GlyphProjection` stays outside `shaper`: `MsdfCompute`, which
+  the plan keeps available, takes one. Its producer `glyph_projection` is
+  gated. The test compiled without default features (`tests/atlas_only.rs`)
+  landed with step 7, because it loads step 7's fixture.
+- **Step 7, consumers.** libcontrols (`464111e`, scratch copy with a
+  `[patch]` to this branch, nothing committed) builds and its 306 tests
+  pass. The tower defense game was not built: on the owner's instruction
+  its workspace is not touched. Its two committed v3 atlases were loaded
+  read-only through `FontAtlas::from_bytes` and round-trip through format
+  5 unchanged. tinytrowel and sigilweaver were not built, for disk space
+  (under 1 GB free); they are left to the bundled fonts plan's step 9.
+- **Evidence.** `out/layout/log.md`: release-build bakes with
+  `--layout` of the bundled Roboto faces and of the game's Grenze Gotisch
+  and Texturina (read from its assets), each passing the equivalence check:
+  Roboto Regular 46,695 strings, Bold 48,469, Italic 48,447,
+  Grenze Gotisch 153,766, Texturina 48,291; the slowest single-face check
+  took 1.14 s (Grenze), under the 10 s budget.
