@@ -146,3 +146,32 @@ Before writing, modifying or deleting code for a new planned work item:
    chain. The `VERSIONS.md` entry names the dependency with its old and new
    versions and marks the change **Breaking**. A repository with no public
    API (an application) only updates its manifest and lock file.
+
+## Bundled fonts and atlases
+
+The bundled fonts are opt-in cargo features (`font-apache-*`, `font-ofl-*`;
+README.md, "Licensing"). Their atlases are committed under `fonts/atlases/`
+(the fallback of `docs/design/20261016_02_BUNDLED_FONT_FEATURES_PLAN.md`,
+section 4.10: the build-time bake did not meet its build-time criterion).
+
+1. Bundled atlases are **baked, never edited**. They are produced only by
+   `cargo run -p libmsdf-font --features bake --bin libmsdf-bake -- bundled --out fonts/atlases --hashes`
+   (`libmsdf::bake::Baker` underneath). Never hand-edit an atlas, never copy
+   one in from another repository or an older build, and never substitute
+   one face's atlas for another's. A test or build that needs a different
+   atlas is a reason to stop and ask, not to swap files.
+2. When you change a TTF under `fonts/`, the bundled table
+   (`font/src/bundled.rs`) or anything in `libmsdf-font` that the bake
+   uses, run the command of item 1, and commit `fonts/atlases/` and
+   `fonts/bundled.sha256` together. Verify with
+   `cargo run -p libmsdf-font --features bake --bin libmsdf-bake -- bundled --check fonts/atlases`
+   before committing, and with
+   `cargo test --features fonts-apache-roboto,fonts-ofl-ledger --test bundled_fonts`
+   after. If `bundled_atlases_match_the_reference` fails, the bytes
+   changed: explain the change to the owner, and update
+   `fonts/bundled.sha256` only with the owner's agreement, in its own
+   commit.
+3. A TTF under `fonts/` is replaced only together with its sha256 in the
+   bundled table and its entry in `FONTS-LICENSE-*.txt`.
+4. Bake output for inspection goes to `out/bundled/` (gitignored), never
+   into `fonts/` except by item 1's command.
