@@ -136,3 +136,13 @@ Before writing, modifying or deleting code for a new planned work item:
    are strictly additive, or change no public API, bumps the patch version
    (`0.x.y` to `0.x.(y+1)`). This applies from 0.3.0 on; earlier versions are
    not re-labelled.
+5. The public API rule is recursive through dependencies. When a crate with
+   a public API moves a dependency to a version that is not semver-compatible
+   with the one it used (for a `0.x` dependency, a new minor version; from
+   1.0, a new major version), its own release is not strictly additive and
+   bumps its minor version under Rule 5.4 (its major version from 1.0), even
+   when its own code does not change. Every crate with a public API that
+   depends on it does the same when it takes that release, and so on up the
+   chain. The `VERSIONS.md` entry names the dependency with its old and new
+   versions and marks the change **Breaking**. A repository with no public
+   API (an application) only updates its manifest and lock file.
