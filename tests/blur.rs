@@ -123,7 +123,7 @@ fn readback(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture) -> 
     });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
-    let data = slice.get_mapped_range();
+    let data = slice.get_mapped_range().unwrap();
     let mut img = Vec::with_capacity((W * H * 4) as usize);
     for row in 0..H {
         let start = (row * padded) as usize;

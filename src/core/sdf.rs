@@ -37,6 +37,20 @@ pub const DRAW_TYPE_BEZIER: f32 = 10.0;
 /// four corner radii live in the aux param bank as [tl, tr, br, bl] (screen
 /// space, +x right / +y down). params: [11, 0, anim_idx, param_bank index].
 pub const DRAW_TYPE_SLAB_PC: f32 = 11.0;
+/// Filled closed path, even-odd (see `drawlist::path`). `pos`/`size` are the
+/// control-hull bound of its segments, params:
+/// `[12, seg_count, anim_idx, param_bank index]`. The segments are
+/// `2 * seg_count` consecutive vec4s in the aux param bank, two per segment:
+/// `[p0.x, p0.y, ctrl.x, ctrl.y]`, `[p2.x, p2.y, kind, 0]`, where kind 0 is a
+/// line from p0 to p2 and kind 1 a y-monotone quadratic p0 -> ctrl -> p2, all
+/// in absolute logical pixels. `seg_count == 0` draws nothing.
+pub const DRAW_TYPE_PATH_FILL: f32 = 12.0;
+
+/// Capacity of the aux param bank, in vec4 entries (64 KiB): the size of the
+/// renderer's `param_bank` storage buffer, and the limit `DrawList::lower`
+/// keeps filled paths inside (a path whose segments would pass it is lowered
+/// with no segments rather than left to upload truncation).
+pub const PARAM_BANK_CAPACITY: usize = 4096;
 
 /// `xform[1]`, the per-instance **raised** flag: `0.0` (the default) is flat
 /// and casts nothing; this value makes the instance cast the renderer's drop
@@ -226,9 +240,11 @@ impl ClipRect {
 /// params: [f32; 4]   [type, radius, anim_idx, slot]
 ///   params[0] = draw type (DRAW_TYPE_*)
 ///   params[1] = radius (Slab, Circle) / thickness (Outline, Bezier, Line)
+///     / segment count (Path fill)
 ///   params[2] = anim_bank index (0 = no animation, 1+ = AnimBank[idx-1])
-///   params[3] = slot (Text: string ref; Bezier/Line/Slab-per-corner:
-///     param_bank index, bitcast)
+///   params[3] = slot (Text: string ref; Bezier/Line/Slab-per-corner/Path
+///     fill: param_bank index, bitcast; a path's segments are the
+///     `2 * params[1]` vec4s starting there, see [`DRAW_TYPE_PATH_FILL`])
 /// xform:  [f32; 4]   [xform_idx, raised, blur_radius, alpha_ombre]
 ///   xform[1] = [`XFORM_RAISED`] to cast this instance's drop shadow, 0.0
 ///     (the default for every instance) to stay flat.
@@ -397,10 +413,132 @@ pub fn sd_cubic_stroke(
     dmin - thickness * 0.5
 }
 
+/// Unsigned distance to the quadratic Bézier `a -> b -> c`, closed form
+/// (Inigo Quilez's `sdBezier`): `(B(t) - p) · B'(t) = 0` reduced to a
+/// depressed cubic, Cardano for one real root, the trigonometric form for
+/// three, `t` clamped to [0, 1]. Exact up to f32 rounding for a
+/// non-degenerate quadratic (`a - 2b + c` not near zero, which filled-path
+/// lowering guarantees by demoting those to lines). Mirrors `ud_quad` in
+/// `sdf_render.wgsl` - keep the two in sync.
+fn ud_quad(p: [f32; 2], a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> f32 {
+    let dot = |u: [f32; 2], v: [f32; 2]| u[0] * v[0] + u[1] * v[1];
+    let aa = [b[0] - a[0], b[1] - a[1]];
+    let bb = [a[0] - 2.0 * b[0] + c[0], a[1] - 2.0 * b[1] + c[1]];
+    let cc = [aa[0] * 2.0, aa[1] * 2.0];
+    let d = [a[0] - p[0], a[1] - p[1]];
+    let kk = 1.0 / dot(bb, bb);
+    let kx = kk * dot(aa, bb);
+    let ky = kk * (2.0 * dot(aa, aa) + dot(d, bb)) / 3.0;
+    let kz = kk * dot(d, aa);
+    let pp = ky - kx * kx;
+    let p3 = pp * pp * pp;
+    let q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
+    let h = q * q + 4.0 * p3;
+    // Squared distance from p to the curve point at t.
+    let at = |t: f32| {
+        let e = [
+            d[0] + (cc[0] + bb[0] * t) * t,
+            d[1] + (cc[1] + bb[1] * t) * t,
+        ];
+        dot(e, e)
+    };
+    let res = if h >= 0.0 {
+        let h = h.sqrt();
+        let x0 = (h - q) * 0.5;
+        let x1 = (-h - q) * 0.5;
+        let u0 = x0.signum() * x0.abs().powf(1.0 / 3.0);
+        let u1 = x1.signum() * x1.abs().powf(1.0 / 3.0);
+        at((u0 + u1 - kx).clamp(0.0, 1.0))
+    } else {
+        let z = (-pp).sqrt();
+        let v = (q / (pp * z * 2.0)).clamp(-1.0, 1.0).acos() / 3.0;
+        let m = v.cos();
+        let n = v.sin() * 1.732_050_8;
+        let t0 = ((m + m) * z - kx).clamp(0.0, 1.0);
+        let t1 = ((-n - m) * z - kx).clamp(0.0, 1.0);
+        at(t0).min(at(t1))
+    };
+    res.sqrt()
+}
+
+/// The x at which the GPU path segment `p0 -> c -> p2` (a line when
+/// `is_quad` is false) meets the horizontal line `y`, which the caller has
+/// checked lies in `[min(p0.y, p2.y), max(p0.y, p2.y))`. Segments are
+/// y-monotone, so there is exactly one such point. Mirrors `path_crossing`
+/// in `sdf_render.wgsl` - keep the two in sync.
+fn path_crossing_x(y: f32, p0: [f32; 2], c: [f32; 2], p2: [f32; 2], is_quad: bool) -> f32 {
+    if !is_quad {
+        let t = (y - p0[1]) / (p2[1] - p0[1]);
+        return p0[0] + t * (p2[0] - p0[0]);
+    }
+    let a = p0[1] - 2.0 * c[1] + p2[1];
+    let b = 2.0 * (c[1] - p0[1]);
+    let cy = p0[1] - y;
+    let t = if a.abs() < 1e-6 {
+        -cy / b
+    } else {
+        let disc = (b * b - 4.0 * a * cy).max(0.0);
+        let sb = if b < 0.0 { -1.0 } else { 1.0 };
+        let s = -0.5 * (b + sb * disc.sqrt());
+        let t1 = s / a;
+        if (-1e-4..=1.0 + 1e-4).contains(&t1) {
+            t1
+        } else if s != 0.0 {
+            cy / s
+        } else {
+            0.0
+        }
+    }
+    .clamp(0.0, 1.0);
+    let u = 1.0 - t;
+    u * u * p0[0] + 2.0 * u * t * c[0] + t * t * p2[0]
+}
+
+/// Signed distance to a filled path (even-odd), negative inside. `segments`
+/// holds the path's GPU segments as param-bank rows, two per segment:
+/// `[p0.x, p0.y, ctrl.x, ctrl.y]`, `[p2.x, p2.y, kind, 0]` (kind 0 line,
+/// 1 y-monotone quadratic; see [`DRAW_TYPE_PATH_FILL`]).
+///
+/// The sign is the parity of crossings of a ray toward +x (half-open in y,
+/// so a shared vertex counts once and a horizontal segment never). The
+/// magnitude is the minimum distance to any segment, measured only for
+/// segments whose hull bound expanded by `band` contains the point, and
+/// clamped to `band`; pass `f32::INFINITY` for the unclamped distance.
+/// Mirrors `sd_path_fill` in `sdf_render.wgsl` (case 12u) - keep the two in
+/// sync.
+pub fn sd_path_fill(px: f32, py: f32, segments: &[[f32; 4]], band: f32) -> f32 {
+    let mut inside = false;
+    let mut dmin = band;
+    for pair in segments.chunks_exact(2) {
+        let p0 = [pair[0][0], pair[0][1]];
+        let c = [pair[0][2], pair[0][3]];
+        let p2 = [pair[1][0], pair[1][1]];
+        let is_quad = pair[1][2] >= 0.5;
+        let lo = [p0[0].min(c[0]).min(p2[0]), p0[1].min(c[1]).min(p2[1])];
+        let hi = [p0[0].max(c[0]).max(p2[0]), p0[1].max(c[1]).max(p2[1])];
+        if py >= p0[1].min(p2[1])
+            && py < p0[1].max(p2[1])
+            && hi[0] > px
+            && path_crossing_x(py, p0, c, p2, is_quad) > px
+        {
+            inside = !inside;
+        }
+        if px >= lo[0] - band && px <= hi[0] + band && py >= lo[1] - band && py <= hi[1] + band {
+            let d = if is_quad {
+                ud_quad([px, py], p0, c, p2)
+            } else {
+                sd_segment_raw(px, py, p0[0], p0[1], p2[0], p2[1])
+            };
+            dmin = dmin.min(d);
+        }
+    }
+    if inside { -dmin } else { dmin }
+}
+
 /// Evaluate the SDF for a single draw command at pixel position (px, py).
 /// Returns (distance, color) — negative distance means inside.
 /// Commands that need the aux param bank (Bezier control points, a line's far
-/// endpoint, per-corner slab radii) fall back to degenerate values; use
+/// endpoint, per-corner slab radii, a path's segments) fall back to degenerate values; use
 /// [`sdf_eval_with_params`] for those.
 pub fn sdf_eval(cmd: &SdfDrawCmd, px: f32, py: f32) -> (f32, [f32; 4]) {
     sdf_eval_with_params(cmd, px, py, &[])
@@ -491,6 +629,33 @@ pub fn sdf_eval_with_params(
             let radii = param_bank.get(idx).copied().unwrap_or([cmd.radius(); 4]);
             sd_rounded_box_per_corner(local_x, local_y, hw, hh, radii)
         }
+        12 => {
+            // Filled path: params[1] = segment count, the 2n segment rows at
+            // param_bank[bitcast(params[3])]. Mirrors `case 12u` in
+            // sdf_render.wgsl, bound reject and band clamp included - keep
+            // the two in sync. Nothing to draw (1e6, the shader's "no hit")
+            // for n == 0, a range past the bank, or a point outside the bound.
+            let n = cmd.params[1] as usize;
+            let base = cmd.params[3].to_bits() as usize;
+            let band = 1.0 + cmd.xform[2].max(0.0);
+            let margin = if cmd.xform[1] >= 0.5 {
+                band + 8.0
+            } else {
+                band
+            };
+            match param_bank.get(base..base + 2 * n) {
+                Some(rows)
+                    if n > 0
+                        && px >= cmd.pos[0] - margin
+                        && px <= cmd.pos[0] + cmd.size[0] + margin
+                        && py >= cmd.pos[1] - margin
+                        && py <= cmd.pos[1] + cmd.size[1] + margin =>
+                {
+                    sd_path_fill(px, py, rows, band)
+                }
+                _ => 1e6,
+            }
+        }
         _ => f32::MAX,
     };
 
@@ -573,6 +738,11 @@ pub fn any_animation_active(anim_bank: &[Anim], int_bank: &[i32]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_param_bank_is_still_64_kib() {
+        assert_eq!(PARAM_BANK_CAPACITY * 16, 64 * 1024);
+    }
 
     #[test]
     fn sd_box_inside() {
@@ -789,5 +959,200 @@ mod tests {
         let bank = [[9.0f32, 9.0, 9.0, 9.0], [9.0, 9.0, 9.0, 9.0]];
         let (d, _) = sdf_eval_with_params(&cmd, 20.0, 20.0, &bank);
         assert!(d < 0.0);
+    }
+
+    // ── Filled path (DRAW_TYPE_PATH_FILL), plan step 4 ──────────────────
+
+    use crate::drawlist::path::{PathBuilder, lower_path};
+
+    fn rows(path: &crate::drawlist::Path) -> Vec<[f32; 4]> {
+        let (segs, _, _) = lower_path(path).unwrap();
+        segs.iter().flat_map(|s| s.to_rows()).collect()
+    }
+
+    fn rect(b: &mut PathBuilder, x0: f32, y0: f32, x1: f32, y1: f32, clockwise: bool) {
+        b.move_to([x0, y0]);
+        if clockwise {
+            b.line_to([x1, y0]).line_to([x1, y1]).line_to([x0, y1]);
+        } else {
+            b.line_to([x0, y1]).line_to([x1, y1]).line_to([x1, y0]);
+        }
+        b.close();
+    }
+
+    #[test]
+    fn path_fill_sign_is_even_odd_whatever_the_hole_direction() {
+        for hole_clockwise in [true, false] {
+            let mut b = PathBuilder::new();
+            rect(&mut b, 0.0, 0.0, 100.0, 100.0, true);
+            rect(&mut b, 30.0, 30.0, 70.0, 70.0, hole_clockwise);
+            let r = rows(&b.build().unwrap());
+            let d = |x, y| sd_path_fill(x, y, &r, f32::INFINITY);
+            assert!(d(10.0, 50.0) < 0.0, "in the ring");
+            assert!(d(85.0, 15.0) < 0.0, "in the ring");
+            assert!(d(50.0, 50.0) > 0.0, "in the hole");
+            assert!(d(150.0, 50.0) > 0.0, "outside");
+            assert!(d(-5.0, -5.0) > 0.0, "outside");
+            assert!((d(50.0, 50.0) - 20.0).abs() < 1e-4);
+            assert!((d(10.0, 50.0) + 10.0).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn path_fill_parity_level_with_a_vertex_and_a_horizontal_edge() {
+        // A diamond: rays level with its left and right vertices.
+        let diamond = PathBuilder::new()
+            .move_to([50.0, 0.0])
+            .line_to([100.0, 50.0])
+            .line_to([50.0, 100.0])
+            .line_to([0.0, 50.0])
+            .build()
+            .unwrap();
+        let r = rows(&diamond);
+        assert!(sd_path_fill(20.0, 50.0, &r, f32::INFINITY) < 0.0);
+        assert!(sd_path_fill(-10.0, 50.0, &r, f32::INFINITY) > 0.0);
+        assert!(sd_path_fill(110.0, 50.0, &r, f32::INFINITY) > 0.0);
+        // Level with the top vertex.
+        assert!(sd_path_fill(-10.0, 0.0, &r, f32::INFINITY) > 0.0);
+        // An L: a ray level with the inner horizontal edge (y = 50).
+        let l = PathBuilder::new()
+            .move_to([0.0, 0.0])
+            .line_to([100.0, 0.0])
+            .line_to([100.0, 50.0])
+            .line_to([50.0, 50.0])
+            .line_to([50.0, 100.0])
+            .line_to([0.0, 100.0])
+            .build()
+            .unwrap();
+        let r = rows(&l);
+        assert!(sd_path_fill(25.0, 50.0, &r, f32::INFINITY) < 0.0);
+        assert!(sd_path_fill(-10.0, 50.0, &r, f32::INFINITY) > 0.0);
+        assert!(sd_path_fill(120.0, 50.0, &r, f32::INFINITY) > 0.0);
+        assert!(sd_path_fill(75.0, 75.0, &r, f32::INFINITY) > 0.0);
+        assert!(sd_path_fill(75.0, 25.0, &r, f32::INFINITY) < 0.0);
+        // Level with the top edge (y = 0) and the bottom edge (y = 100).
+        assert!(sd_path_fill(-10.0, 0.0, &r, f32::INFINITY) > 0.0);
+        assert!(sd_path_fill(-10.0, 100.0, &r, f32::INFINITY) > 0.0);
+    }
+
+    /// The trowel blade of the tower defense game's tool icon, on its 24 px
+    /// design grid scaled by `s`.
+    fn blade(s: f32) -> crate::drawlist::Path {
+        PathBuilder::new()
+            .move_to([4.0, 14.0])
+            .cubic_to([7.0, 6.0], [13.0, 3.0], [20.0, 2.0])
+            .cubic_to([18.0, 9.0], [14.0, 13.0], [8.0, 16.0])
+            .close()
+            .build()
+            .unwrap()
+            .mapped(|[x, y]| [x * s, y * s])
+    }
+
+    fn quad_pt(r: &[[f32; 4]], t: f32) -> [f32; 2] {
+        let (p0, c, p2) = ([r[0][0], r[0][1]], [r[0][2], r[0][3]], [r[1][0], r[1][1]]);
+        let u = 1.0 - t;
+        [
+            u * u * p0[0] + 2.0 * u * t * c[0] + t * t * p2[0],
+            u * u * p0[1] + 2.0 * u * t * c[1] + t * t * p2[1],
+        ]
+    }
+
+    #[test]
+    fn path_fill_distance_agrees_with_dense_sampling() {
+        let r = rows(&blade(10.0));
+        let pairs: Vec<&[[f32; 4]]> = r.chunks_exact(2).collect();
+        // Dense polyline of every segment.
+        let mut poly: Vec<([f32; 2], [f32; 2])> = Vec::new();
+        for pair in &pairs {
+            const N: usize = 2000;
+            let mut prev = quad_pt(pair, 0.0);
+            for i in 1..=N {
+                let q = quad_pt(pair, i as f32 / N as f32);
+                poly.push((prev, q));
+                prev = q;
+            }
+        }
+        let mut seed: u32 = 0x9e37_79b9;
+        let mut rnd = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32
+        };
+        let mut worst = 0.0f32;
+        for _ in 0..500 {
+            let pair = pairs[(rnd() * pairs.len() as f32) as usize % pairs.len()];
+            let on = quad_pt(pair, rnd());
+            let p = [on[0] + (rnd() - 0.5) * 8.0, on[1] + (rnd() - 0.5) * 8.0];
+            let brute = poly
+                .iter()
+                .map(|&(a, b)| sd_segment_raw(p[0], p[1], a[0], a[1], b[0], b[1]))
+                .fold(f32::INFINITY, f32::min);
+            let d = sd_path_fill(p[0], p[1], &r, f32::INFINITY).abs();
+            worst = worst.max((d - brute).abs());
+        }
+        assert!(worst < 0.01, "worst disagreement {worst} px");
+    }
+
+    #[test]
+    fn path_fill_magnitude_is_clamped_to_the_band() {
+        let r = rows(&blade(10.0));
+        // Far outside, and deep inside the blade.
+        assert_eq!(sd_path_fill(500.0, 500.0, &r, 1.5), 1.5);
+        let inside = sd_path_fill(110.0, 100.0, &r, f32::INFINITY);
+        assert!(inside < -5.0, "{inside}");
+        assert_eq!(sd_path_fill(110.0, 100.0, &r, 1.5), -1.5);
+    }
+
+    fn circle_path(cx: f32, cy: f32, r: f32) -> crate::drawlist::Path {
+        let k = 0.552_284_8 * r;
+        PathBuilder::new()
+            .move_to([cx + r, cy])
+            .cubic_to([cx + r, cy + k], [cx + k, cy + r], [cx, cy + r])
+            .cubic_to([cx - k, cy + r], [cx - r, cy + k], [cx - r, cy])
+            .cubic_to([cx - r, cy - k], [cx - k, cy - r], [cx, cy - r])
+            .cubic_to([cx + k, cy - r], [cx + r, cy - k], [cx + r, cy])
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_four_cubic_circle_agrees_with_sd_circle() {
+        let r = rows(&circle_path(100.0, 100.0, 60.0));
+        let mut worst = 0.0f32;
+        for i in 0..720 {
+            let a = i as f32 / 720.0 * std::f32::consts::TAU;
+            for dr in [-3.0, -1.0, -0.5, 0.0, 0.5, 1.0, 3.0] {
+                let (x, y) = (100.0 + (60.0 + dr) * a.cos(), 100.0 + (60.0 + dr) * a.sin());
+                let want = sd_circle(x - 100.0, y - 100.0, 60.0);
+                let got = sd_path_fill(x, y, &r, f32::INFINITY);
+                worst = worst.max((got - want).abs());
+            }
+        }
+        assert!(worst < 0.05, "worst {worst} px");
+    }
+
+    #[test]
+    fn sdf_eval_reads_a_path_from_the_param_bank() {
+        let path = circle_path(50.0, 50.0, 20.0);
+        let (segs, pos, size) = lower_path(&path).unwrap();
+        let mut bank = vec![[9.0f32; 4]]; // something before it
+        bank.extend(segs.iter().flat_map(|s| s.to_rows()));
+        let cmd = SdfDrawCmd {
+            pos,
+            size,
+            color: [1.0; 4],
+            params: [
+                DRAW_TYPE_PATH_FILL,
+                segs.len() as f32,
+                0.0,
+                f32::from_bits(1),
+            ],
+            xform: [0.0; 4],
+            clip: SdfDrawCmd::NO_CLIP,
+        };
+        assert_eq!(sdf_eval_with_params(&cmd, 50.0, 50.0, &bank).0, -1.0);
+        assert!((sdf_eval_with_params(&cmd, 70.5, 50.0, &bank).0 - 0.5).abs() < 0.02);
+        assert_eq!(sdf_eval_with_params(&cmd, 5.0, 5.0, &bank).0, 1e6);
+        // No bank: nothing to draw.
+        assert_eq!(sdf_eval(&cmd, 50.0, 50.0).0, 1e6);
     }
 }

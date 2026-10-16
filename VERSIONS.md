@@ -36,3 +36,28 @@ lists the changes from there.
   constants and errors re-exported at the crate root.
 - `gpu`: `GpuSdfRenderer`, `MsdfCompute`, `BlurPass`, `blur_params`.
 - `pane`: `PaneGate`, `PaneMark`.
+
+## 0.3.0 — 2026-10-16 (tag `v0.3.0`)
+
+Filled Bézier paths (`docs/design/20261015_01_FILLED_BEZIER_PATH_PLAN.md`).
+The commit is the one tagged `v0.3.0`: the entry is written in that commit,
+which cannot name its own hash. No dependency changed version.
+
+- **Breaking:** `SdfKind` gains `PathFill { seg_start, seg_count }` and is
+  `#[non_exhaustive]`: a `match` on it outside libmsdf needs a `_` arm.
+- Added: the `drawlist::path` module, re-exported from `drawlist`:
+  `Path` (`contours`, `bounds`, `mapped`), `PathBuilder` (`new`, `move_to`,
+  `line_to`, `quad_to`, `cubic_to`, `close`, `build`), `Contour`,
+  `PathSegment` (`Line`, `Quad`, `Cubic`; `end`), `PathError` (`Empty`,
+  `NoCurrentPoint`, `NonFinite`, `TooManySegments`; `Display`, `Error`),
+  `GpuPathSegment` (`LINE`, `QUAD`, `to_rows`) and the constants
+  `PATH_MAX_SEGMENTS`, `PATH_CUBIC_TOLERANCE`, `PATH_MAX_QUADS_PER_CUBIC`,
+  `PATH_LINE_DEMOTE`. The crate root re-exports `Path`, `PathBuilder`,
+  `Contour`, `PathSegment`, `PathError`, `PATH_MAX_SEGMENTS` and
+  `PATH_CUBIC_TOLERANCE`.
+- Added: `DrawList::push_path_fill(&Path, color, Elevation) -> Result<(),
+  PathError>` (even-odd fill) and `DrawList::path_segments()`.
+- Added: `core::sdf::{DRAW_TYPE_PATH_FILL, PARAM_BANK_CAPACITY,
+  sd_path_fill}`, re-exported from `core`; the crate root re-exports
+  `DRAW_TYPE_PATH_FILL` and `PARAM_BANK_CAPACITY`. `sdf_eval_with_params`
+  evaluates draw type 12.

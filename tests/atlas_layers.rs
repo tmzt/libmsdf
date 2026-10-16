@@ -745,7 +745,7 @@ mod on_the_gpu {
         });
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         rx.recv().unwrap().unwrap();
-        let data = slice.get_mapped_range();
+        let data = slice.get_mapped_range().unwrap();
         let mut img = Vec::with_capacity((W * H * bpp) as usize);
         for row in 0..H {
             let start = (row * padded_row) as usize;

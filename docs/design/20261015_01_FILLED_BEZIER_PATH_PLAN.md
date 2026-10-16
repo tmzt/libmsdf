@@ -1,7 +1,7 @@
 ---
 title: Filled Bézier paths as an SDF primitive
 date: 2026-10-15
-status: Draft
+status: In implementation
 covers: >
   A new filled-path primitive for libmsdf: closed shapes built from line,
   quadratic and cubic Bézier segments, with any number of contours and holes,
@@ -606,3 +606,30 @@ with `CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm cargo test -p libmsdf --features gp
 6. **Branches.** Should the feature also be merged into libmsdf's
    `main-sigilweaver` and `highbay` branches at step 8, or only once those
    consumers need it?
+
+## Amendment — 2026-10-16 02:12 EDT: implementation started; document now immutable
+
+Implementation has started on the owner's instruction ("implement libmsdf
+changes"), and this document is now immutable (AGENTS.md Rule 1.5). It
+replaces no earlier text. The open questions of section 7 were not answered
+one by one; the plan's own recommended answers are in force:
+
+1. **Fill rule:** even-odd (3.2). Overlapping parts are separate instances.
+2. **Cubic tolerance:** `PATH_CUBIC_TOLERANCE = 1/64` logical px, at most
+   `PATH_MAX_QUADS_PER_CUBIC = 16` quadratics per cubic (3.3).
+3. **Segment encoding:** two vec4s per GPU segment,
+   `[p0.x, p0.y, ctrl.x, ctrl.y]`, `[p2.x, p2.y, kind, 0]` (3.4).
+4. **Param bank capacity:** unchanged at 4096 vec4s (64 KiB), as drafted,
+   now public as `PARAM_BANK_CAPACITY`.
+5. **Version:** 0.3.0, by AGENTS.md Rule 5.4: a variant added to an
+   exhaustive public enum is not strictly additive. In the same release
+   `SdfKind` is marked `#[non_exhaustive]` (step 5), following libcontrols,
+   which marked `Key` `#[non_exhaustive]` in its own 0.3.0, so that later
+   kinds are additive. No dependency of libmsdf moves to a
+   semver-incompatible version, so Rule 5.5 adds nothing here.
+6. **Branches:** the feature is merged into `main` only, not into
+   `main-sigilweaver` or `highbay`. Consumers are checked against the new
+   libmsdf through local, uncommitted overrides (step 8).
+
+How the steps land (one commit per step on the branch `impl/0.3.0`,
+squash-merged into `main`) and any departures are recorded in `CHANGES.md`.

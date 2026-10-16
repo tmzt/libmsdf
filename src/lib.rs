@@ -28,11 +28,12 @@ pub mod pane;
 
 pub use crate::core::{
     Anim, ClipRect, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE,
-    DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_SLAB, DRAW_TYPE_TEXT, GpuFont, RenderFrame,
-    SdfDrawCmd,
+    DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_PATH_FILL, DRAW_TYPE_SLAB, DRAW_TYPE_TEXT,
+    GpuFont, PARAM_BANK_CAPACITY, RenderFrame, SdfDrawCmd,
 };
 pub use drawlist::{
-    DrawEffects, DrawList, Elevation, SdfFrame, SdfInstance, SdfKind, SdfRotate, rotate_rect,
+    Contour, DrawEffects, DrawList, Elevation, PATH_CUBIC_TOLERANCE, PATH_MAX_SEGMENTS, Path,
+    PathBuilder, PathError, PathSegment, SdfFrame, SdfInstance, SdfKind, SdfRotate, rotate_rect,
 };
 pub use font::{
     ATLAS_COLS, ATLAS_HEADER_SIZE, ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, ATLAS_VERSION_LAYERED,

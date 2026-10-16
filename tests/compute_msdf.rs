@@ -177,7 +177,7 @@ fn compute_into_texture_and_manager() {
     });
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
-    let data = slice.get_mapped_range();
+    let data = slice.get_mapped_range().unwrap();
 
     let mut bright = 0usize;
     for y in region_g.y..region_g.y + region_g.h {

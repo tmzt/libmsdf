@@ -10,12 +10,18 @@
 //! author) away from the mtd1 container toward the Phase-7 node-graph:
 //! highbay_ui's layout pass emits a `DrawList` per frame.
 
+pub mod path;
 pub mod stream;
+
+pub use path::{
+    Contour, GpuPathSegment, PATH_CUBIC_TOLERANCE, PATH_LINE_DEMOTE, PATH_MAX_QUADS_PER_CUBIC,
+    PATH_MAX_SEGMENTS, Path, PathBuilder, PathError, PathSegment,
+};
 
 use crate::core::sdf::{
     ClipRect, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE,
-    DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_SLAB, DRAW_TYPE_SLAB_PC, SdfDrawCmd,
-    XFORM_RAISED,
+    DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_PATH_FILL, DRAW_TYPE_SLAB, DRAW_TYPE_SLAB_PC,
+    PARAM_BANK_CAPACITY, SdfDrawCmd, XFORM_RAISED,
 };
 use crate::font::atlas::FontAtlas;
 use crate::font::shaper::ShapedRun;
@@ -53,7 +59,11 @@ pub fn screen_px_range(atlas_px_range: f32, cell_px: f32, font_size: f32) -> f32
 
 /// The SDF shape an instance renders. Geometry parameters that aren't the
 /// bounding box live here; color/animation are per-instance fields.
+///
+/// `#[non_exhaustive]` since 0.3.0: a `match` on it outside libmsdf needs a
+/// `_` arm, so a later kind is an additive change.
 #[derive(Copy, Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum SdfKind {
     /// Filled box; `position`/`size` are the rect.
     Box,
@@ -112,6 +122,11 @@ pub enum SdfKind {
         char_count: u32,
         px_range: f32,
     },
+    /// A filled closed path (even-odd), lowered to line and quadratic segments
+    /// held in the list's own path-segment bank at `seg_start..seg_start+seg_count`.
+    /// `SdfInstance::position`/`size` are the segments' control-hull bound.
+    /// Produced by [`DrawList::push_path_fill`]; not meant to be built by hand.
+    PathFill { seg_start: u32, seg_count: u32 },
 }
 
 impl SdfKind {
@@ -154,6 +169,10 @@ impl SdfKind {
             | SdfKind::Circle
             | SdfKind::Outline { .. }
             | SdfKind::MsdfText { .. } => {}
+            // A path's points are ABSOLUTE too, but they live in the list's
+            // path-segment bank, not in the kind (which holds indices), so
+            // [`DrawList::translate_from`] moves them there.
+            SdfKind::PathFill { .. } => {}
         }
     }
 }
@@ -411,6 +430,9 @@ pub struct SdfFrame {
 pub struct DrawList {
     pub instances: Vec<SdfInstance>,
     chars: Vec<u32>,
+    /// The lowered segments backing `PathFill` instances, each instance owning
+    /// `seg_start..seg_start + seg_count` (see [`DrawList::push_path_fill`]).
+    path_segments: Vec<GpuPathSegment>,
     /// The `SdfRotate` transform bank, in push order: an entry's 1-based
     /// index is what `instance_transforms` records for the instances pushed
     /// under it. Baked into the lowered [`SdfFrame`]'s `param_bank` (two
@@ -467,6 +489,7 @@ impl DrawList {
     pub fn clear(&mut self) {
         self.instances.clear();
         self.chars.clear();
+        self.path_segments.clear();
         self.transforms.clear();
         self.active_transform.clear();
         self.instance_transforms.clear();
@@ -484,6 +507,11 @@ impl DrawList {
     /// The packed MSDF char entries backing `MsdfText` instances.
     pub fn chars(&self) -> &[u32] {
         &self.chars
+    }
+
+    /// The lowered segments backing `PathFill` instances.
+    pub fn path_segments(&self) -> &[GpuPathSegment] {
+        &self.path_segments
     }
 
     /// The 1-based id of the currently active [`DrawList::push_rotate`]
@@ -577,6 +605,17 @@ impl DrawList {
             instance.position[0] += dx;
             instance.position[1] += dy;
             instance.kind.translate(dx, dy);
+            // Each path owns its own segment range, so nothing moves twice.
+            if let SdfKind::PathFill {
+                seg_start,
+                seg_count,
+            } = instance.kind
+            {
+                let range = seg_start as usize..(seg_start + seg_count) as usize;
+                for seg in &mut self.path_segments[range] {
+                    seg.translate(dx, dy);
+                }
+            }
         }
         for clip in &mut self.instance_clips[start..] {
             if clip.is_unbounded() {
@@ -643,14 +682,18 @@ impl DrawList {
              appended instances carry their OWN tags and would escape it",
         );
         let char_base = self.chars.len() as u32;
+        let seg_base = self.path_segments.len() as u32;
         let transform_base = self.transforms.len() as u32;
         self.chars.extend_from_slice(&other.chars);
+        self.path_segments.extend_from_slice(&other.path_segments);
         self.transforms.extend_from_slice(&other.transforms);
         self.instances.reserve(other.instances.len());
         for instance in &other.instances {
             let mut instance = *instance;
-            if let SdfKind::MsdfText { char_start, .. } = &mut instance.kind {
-                *char_start += char_base;
+            match &mut instance.kind {
+                SdfKind::MsdfText { char_start, .. } => *char_start += char_base,
+                SdfKind::PathFill { seg_start, .. } => *seg_start += seg_base,
+                _ => {}
             }
             self.instances.push(instance);
         }
@@ -758,6 +801,47 @@ impl DrawList {
         if let Some(last) = self.instance_elevation.last_mut() {
             *last = elevation;
         }
+    }
+
+    /// Fill `path` with `color` at `elevation`, by the **even-odd** rule: two
+    /// overlapping contours in one path cancel where they overlap (push
+    /// overlapping parts as separate instances to union them).
+    ///
+    /// Lowers the path (cubics to quadratics within
+    /// [`path::PATH_CUBIC_TOLERANCE`], monotone split) at push time, stores the
+    /// segments in the list's path bank and pushes ONE instance through
+    /// [`DrawList::push_fill`], so it is tagged with the active
+    /// rotate/translate, clip and effects scopes like any other instance. Its
+    /// `position`/`size` are the segments' control-hull bound.
+    ///
+    /// On error ([`PathError::TooManySegments`] past
+    /// [`path::PATH_MAX_SEGMENTS`]) nothing is pushed and the list is
+    /// unchanged. The name contains `fill(` for the same reason
+    /// [`DrawList::push_fill`]'s does.
+    pub fn push_path_fill(
+        &mut self,
+        path: &Path,
+        color: [f32; 4],
+        elevation: Elevation,
+    ) -> Result<(), PathError> {
+        let (segments, position, size) = path::lower_path(path)?;
+        let seg_start = self.path_segments.len() as u32;
+        let seg_count = segments.len() as u32;
+        self.path_segments.extend_from_slice(&segments);
+        self.push_fill(
+            SdfInstance {
+                kind: SdfKind::PathFill {
+                    seg_start,
+                    seg_count,
+                },
+                position,
+                size,
+                color,
+                anim: 0,
+            },
+            elevation,
+        );
+        Ok(())
     }
 
     /// Begin a rotation scope: every instance pushed after this — until the
@@ -1256,6 +1340,7 @@ impl DrawList {
 
         let mut draws = Vec::with_capacity(self.instances.len());
         let mut param_bank: Vec<[f32; 4]> = Vec::new();
+        let mut paths_dropped = 0usize;
 
         // Bake the SdfRotate transform bank FIRST, at fixed slots [0..2N),
         // so an instance's 1-based `transform` id maps directly to
@@ -1375,6 +1460,38 @@ impl DrawList {
                         ],
                     )
                 }
+                SdfKind::PathFill {
+                    seg_start,
+                    seg_count,
+                } => {
+                    // The segments go in the aux bank, two vec4s each. A path
+                    // that would pass the bank's capacity is lowered with no
+                    // segments (drawing nothing) rather than left to the
+                    // upload's truncation: the shader bounds-checks against
+                    // the buffer size, so a truncated path would read stale
+                    // segments from an earlier frame.
+                    let idx = param_bank.len();
+                    let range = seg_start as usize..(seg_start + seg_count) as usize;
+                    let n = if idx + 2 * range.len() <= PARAM_BANK_CAPACITY {
+                        for seg in &self.path_segments[range] {
+                            param_bank.extend_from_slice(&seg.to_rows());
+                        }
+                        seg_count
+                    } else {
+                        paths_dropped += 1;
+                        0
+                    };
+                    (
+                        inst.position,
+                        inst.size,
+                        [
+                            DRAW_TYPE_PATH_FILL,
+                            n as f32,
+                            anim,
+                            f32::from_bits(idx as u32),
+                        ],
+                    )
+                }
             };
             let xform = [
                 transform as f32,
@@ -1390,6 +1507,13 @@ impl DrawList {
                 xform,
                 clip: clip.to_wire(),
             });
+        }
+
+        if paths_dropped > 0 {
+            log::warn!(
+                "[sdf] lower: {paths_dropped} filled path(s) dropped, the param bank is full \
+                 ({PARAM_BANK_CAPACITY} entries)"
+            );
         }
 
         SdfFrame {
@@ -2731,7 +2855,7 @@ mod tests {
     fn the_returned_rect_is_rotate_rect_over_the_instance_that_was_drawn() {
         let (atlas, run) = marker_atlas();
         let anchor = [140.0f32, 90.0];
-        for &angle in &[0.0f32, 0.37, 1.9, -2.6, 3.14159, 6.0] {
+        for &angle in &[0.0f32, 0.37, 1.9, -2.6, std::f32::consts::PI, 6.0] {
             let mut list = DrawList::new();
             let got = list
                 .push_marker(&run, &atlas, anchor, angle, 20.0, 6.0, [1.0; 4])
@@ -2848,5 +2972,322 @@ mod tests {
         two.glyphs.push(run.glyphs[0]);
         let mut list = DrawList::new();
         let _ = list.push_marker(&two, &atlas, [0.0, 0.0], 0.0, 16.0, 6.0, [1.0; 4]);
+    }
+
+    // ── Filled paths (plan step 5) ───────────────────────────────────────
+
+    /// One instance of every kind that existed before `PathFill`, under a
+    /// rotation, a translation, a clip and an effects scope, raised and flat.
+    fn every_existing_kind() -> DrawList {
+        let mut list = DrawList::new();
+        let inst = |kind: SdfKind, position: [f32; 2], size: [f32; 2]| SdfInstance {
+            kind,
+            position,
+            size,
+            color: [0.1, 0.2, 0.3, 0.9],
+            anim: 2,
+        };
+        list.push(inst(SdfKind::Box, [1.0, 2.0], [30.0, 40.0]));
+        list.push_fill(
+            inst(
+                SdfKind::RoundedBox { radius: 4.0 },
+                [5.0, 6.0],
+                [20.0, 10.0],
+            ),
+            Elevation::Raised,
+        );
+        list.push_clip([0.0, 0.0], [200.0, 150.0]);
+        list.push(inst(
+            SdfKind::RoundedBoxPerCorner {
+                radii: [1.0, 2.0, 3.0, 4.0],
+            },
+            [7.0, 8.0],
+            [50.0, 60.0],
+        ));
+        list.push_rotate(SdfRotate::Quarter(1), [50.0, 50.0]);
+        list.push(inst(SdfKind::Circle, [9.0, 10.0], [12.0, 14.0]));
+        list.push_line([1.0, 1.0], [90.0, 40.0], 3.0, [1.0, 0.0, 0.0, 1.0]);
+        list.push_rotate_end();
+        list.push_clip_end();
+        list.begin_effects(DrawEffects {
+            blur_radius: 2.0,
+            alpha_ombre: 0.5,
+        });
+        list.push(inst(
+            SdfKind::Outline {
+                radius: 3.0,
+                thickness: 1.5,
+            },
+            [11.0, 12.0],
+            [40.0, 20.0],
+        ));
+        list.push_translate(5.0, -3.0);
+        list.push_bezier_shadowed(
+            [0.0, 0.0],
+            [10.0, 30.0],
+            [40.0, -10.0],
+            [60.0, 20.0],
+            2.0,
+            [0.0, 1.0, 0.0, 1.0],
+        );
+        list.push(inst(
+            SdfKind::MsdfText {
+                char_start: 0,
+                char_count: 0,
+                px_range: 4.0,
+            },
+            [13.0, 14.0],
+            [80.0, 16.0],
+        ));
+        list.push_translate_end();
+        list.end_effects();
+        list
+    }
+
+    /// FNV-1a over every byte of a lowered frame.
+    fn frame_digest(frame: &SdfFrame) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut eat = |bits: u32| {
+            for b in bits.to_le_bytes() {
+                h ^= b as u64;
+                h = h.wrapping_mul(0x0100_0000_01b3);
+            }
+        };
+        for d in &frame.draws {
+            for v in d
+                .pos
+                .iter()
+                .chain(&d.size)
+                .chain(&d.color)
+                .chain(&d.params)
+                .chain(&d.xform)
+                .chain(&d.clip)
+            {
+                eat(v.to_bits());
+            }
+        }
+        for &c in &frame.char_buffer {
+            eat(c);
+        }
+        for row in &frame.param_bank {
+            for v in row {
+                eat(v.to_bits());
+            }
+        }
+        h
+    }
+
+    #[test]
+    fn a_list_without_paths_lowers_to_the_same_bytes_as_before_paths() {
+        let frame = every_existing_kind().lower();
+        assert_eq!(frame.draws.len(), 8);
+        // Recorded at 1ca7dfb, before SdfKind::PathFill existed.
+        assert_eq!(
+            frame_digest(&frame),
+            0xe108_bf90_de64_ed8b,
+            "{:#x}",
+            frame_digest(&frame)
+        );
+    }
+
+    fn tri(x: f32, y: f32) -> Path {
+        PathBuilder::new()
+            .move_to([x, y])
+            .quad_to([x + 20.0, y - 10.0], [x + 40.0, y])
+            .line_to([x + 20.0, y + 30.0])
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_path_lowers_its_segments_after_the_transform_bank() {
+        let mut list = DrawList::new();
+        list.push_rotate(SdfRotate::Quarter(1), [0.0, 0.0]);
+        list.push(SdfInstance {
+            kind: SdfKind::Box,
+            position: [0.0, 0.0],
+            size: [1.0, 1.0],
+            color: [1.0; 4],
+            anim: 0,
+        });
+        list.push_rotate_end();
+        list.push_path_fill(&tri(10.0, 20.0), [1.0; 4], Elevation::Flat)
+            .unwrap();
+        let segs = list.path_segments().to_vec();
+        let n = segs.len();
+        assert!(n >= 3);
+        let frame = list.lower();
+        let cmd = frame.draws[1];
+        assert_eq!(cmd.params[0], DRAW_TYPE_PATH_FILL);
+        assert_eq!(cmd.params[1], n as f32);
+        assert_eq!(cmd.params[2], 0.0);
+        let idx = cmd.params[3].to_bits() as usize;
+        assert_eq!(idx, 2, "after the one transform's two rows");
+        assert_eq!(frame.param_bank.len(), 2 + 2 * n);
+        for (i, s) in segs.iter().enumerate() {
+            assert_eq!(frame.param_bank[idx + 2 * i], s.to_rows()[0]);
+            assert_eq!(frame.param_bank[idx + 2 * i + 1], s.to_rows()[1]);
+        }
+        // The control-hull bound of the LOWERED segments: the quad is split
+        // at its extremum (y = 15), so its controls no longer reach y = 10.
+        assert_eq!(cmd.pos, [10.0, 15.0]);
+        assert_eq!(cmd.size, [40.0, 35.0]);
+    }
+
+    #[test]
+    fn a_path_carries_the_scopes_a_box_would() {
+        let mut list = DrawList::new();
+        list.push_clip([5.0, 5.0], [100.0, 80.0]);
+        list.begin_effects(DrawEffects {
+            blur_radius: 2.0,
+            alpha_ombre: 0.25,
+        });
+        list.push_rotate(SdfRotate::Radians(0.3), [40.0, 40.0]);
+        list.push_translate(3.0, 4.0);
+        list.push(SdfInstance {
+            kind: SdfKind::Box,
+            position: [0.0, 0.0],
+            size: [1.0, 1.0],
+            color: [1.0; 4],
+            anim: 0,
+        });
+        list.push_path_fill(&tri(10.0, 20.0), [1.0; 4], Elevation::Flat)
+            .unwrap();
+        list.push_translate_end();
+        list.push_rotate_end();
+        list.end_effects();
+        list.push_clip_end();
+        list.push_path_fill(&tri(10.0, 20.0), [1.0; 4], Elevation::Raised)
+            .unwrap();
+        let frame = list.lower();
+        let (boxed, path, raised) = (frame.draws[0], frame.draws[1], frame.draws[2]);
+        assert_eq!(path.xform, boxed.xform);
+        assert_eq!(path.clip, boxed.clip);
+        assert_ne!(path.xform[0], 0.0);
+        assert_eq!(path.xform[1], 0.0);
+        assert_eq!(raised.xform[1], XFORM_RAISED);
+        assert_eq!(raised.clip, SdfDrawCmd::NO_CLIP);
+    }
+
+    #[test]
+    fn translate_from_moves_path_segments_and_bound_once() {
+        let mut list = DrawList::new();
+        list.push_path_fill(&tri(0.0, 10.0), [1.0; 4], Elevation::Flat)
+            .unwrap();
+        let first = list.path_segments().len();
+        list.push_path_fill(&tri(100.0, 10.0), [1.0; 4], Elevation::Flat)
+            .unwrap();
+        list.push_path_fill(&tri(200.0, 10.0), [1.0; 4], Elevation::Flat)
+            .unwrap();
+        let before = list.path_segments().to_vec();
+        list.translate_from(1, 7.0, -2.0);
+        let after = list.path_segments();
+        assert_eq!(after[..first], before[..first], "the first path stays");
+        for (a, b) in after[first..].iter().zip(&before[first..]) {
+            let mut moved = *b;
+            moved.translate(7.0, -2.0);
+            assert_eq!(*a, moved);
+        }
+        assert_eq!(list.instances[0].position, [0.0, 5.0]);
+        assert_eq!(list.instances[1].position, [107.0, 3.0]);
+        assert_eq!(list.instances[2].position, [207.0, 3.0]);
+        // Lowered: the moved list equals one built at the moved spot.
+        let mut direct = DrawList::new();
+        direct
+            .push_path_fill(&tri(107.0, 8.0), [1.0; 4], Elevation::Flat)
+            .unwrap();
+        let (moved, direct) = (list.lower(), direct.lower());
+        let (m, d) = (moved.draws[1], direct.draws[0]);
+        assert_eq!((m.pos, m.size, m.params[1]), (d.pos, d.size, d.params[1]));
+        let (mi, di) = (
+            m.params[3].to_bits() as usize,
+            d.params[3].to_bits() as usize,
+        );
+        let rows = 2 * d.params[1] as usize;
+        assert_eq!(
+            moved.param_bank[mi..mi + rows],
+            direct.param_bank[di..di + rows]
+        );
+    }
+
+    #[test]
+    fn append_from_rebases_seg_start() {
+        let mut a = DrawList::new();
+        a.push_path_fill(&tri(0.0, 10.0), [1.0; 4], Elevation::Flat)
+            .unwrap();
+        let mut b = DrawList::new();
+        b.push_path_fill(&tri(50.0, 60.0), [0.5; 4], Elevation::Raised)
+            .unwrap();
+        let mut composed = a.clone();
+        composed.append_from(&b);
+        let mut direct = DrawList::new();
+        direct
+            .push_path_fill(&tri(0.0, 10.0), [1.0; 4], Elevation::Flat)
+            .unwrap();
+        direct
+            .push_path_fill(&tri(50.0, 60.0), [0.5; 4], Elevation::Raised)
+            .unwrap();
+        assert_eq!(composed.instances, direct.instances);
+        let (x, y) = (composed.lower(), direct.lower());
+        assert_eq!(x.draws, y.draws);
+        assert_eq!(x.param_bank, y.param_bank);
+    }
+
+    #[test]
+    fn a_refused_path_leaves_the_list_unchanged() {
+        let mut big = PathBuilder::new();
+        big.move_to([0.0, 0.0]);
+        for i in 1..300 {
+            big.line_to([i as f32, (i % 2) as f32 * 10.0]);
+        }
+        let big = big.build().unwrap();
+        let mut list = DrawList::new();
+        list.push_path_fill(&tri(0.0, 10.0), [1.0; 4], Elevation::Flat)
+            .unwrap();
+        let (instances, segments) = (list.instances.len(), list.path_segments().len());
+        let err = list.push_path_fill(&big, [1.0; 4], Elevation::Flat);
+        assert!(matches!(
+            err,
+            Err(PathError::TooManySegments { max: 256, .. })
+        ));
+        assert_eq!(list.instances.len(), instances);
+        assert_eq!(list.path_segments().len(), segments);
+        assert_eq!(list.instance_clips().len(), instances);
+        list.clear();
+        assert!(list.path_segments().is_empty());
+    }
+
+    #[test]
+    fn paths_past_the_bank_capacity_lower_with_no_segments() {
+        // A 200-segment polygon: 400 rows each, so ten fit in 4096 rows and
+        // the eleventh and twelfth do not.
+        let mut b = PathBuilder::new();
+        for i in 0..200 {
+            let a = i as f32 / 200.0 * std::f32::consts::TAU;
+            let p = [50.0 + 40.0 * a.cos(), 50.0 + 40.0 * a.sin()];
+            if i == 0 {
+                b.move_to(p);
+            } else {
+                b.line_to(p);
+            }
+        }
+        let poly = b.build().unwrap();
+        let mut list = DrawList::new();
+        for _ in 0..12 {
+            list.push_path_fill(&poly, [1.0; 4], Elevation::Flat)
+                .unwrap();
+        }
+        list.push_line([0.0, 0.0], [5.0, 5.0], 1.0, [1.0; 4]);
+        let frame = list.lower();
+        for (i, cmd) in frame.draws[..12].iter().enumerate() {
+            let want = if i < 10 { 200.0 } else { 0.0 };
+            assert_eq!(cmd.params[1], want, "path {i}");
+        }
+        assert_eq!(frame.draws[9].params[3].to_bits(), 9 * 400);
+        // The line after them keeps today's behaviour: its endpoint is
+        // appended (past capacity, so the upload truncates it).
+        assert_eq!(frame.param_bank.len(), 4000 + 1);
+        let first = list.path_segments()[0].to_rows();
+        assert_eq!(frame.param_bank[0], first[0]);
     }
 }

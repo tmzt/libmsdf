@@ -10,7 +10,10 @@
 // Each DrawCmd specifies type via params.x:
 //   0 = Box, 1 = Slab (rounded rect), 2 = Circle, 3 = Line (segment), 4 = Text,
 //   5 = Texture, 8 = MSDF Text, 9 = Outline,
-//   10 = Cubic Bézier stroke, 11 = Slab per-corner
+//   10 = Cubic Bézier stroke, 11 = Slab per-corner, 12 = Filled path
+//   (even-odd; params.y = segment count, params.w = param_bank index of its
+//   2 * count vec4s: [p0.xy, ctrl.xy], [p2.xy, kind, 0], kind 0 = line,
+//   1 = y-monotone quadratic; see DRAW_TYPE_PATH_FILL in core::sdf)
 //   (6/7 are retired — see `clip` below)
 //
 // SdfRotate (xform.x, a separate per-instance field, not a params.x type):
@@ -207,6 +210,120 @@ fn sd_cubic_stroke(p: vec2<f32>, p0: vec2<f32>, c1: vec2<f32>, c2: vec2<f32>, p3
         prev = pt;
     }
     return dmin - thickness * 0.5;
+}
+
+// ── Filled path (type 12) ──
+//
+// Mirrors core::sdf's ud_quad, path_crossing_x and sd_path_fill line for
+// line - keep the two in sync. Segments are param_bank row pairs
+// [p0.xy, ctrl.xy], [p2.xy, kind, 0]; kind 0 = line, 1 = y-monotone
+// quadratic (see DRAW_TYPE_PATH_FILL in core::sdf).
+
+/// Unsigned distance to the quadratic Bézier a0 -> b0 -> c0, closed form
+/// (Inigo Quilez's sdBezier): a depressed cubic, Cardano for one real root,
+/// the trigonometric form for three, t clamped to [0, 1].
+fn ud_quad(p: vec2<f32>, a0: vec2<f32>, b0: vec2<f32>, c0: vec2<f32>) -> f32 {
+    let a = b0 - a0;
+    let b = a0 - 2.0 * b0 + c0;
+    let c = a * 2.0;
+    let d = a0 - p;
+    let kk = 1.0 / dot(b, b);
+    let kx = kk * dot(a, b);
+    let ky = kk * (2.0 * dot(a, a) + dot(d, b)) / 3.0;
+    let kz = kk * dot(d, a);
+    let pp = ky - kx * kx;
+    let p3 = pp * pp * pp;
+    let q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
+    let h = q * q + 4.0 * p3;
+    var res: f32;
+    if h >= 0.0 {
+        let hs = sqrt(h);
+        let x = (vec2<f32>(hs, -hs) - q) * 0.5;
+        // pow(0, y) is exp2(y * log2(0)); select keeps a zero root exact.
+        let ax = abs(x);
+        let cbrt = select(vec2<f32>(0.0), pow(ax, vec2<f32>(1.0 / 3.0)), ax > vec2<f32>(0.0));
+        let uv = sign(x) * cbrt;
+        let t = clamp(uv.x + uv.y - kx, 0.0, 1.0);
+        let e = d + (c + b * t) * t;
+        res = dot(e, e);
+    } else {
+        let z = sqrt(-pp);
+        let v = acos(clamp(q / (pp * z * 2.0), -1.0, 1.0)) / 3.0;
+        let m = cos(v);
+        let n = sin(v) * 1.7320508;
+        let t0 = clamp((m + m) * z - kx, 0.0, 1.0);
+        let t1 = clamp((-n - m) * z - kx, 0.0, 1.0);
+        let e0 = d + (c + b * t0) * t0;
+        let e1 = d + (c + b * t1) * t1;
+        res = min(dot(e0, e0), dot(e1, e1));
+    }
+    return sqrt(res);
+}
+
+/// The x where the y-monotone segment p0 -> c -> p2 (a line when !is_quad)
+/// meets the horizontal line `y`, which the caller has checked lies in
+/// [min(p0.y, p2.y), max(p0.y, p2.y)). Exactly one root lies in [0, 1].
+fn path_crossing(y: f32, p0: vec2<f32>, c: vec2<f32>, p2: vec2<f32>, is_quad: bool) -> f32 {
+    if !is_quad {
+        let tl = (y - p0.y) / (p2.y - p0.y);
+        return p0.x + tl * (p2.x - p0.x);
+    }
+    let a = p0.y - 2.0 * c.y + p2.y;
+    let b = 2.0 * (c.y - p0.y);
+    let cy = p0.y - y;
+    var t: f32;
+    if abs(a) < 1e-6 {
+        t = -cy / b;
+    } else {
+        let disc = max(b * b - 4.0 * a * cy, 0.0);
+        let sb = select(1.0, -1.0, b < 0.0);
+        let s = -0.5 * (b + sb * sqrt(disc));
+        let t1 = s / a;
+        if t1 >= -1e-4 && t1 <= 1.0 + 1e-4 {
+            t = t1;
+        } else if s != 0.0 {
+            t = cy / s;
+        } else {
+            t = 0.0;
+        }
+    }
+    t = clamp(t, 0.0, 1.0);
+    let u = 1.0 - t;
+    return u * u * p0.x + 2.0 * u * t * c.x + t * t * p2.x;
+}
+
+/// Signed distance to the filled path whose `n` segments start at
+/// param_bank[base]: sign by even-odd crossings of a ray toward +x
+/// (half-open in y), magnitude the minimum segment distance within `band`,
+/// clamped to it. Deep inside or outside, segments are only counted.
+fn sd_path_fill(q: vec2<f32>, base: u32, n: u32, band: f32) -> f32 {
+    var inside = false;
+    var dmin = band;
+    for (var i: u32 = 0u; i < n; i = i + 1u) {
+        let r0 = param_bank[base + 2u * i];
+        let r1 = param_bank[base + 2u * i + 1u];
+        let p0 = r0.xy;
+        let c = r0.zw;
+        let p2 = r1.xy;
+        let is_quad = r1.z >= 0.5;
+        let lo = min(min(p0, c), p2);
+        let hi = max(max(p0, c), p2);
+        if q.y >= min(p0.y, p2.y) && q.y < max(p0.y, p2.y) && hi.x > q.x {
+            if path_crossing(q.y, p0, c, p2, is_quad) > q.x {
+                inside = !inside;
+            }
+        }
+        if all(q >= lo - vec2<f32>(band)) && all(q <= hi + vec2<f32>(band)) {
+            var d: f32;
+            if is_quad {
+                d = ud_quad(q, p0, c, p2);
+            } else {
+                d = sd_segment_raw(q, p0, p2);
+            }
+            dmin = min(dmin, d);
+        }
+    }
+    return select(dmin, -dmin, inside);
 }
 
 // ── Lo-fi pencil-sketch hook (Phase 8) ──
@@ -618,6 +735,30 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                     d = sd_cubic_stroke(effective_pixel, p0, c1, c2, p3, thickness);
                     if wants_shadow {
                         shadow_d = sd_cubic_stroke(effective_pixel - vec2<f32>(2.0, 3.0), p0, c1, c2, p3, thickness);
+                        shadow_on = true;
+                    }
+                }
+            }
+            case 12u: { // Filled path, even-odd; segments in param_bank
+                // pos/size = the segments' control-hull bound; params.y =
+                // segment count (0 draws nothing); params.w = bitcast index
+                // of its 2 * count rows. Evaluated at effective_pixel like
+                // Line and BezierStroke, because the segments are absolute.
+                // band = AA half-width + blur: beyond it the fill's
+                // smoothstep is saturated, so the clamped distance changes
+                // no pixel. The shadow's band is 4, the far end of its ramp.
+                let n = u32(cmd.params.y);
+                let base = bitcast<u32>(cmd.params.w);
+                let wants_shadow = cmd.xform.y >= 0.5;
+                let band = 1.0 + max(cmd.xform.z, 0.0);
+                let margin = select(band, band + 8.0, wants_shadow);
+                let q = effective_pixel;
+                if n > 0u && base + 2u * n <= arrayLength(&param_bank) &&
+                   q.x >= cmd.pos.x - margin && q.x <= cmd.pos.x + cmd.size.x + margin &&
+                   q.y >= cmd.pos.y - margin && q.y <= cmd.pos.y + cmd.size.y + margin {
+                    d = sd_path_fill(q, base, n, band);
+                    if wants_shadow {
+                        shadow_d = sd_path_fill(q - vec2<f32>(2.0, 3.0), base, n, 4.0);
                         shadow_on = true;
                     }
                 }

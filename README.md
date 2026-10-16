@@ -3,7 +3,7 @@
 The wgpu SDF/MSDF rendering engine and typography stack, extracted from
 matter-stream's render crates (`matterstream-common` / `-font` / `-ui-gpu`)
 with all VM, skills, and card code pruned: SDF primitive instancing
-(box / rounded-box / circle / line / Bézier stroke), MSDF text via font
+(box / rounded-box / circle / line / Bézier stroke / filled Bézier path), MSDF text via font
 atlases (baked at build time **and** generated at runtime by a WGSL compute
 shader), rustybuzz shaping, and the `DrawList` contract that highbay_ui's
 node-graph lowers into. Runs native and on wasm32 (WebGPU); includes the lo-fi
@@ -36,4 +36,4 @@ dual licensed as above, without any additional terms or conditions.
 
 | Document | Date | Status | Decision |
 |---|---|---|---|
-| [Filled Bézier paths as an SDF primitive](docs/design/20261015_01_FILLED_BEZIER_PATH_PLAN.md) | 2026-10-15 | Draft | Adds `SdfKind::PathFill`: closed line/quadratic/cubic paths filled by an exact even-odd signed distance, segments in the aux param bank; Draft until the owner approves. |
+| [Filled Bézier paths as an SDF primitive](docs/design/20261015_01_FILLED_BEZIER_PATH_PLAN.md) | 2026-10-15 | In implementation | Adds `SdfKind::PathFill`: closed line/quadratic/cubic paths filled by an exact even-odd signed distance, segments in the aux param bank; implementation started on the owner's instruction, released as 0.3.0. |

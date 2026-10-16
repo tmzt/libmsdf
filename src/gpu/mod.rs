@@ -103,7 +103,6 @@ impl From<&SdfDrawCmd> for GpuDrawCmd {
 const MAX_DRAW_CMDS: u32 = 4096;
 const MAX_TEXTURE_LAYERS: u32 = 8;
 const MAX_GLYPH_TABLE_ENTRIES: u32 = 4096;
-const MAX_PARAM_BANK_ENTRIES: u32 = 4096;
 const PLACEHOLDER_TEX_SIZE: u32 = 1;
 const SHADER_SOURCE: &str = include_str!("sdf_render.wgsl");
 
@@ -226,7 +225,7 @@ impl GpuSdfRenderer {
         });
         let param_bank_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("param_bank"),
-            size: (MAX_PARAM_BANK_ENTRIES as u64) * 16,
+            size: (crate::core::sdf::PARAM_BANK_CAPACITY as u64) * 16,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
