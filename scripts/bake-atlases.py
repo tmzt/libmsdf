@@ -99,7 +99,8 @@ ATLASES = [
     (
         "roboto-msymbols-48.atlas",
         MERGED_FACE,
-        ["--style", "bold", "--style", "italic",
+        ["--style", "bold=fonts/Roboto-Bold-ascii.ttf",
+         "--style", "italic=fonts/Roboto-Italic-ascii.ttf",
          "--licence", "Apache-2.0=Roboto@regular,bold,italic",
          "--licence", "Apache-2.0=Material Symbols",
          "--layout"],
