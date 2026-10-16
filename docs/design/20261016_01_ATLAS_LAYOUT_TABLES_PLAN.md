@@ -1370,3 +1370,59 @@ Section 4.1's text stands unchanged; this records why.
    and is made as its own commit, with its own CHANGES.md addendum, when the
    owner approves the wording. Until then section 4.12 applies to the 0.4.0
    entry as written there.
+
+## Amendment — 2026-10-16 13:03 EDT: the format version follows semver as Cargo reads it
+
+The owner confirmed, relayed: "right, it follows semver post 1.0, moves
+left". The format version within a file-major reads the way Cargo reads
+semver:
+
+- **From 1.0:** major = breaking (a reader refuses a newer major), minor =
+  additive (a reader accepts a newer minor in its major), patch = no format
+  change.
+- **Before 1.0 the meanings move one place left:** minor = breaking (a
+  0.x minor bump may change parsing; a reader refuses a newer minor), patch
+  = additive (a reader accepts a newer patch within its minor).
+- **0.0.x** files remain refused.
+- **Additive** means only adding tables that an older reader skips
+  (section 4.2's rule for unknown tags). It never changes the fixed prefix,
+  the layout of an existing table, or how any existing data is read.
+
+**What this replaces.**
+
+- Section 4.1 and decision 1 of section 2 said "Patch never changes parsing"
+  and "Patch is ignored: two files that differ only in patch parse
+  identically. A patch bump records a writer change that leaves the layout
+  the same". These now apply only from 1.0. In 0.x a patch may add skippable
+  tables, and a reader that does not know them skips them; it still never
+  changes how existing data is read.
+- Decision 6 of the 13:02 EDT amendment is refined. Its 1.0 rules stand,
+  with patch at 1.x meaning no format change. Its 0.x rule ("a reader
+  refuses a newer minor") stands, and a newer patch within the reader's
+  minor is accepted.
+- Section 4.1's acceptance rule for `F.major == 0` stays as written:
+  refuse when `(F.major, F.minor) > K` or `(F.major, F.minor) < (0, 1)`,
+  otherwise accept whatever the patch. For `F.major >= 1` it stays as
+  decision 6 set it: refuse when `F.major > K.major`.
+
+**Step 1's test table** (section 4.1, with the 13:02 additions) is replaced
+by the rows below for the split versions. The legacy rows (`03`, `04`,
+`03 00 01 00`, `02`, `00`) are unchanged.
+
+| Bytes 4..8 | Reader newest | Result | Sections read |
+|---|---|---|---|
+| `05 00 01 00` | 5:0.1.0 | accept | 36-byte header, layers, sets, glyphs, directory, tables, pixels |
+| `05 00 01 01`, with one table of a tag the reader does not know | 5:0.1.0 | accept; the unknown table is skipped (bounds checked, body not read) | as 0.1.0 |
+| `05 00 01 07` | 5:0.1.0 | accept, parsed as 0.1.0 plus any skipped tables | as 0.1.0 |
+| `05 00 00 03` | 5:0.1.0 | refuse (0.0.x never written) | none |
+| `05 00 02 00` | 5:0.1.0 | refuse (newer minor in 0.x) | none |
+| `05 01 00 00` | 5:0.1.0 | refuse (newer major) | none |
+| `06 00 00 00` | 5:0.1.0 | refuse (newer file-major) | none |
+| `05 00 01 00` | hypothetical 5:0.2 reader, field X gated `v > (0, 1)` | accept | as 0.1, X takes its default |
+| `05 00 02 00` | hypothetical 5:0.2 reader | accept | as 0.1, plus X |
+| `05 01 02 00` | hypothetical 5:1.0 reader | accept (newer minor from 1.0); unknown tables skipped | as 1.0 |
+| `05 01 00 05` | hypothetical 5:1.0 reader | accept, parsed as 1.0.0 | as 1.0 |
+| `05 02 00 00` | hypothetical 5:1.0 reader | refuse (newer major) | none |
+
+The hypothetical-reader rows remain unit tests of the gating and acceptance
+helpers, not of a real 0.2 or 1.0 format.
