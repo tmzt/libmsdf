@@ -164,3 +164,19 @@ compat?" and its answer: no, it must come first, so that legacy
 little-endian v3/v4 versions read as file-major 3/4 and old readers refuse
 `05 00 01 00` (u32 65541) cleanly. The plan has no open questions left. Still
 no code changes until the owner approves the plan.
+
+## 2026-10-16 13:03 EDT — Atlas layout tables plan: format version reads as Cargo semver
+
+Plan: `docs/design/20261016_01_ATLAS_LAYOUT_TABLES_PLAN.md` (Draft). The
+owner confirmed that the format version follows semver as Cargo reads it.
+
+- **From 1.0:** major is breaking, minor is additive (only tables an older
+  reader skips), and patch is no format change.
+- **In 0.x the meanings move one place left:** a newer minor is refused, and
+  a newer patch is accepted with any unknown tables skipped.
+- **0.0.x** stays refused.
+
+The amendment refines decision 6 of the 13:02 EDT amendment and the earlier
+"patch never changes parsing". It replaces step 1's test-table rows for split
+versions: a 0.1.0 reader accepts 0.1.1 and skips its unknown table, and
+refuses 0.2.0.
