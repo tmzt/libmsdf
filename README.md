@@ -36,4 +36,4 @@ dual licensed as above, without any additional terms or conditions.
 
 | Document | Date | Status | Decision |
 |---|---|---|---|
-| [Filled Bézier paths as an SDF primitive](docs/design/20261015_01_FILLED_BEZIER_PATH_PLAN.md) | 2026-10-15 | In implementation | Adds `SdfKind::PathFill`: closed line/quadratic/cubic paths filled by an exact even-odd signed distance, segments in the aux param bank; implementation started on the owner's instruction, released as 0.3.0. |
+| [Filled Bézier paths as an SDF primitive](docs/design/20261015_01_FILLED_BEZIER_PATH_PLAN.md) | 2026-10-15 | Implemented | Adds `SdfKind::PathFill`: closed line/quadratic/cubic paths filled by an exact even-odd signed distance, segments in the aux param bank; every step done, released as 0.3.0 (`v0.3.0`). |

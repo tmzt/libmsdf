@@ -1,7 +1,7 @@
 ---
 title: Filled Bézier paths as an SDF primitive
 date: 2026-10-15
-status: In implementation
+status: Implemented
 covers: >
   A new filled-path primitive for libmsdf: closed shapes built from line,
   quadratic and cubic Bézier segments, with any number of contours and holes,
@@ -633,3 +633,26 @@ one by one; the plan's own recommended answers are in force:
 
 How the steps land (one commit per step on the branch `impl/0.3.0`,
 squash-merged into `main`) and any departures are recorded in `CHANGES.md`.
+
+## Amendment — 2026-10-16 02:36 EDT: Implemented
+
+Every step is done and its **Done when:** holds, with the departures recorded
+in `CHANGES.md` (2026-10-16 02:36 EDT). This amendment replaces no earlier
+text. Status is now `Implemented`. On `main` all the steps landed in the
+squash commit `b375be3`, tagged `v0.3.0`. The step commits on the branch
+`impl/0.3.0` were:
+
+1. Constants and wire documentation: `713831b`. It was preceded by
+   `0546080`, which made the GPU suite build against wgpu 30 and cleared a
+   clippy error.
+2. Path model: `a9171d4`.
+3. Lowering to GPU segments: `745b7b6`.
+4. CPU reference SDF: `1ca7dfb`.
+5. DrawList integration: `172458a`.
+6. Shader: `da633d6`.
+7. GPU golden tests: `0cc90ae`. The evidence is in `out/path_fill/LOG.md`.
+8. Release and consumers: `4029003` (0.3.0). The consumer results are in
+   `CHANGES.md`. libcontrols and sigilweaver build and pass their tests.
+   tinytrowel's crates build and pass, except its two libmorph shells, which
+   are blocked by a libmorph/libdevice mismatch unrelated to libmsdf. highbay
+   is not affected, because the release is on `main` only.
