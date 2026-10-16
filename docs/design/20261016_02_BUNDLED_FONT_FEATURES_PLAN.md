@@ -1113,3 +1113,269 @@ crate split does not move files under work in progress.
    and their layers of the styled atlas? Baking at build time removes the
    repository cost; a consumer pays the bake time and binary size only for
    what it enables. Recommended: ship them.
+
+## Amendment — 2026-10-16 13:34 EDT: owner approval; the OFL faces are subset
+
+The owner's decision, relayed by the coordinating agent: "approve with the
+recommendations ... subset for now ascii, east/west europe and common
+symbols". The plan is approved, with the six open questions of section 8
+answered as below. Its status stays `Draft`: under Rule 1.5, the first
+commit that implements it sets `In implementation`.
+
+**What this replaces.** Section 8 has no open questions left. Decision 3
+(open question 3) is reversed: the OFL faces are subset, not shipped
+unmodified. That replaces:
+
+- the subsetting paragraph of section 4.3, and the two OFL lines of its file
+  list;
+- the sentence in section 3.1 "The game's copies, which libmsdf's must
+  equal byte for byte": those hashes are now the **upstream** hashes,
+  recorded for provenance;
+- the OFL lines of the bundled table and of "What each atlas is" (sections
+  4.4 and 4.5);
+- the OFL entries of `FONTS-LICENSE-OFL.txt` (section 4.12);
+- step 2's second commit and its **Done when:**.
+
+Everything else stands.
+
+### Answers
+
+1. **The `libmsdf-font` split: approved** (section 4.1). Switch criterion 1
+   of section 4.10 holds.
+2. **`libmsdf-font` is versioned in lockstep** with libmsdf: one version,
+   one tag, one `VERSIONS.md` (section 5).
+3. **The OFL faces are subset** to the set below (the rest of this
+   amendment).
+4. **No `tnum`.** The bundled atlases are baked with the default features
+   only (section 4.5). The subset TTFs keep every layout feature (below), so
+   a consumer can still bake `tnum` with its own `Baker::bake_face`.
+5. **Linux reference hashes.** `fonts/bundled.sha256` gains
+   `x86_64-unknown-linux-gnu` lines in step 6, measured on Linux when switch
+   criterion 3 is. Step 6's **Done when:** gains: "`fonts/bundled.sha256`
+   has lines for `aarch64-apple-darwin` and `x86_64-unknown-linux-gnu`, each
+   from a bake on that host". The "no reference recorded" pass of section
+   4.8 remains only for other hosts.
+6. **Standalone Bold and Italic atlases ship** as section 4.4 says.
+
+### The subset coverage: `EUROPEAN_TEXT_RANGES`
+
+A new constant in `libmsdf-font`, beside `TEXT_RANGES` (which does not
+change and stays the Roboto faces' coverage):
+
+```rust
+/// The text coverage of the bundled OFL faces (Grenze Gotisch, Texturina):
+/// Western and Central/Eastern European Latin plus common symbols.
+pub const EUROPEAN_TEXT_RANGES: &[(char, char)] = &[
+    ('\u{0020}', '\u{007E}'), // Basic Latin, printable
+    ('\u{00A0}', '\u{00FF}'), // Latin-1 Supplement
+    ('\u{0100}', '\u{017F}'), // Latin Extended-A
+    ('\u{2010}', '\u{2027}'), // General Punctuation: hyphens, figure dash,
+                              // en/em dash, horizontal bar, double vertical
+                              // line, quotes (single, double, low, reversed),
+                              // dagger, double dagger, bullet, triangular
+                              // bullet, leaders, ellipsis, hyphenation point
+    ('\u{2030}', '\u{203A}'), // per mille, per ten thousand, primes,
+                              // reversed primes, caret, single guillemets
+    ('\u{20AC}', '\u{20AC}'), // euro sign
+    ('\u{2122}', '\u{2122}'), // trade mark sign
+];
+```
+
+That is 356 codepoints: 95 + 96 + 128 + 24 + 11 + 1 + 1. Dagger (U+2020),
+double dagger (U+2021) and bullet (U+2022) are inside U+2010–2027. U+2028
+and U+2029 (line and paragraph separators) and U+202A–202F (bidi controls,
+narrow no-break space) are deliberately outside the range.
+
+**What each face maps (measured 2026-10-16, fontTools 4.67.0):**
+
+- **Grenze Gotisch: 340 of 356.** Unmapped: U+2012, U+2015, U+2016,
+  U+2017, U+201B, U+201F, U+2023, U+2024, U+2025, U+2027, U+2031, U+2034,
+  U+2035, U+2036, U+2037, U+2038.
+- **Texturina: 338 of 356.** Unmapped: the same sixteen, plus U+017F
+  (long s) and U+2011 (non-breaking hyphen).
+
+An unmapped codepoint shapes to the face's glyph 0 and draws its `.notdef`,
+as any codepoint outside a face's coverage does today. The range list stays
+whole rather than being trimmed per face, so one constant describes both
+faces and a later upstream release that adds glyphs fills them in.
+
+**What fires on the set (uharfbuzz 0.56.3, `lnum` and `pnum` on,
+every codepoint alone, after `A`, and doubled):** in both faces, only the
+`f_f` ligature (and the other `liga` forms), the ten lining figures
+(`zero.lf` to `nine.lf`), and the soft hyphen becoming the space glyph.
+There is no decomposition, no change in glyph count other than ligatures,
+and no GDEF mark glyph produced, and none of the 356 codepoints is a GDEF
+mark. So the Latin Extended-A widening stays inside what the atlas layout
+tables can carry. fontTools' closure lists combining marks and `locl`
+forms, but only through contextual and language-specific rules that do not
+fire without a language system; the bake's equivalence check is the
+authority on that.
+
+### How the subset is made
+
+A new script, `fonts/ofl_subset.py`, in the style of `fonts/style.py`: run
+with `uv run --with fonttools==4.67.0`, Python 3.11 or later; it stops with
+a clear message if `uv` is missing.
+
+```text
+./fonts/ofl_subset.py <upstream.ttf> <out.ttf> <expected-upstream-sha256>
+```
+
+1. It checks the upstream file's sha256 against the expected value and
+   refuses a mismatch.
+2. It subsets with the fontTools subsetter, the equivalent of:
+
+   ```text
+   pyftsubset <upstream.ttf> \
+     --unicodes="U+0020-007E,U+00A0-017F,U+2010-2027,U+2030-203A,U+20AC,U+2122" \
+     --layout-features='*' --glyph-names --name-IDs='*' --name-languages='*' \
+     --notdef-outline --no-hinting --drop-tables+=gasp,DSIG
+   ```
+
+   - **Every layout feature is kept** (`'*'`), so `ccmp`, `locl`, `liga`,
+     `kern`, `lnum`, `pnum`, `tnum` (Grenze) and the rest stay usable, and
+     their glyph closure stays in the file.
+   - **Glyph names and the whole `name` table are kept.**
+   - **Hinting is dropped**, following section 4.4 of the atlas layout
+     tables plan, which carries no virtual-machine data: `--no-hinting`
+     removes `prep`, `fpgm`, `cvt ` and per-glyph instructions. `gasp`
+     (rasteriser flags) and `DSIG` (a signature the modification would
+     invalidate) are dropped too.
+   - **The variation tables are kept** (`fvar`, `gvar`, `HVAR`, `STAT`,
+     and `avar` for Texturina), so the files remain the variable fonts; the
+     atlas is baked from the default instance as before.
+   - The `head` timestamp is not recalculated, so the output is
+     reproducible. Measured: two runs on Texturina gave byte-identical files
+     (sha256 `a2a29082...`).
+3. It then sets two `name` records, per OFL good practice for a Modified
+   Version, with fixed strings so the bytes stay reproducible:
+   - ID 5 (version): the upstream string followed by
+     `"; libmsdf subset (U+0020-017F, punctuation)"`;
+   - ID 10 (description):
+     `"Subset by libmsdf to Latin (U+0020-017F) and common punctuation and symbols; outlines, metrics and layout unchanged."`.
+4. **Provenance check.** For every glyph kept, the outline and advance must
+   equal the upstream file's, and every kept codepoint must map to the same
+   glyph name. Otherwise the script aborts, as `widen.py` and `style.py` do.
+5. It prints the output's sha256.
+
+The upstream files are build inputs, not committed. They are fetched to the
+gitignored `fonts/upstream/` from google/fonts at a commit named in
+`FONTS-LICENSE-OFL.txt`, the way `.gitignore` already treats the Material
+Symbols input.
+
+**Measured sizes** (fontTools 4.67.0, before the two `name` edits, which add
+a few hundred bytes):
+
+| Face | upstream | subset |
+|---|---|---|
+| Grenze Gotisch | 193,492 bytes, 1,111 glyphs | 127,732 bytes, 643 glyphs |
+| Texturina | 288,320 bytes, 722 glyphs | 204,204 bytes, 454 glyphs |
+
+This replaces section 8's estimate of "about 350 KB" saved: the saving is
+about 150 KB for both faces together. Most of what remains is the variation
+data.
+
+### Files and licence
+
+- The committed TTFs are the subsets:
+  `fonts/GrenzeGotisch[wght]-subset.ttf` and
+  `fonts/Texturina[opsz,wght]-subset.ttf`. The suffix keeps them from being
+  mistaken for upstream bytes. `GRENZE_GOTISCH_TTF` and `TEXTURINA_TTF`
+  include them, with names unchanged.
+- `BundledFace` gains `upstream_sha256: Option<[u8; 32]>`, and the bundled
+  table records both hashes: the subset's (checked before every bake) and
+  the upstream's (from section 3.1, checked by `ofl_subset.py`). The
+  upstream values are those in section 3.1: Grenze `701b299d...`,
+  Texturina `478a15d7...`.
+- **This is an OFL Modified Version, which the OFL allows.** Neither face
+  declares a Reserved Font Name, so the family names may stay. Each OFL
+  entry in `FONTS-LICENSE-OFL.txt` gains:
+
+  ```text
+    Modified Version: subset by libmsdf (fonts/ofl_subset.py) to
+    U+0020-007E, U+00A0-017F, U+2010-2027, U+2030-203A, U+20AC, U+2122;
+    hinting, gasp and DSIG removed; outlines, metrics, layout tables and
+    variation data otherwise unchanged.
+    Upstream: <google/fonts commit>, sha256 <upstream sha256>
+    This file: sha256 <subset sha256>
+  ```
+
+  and its file line names the `-subset.ttf` file. The copyright lines do
+  not change.
+
+### Coverage and the baked atlases
+
+- **The atlas covers the same set.** `BakeOptions` gains
+  `coverage: Coverage`. `Coverage::Shipped` is today's
+  `add_shipped_coverage`: `TEXT_RANGES` plus whatever the face defines in
+  the Private Use Area, used by the Roboto rows. `Coverage::Ranges(&[(char,
+  char)])` queues exactly those ranges (what the face maps of them) plus the
+  shaped closure, and is used by the OFL rows with `EUROPEAN_TEXT_RANGES`.
+- **It does not fit in one 320-cell layer.** Grenze maps 340 codepoints and
+  Texturina 338; the shaped closure adds the `liga` forms (5), the lining
+  figures (10), glyph 0 and, for Grenze, its contextual `.case` accents. So
+  each needs about 355 to 370 cells against `atlas_capacity()` = 320
+  (8 columns × 40 rows). `ATLAS_ROWS` says growth is "layers, or columns;
+  never rows", and `ATLAS_COLS` says "16 columns at the same 40 rows is
+  800x2000 - inside the same floor - and holds 640 cells". `BakeOptions`
+  therefore gains `columns: u32` (default `ATLAS_COLS`, 8), and
+  `FontAtlasBuilder` gains `with_columns(16)`, with capacity per layer
+  `columns × ATLAS_ROWS`. The two OFL atlases are baked at 16 columns; the
+  Roboto atlases stay at 8, so their bytes and the test fixture do not
+  change. No format change is needed: the width is in the header, glyph
+  entries hold texel coordinates, and `sdf_render.wgsl` normalises by
+  `textureDimensions`.
+- **Size.** 16 columns of 50-texel padded cells by 40 rows is 800 × 2000
+  texels, so 4,800,000 bytes of 3-channel pixel data per OFL atlas, plus
+  about 12 KB of glyph table and the layout tables (measured in step 4).
+  That is twice a one-layer Roboto atlas.
+- **Merging.** A consumer that stacks atlases into one texture array, as the
+  tower defense game does, needs equal dimensions. libmsdf gains
+  `FontAtlas::padded_to(&self, width: u32, height: u32) -> Result<FontAtlas, &'static str>`
+  (additive). It pads every layer on the right and bottom with empty texels,
+  leaving every glyph's texel coordinates, and so its rendering, unchanged.
+  It refuses dimensions smaller than the atlas. Step 4's **Done when:**
+  gains: "an 8-column Roboto atlas padded to 800 × 2000 draws the same
+  `DrawList` frame as unpadded (golden render)".
+- **Layout tables over the wider set.** The atlas layout tables plan defines
+  the `Cmap` scope (its section 4.6) and the equivalence corpus (its section
+  4.9) over `TEXT_RANGES`. For these faces both must be the bake's declared
+  coverage: `Cmap` holds every codepoint of `EUROPEAN_TEXT_RANGES` the face
+  maps, and the corpus pairs run over those codepoints. That is about
+  115,000 pair strings per face instead of 40,401, so switch criterion 2
+  measures it. This means `FaceLayout::extract` / `LayoutOptions` take the
+  coverage as a parameter. That changes an interface of the atlas layout
+  tables plan, which is frozen and whose step 3 is in progress, so under
+  Rule 1.7 it is raised with the owner. It is recorded in `CHANGES.md` once
+  agreed, before that plan's step 3 fixes the scope. With `TEXT_RANGES` as
+  the default, nothing in that plan's Roboto results changes.
+
+### Steps affected
+
+- **Step 2, second commit** (replacing its OFL part): add
+  `fonts/ofl_subset.py`, the two `-subset.ttf` files made by it from the
+  upstream files of section 3.1, `.gitignore`'s `fonts/upstream/` entry,
+  and `GRENZE_GOTISCH_TTF` / `TEXTURINA_TTF`.
+  **Done when** (replacing step 2's): the upstream inputs' sha256 equal
+  section 3.1's; running `ofl_subset.py` twice gives byte-identical files
+  whose sha256 are recorded in the bundled table; its provenance check
+  passes; each subset maps exactly the codepoints listed above for its face;
+  its `name` ID 0 line equals section 3.2's and IDs 5 and 10 carry the
+  modification strings; it has no `prep`, `fpgm`, `cvt `, `gasp` or `DSIG`;
+  with `fonts-ofl-ledger`, `TextShaper` over each shapes "Treasury 50G",
+  "Łódź", "Œuvre", "Šťastný" and "‹ 25 ‰ ›" to non-zero glyphs, and
+  shapes the full set exactly as over the upstream file (glyph names,
+  advances and positions); and
+  `grep -rn "LICENSE-Roboto\|LICENSE-MaterialSymbols"` finds nothing
+  outside `docs/design/` and `CHANGES.md`.
+- **Step 4** gains `Coverage`, `columns`, `with_columns`,
+  `EUROPEAN_TEXT_RANGES` and `FontAtlas::padded_to`. Its OFL comparison
+  with the game's v3 atlases becomes: every glyph in both has identical
+  texels (`FontAtlas::cell_texels`; coordinates differ at 16 columns), and
+  the cells added are exactly the newly covered codepoints and the layout
+  closure, logged with lists.
+- **Step 9:** the game's ledger capture is compared as before. The game's
+  merge pads the Roboto atlas with `padded_to` before stacking.
+- **Section 5** gains, under Added: `EUROPEAN_TEXT_RANGES`, `Coverage`,
+  `BakeOptions::{coverage, columns}`, `FontAtlasBuilder::with_columns`,
+  `FontAtlas::padded_to`, `BundledFace::upstream_sha256`.
