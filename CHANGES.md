@@ -142,3 +142,25 @@ zeros, digit count, the 4096 maximum, no leading digit in text) are
 withdrawn; strings over 255 bytes are refused at bake (the longest measured
 is 98). Truncation, non-ASCII text and `LICS`/`LICT` mismatches are still
 refused. Still no code changes until the owner approves the plan.
+
+## 2026-10-16 13:02 EDT — Atlas layout tables plan: open questions decided
+
+Plan: `docs/design/20261016_01_ATLAS_LAYOUT_TABLES_PLAN.md` (Draft). An
+amendment records the decisions on all seven open questions, made by the
+coordinating agent at the owner's request:
+
+- `Gsub` kind 3 (context single) is accepted, so Grenze Gotisch bakes.
+- Kerning is stored in integer font units.
+- Optional features are chosen per face and recorded in that face's `Head`.
+- `Head` now carries ascender, descender, line gap, cap height and x-height.
+- The real v3 fixture is kept under `tests/fixtures/legacy/`.
+- From format major 1, a reader accepts a newer minor and refuses a newer
+  major.
+- Rule 5 is to gain the VERSIONS.md Format line and the minor-bump rule for
+  format changes; that AGENTS.md change is proposed but not written yet.
+
+It also records the owner's question "does file-major need to be last for back
+compat?" and its answer: no, it must come first, so that legacy
+little-endian v3/v4 versions read as file-major 3/4 and old readers refuse
+`05 00 01 00` (u32 65541) cleanly. The plan has no open questions left. Still
+no code changes until the owner approves the plan.
