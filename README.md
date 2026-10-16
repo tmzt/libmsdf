@@ -59,6 +59,76 @@ Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
 dual licensed as above, without any additional terms or conditions.
 
+## Bundled fonts
+
+Enable the features you use, for example:
+
+```toml
+[dependencies]
+libmsdf = { git = "https://github.com/tmzt/libmsdf", rev = "...", features = ["fonts-ofl-ledger", "font-apache-roboto-regular"] }
+```
+
+Each feature brings that face's MSDF atlas (`GRENZE_GOTISCH_ATLAS`,
+`ROBOTO_REGULAR_ATLAS`, ...: format 5, with layout tables, licence records
+and, for the OFL faces, coverage groups), and with `shaper` (on by default)
+its TTF (`GRENZE_GOTISCH_TTF`, `ROBOTO_REGULAR_ASCII`, ...). A consumer that
+lays text out from the atlas alone turns default features off:
+
+```rust
+let atlas = libmsdf::FontAtlas::from_bytes(libmsdf::GRENZE_GOTISCH_ATLAS)?;
+let shaper = libmsdf::AtlasShaper::new(&atlas, libmsdf::GlyphStyle::Regular)?;
+let run = shaper.shape("Treasury 50G");
+```
+
+The atlases are baked by `libmsdf::bake::Baker` and committed under
+`fonts/atlases/`, so enabling a font feature needs nothing on the build
+host beyond Rust: no C++ compiler and no bake at build time. (Baking them in
+`build.rs` was the plan's first choice; it was too slow for a build script
+at the default `opt-level` - see CHANGES.md.) The OFL atlases are 16 cell
+columns wide (800 x 2000 texels); `FontAtlas::padded_to` pads an 8-column
+atlas to match before stacking atlases into one texture array.
+
+**Your own faces.** A build script can bake with the same baker by
+depending on the `libmsdf-font` crate (no wgpu) with its `bake` feature:
+
+```toml
+[build-dependencies]
+libmsdf-font = { git = "https://github.com/tmzt/libmsdf", rev = "...", features = ["bake"] }
+```
+
+```rust
+// build.rs
+use libmsdf_font::bake::{BakeOptions, Baker, LicenceSpec};
+use libmsdf_font::{GlyphStyle, LayoutOptions};
+
+fn main() {
+    let ttf = std::path::Path::new("assets/MyFace.ttf");
+    println!("cargo:rerun-if-changed={}", ttf.display());
+    let mut opts = BakeOptions::new(48, 6.0);
+    opts.licences.push(LicenceSpec { spdx: "OFL-1.1".into(), source: "My Face".into(), styles: vec![GlyphStyle::Regular] });
+    opts.layout = Some(vec![(GlyphStyle::Regular, LayoutOptions::default())]);
+    let bytes = Baker::bake_face(ttf, &opts).expect("bake");
+    std::fs::write(std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("myface.atlas"), bytes).unwrap();
+}
+```
+
+Baking needs a host C++ compiler (msdfgen) and a macOS or Linux-gnu host.
+On a nightly Cranelift dev profile, add to the workspace manifest:
+
+```toml
+[profile.dev.build-override]
+codegen-backend = "llvm"
+```
+
+`[profile.dev.build-override] opt-level = 2` makes such a bake several
+times faster.
+
+**Verifying the bundled atlases:**
+`cargo run -p libmsdf-font --features bake --bin libmsdf-bake -- bundled --check fonts/atlases`
+re-bakes them in memory and compares, and
+`cargo test --features fonts-apache-roboto,fonts-ofl-ledger --test bundled_fonts`
+checks them against `fonts/bundled.sha256`.
+
 ## Architectural decisions
 
 | Document | Date | Status | Decision |
