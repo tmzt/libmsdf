@@ -30,3 +30,13 @@ Rules 0 to 4 were already identical, and Rule 5 (versions and tags, with
 - From here on a version change follows Rule 5.4: the filled Bézier path
   plan's `SdfKind::PathFill` is a variant added to an exhaustive public enum,
   so it is released as 0.3.0.
+
+## 2026-10-16 02:05 EDT — Adopt Rule 5.5: incompatible dependency bumps propagate
+
+No plan; a change to the rules, following the 02:03 addendum. The owner
+added Rule 5.5 to libcontrols' AGENTS.md, and libmsdf's Rule 5 was copied
+again (`9ec0276`), so Rules 0 to 5 stay byte-identical to libcontrols'.
+Under 5.5 a libmsdf release that moves a dependency to a semver-incompatible
+version bumps libmsdf's minor version, and every consumer with a public API
+that takes such a libmsdf release (for example libcontrols moving from
+libmsdf 0.2 to 0.3) bumps its own minor version in turn.
