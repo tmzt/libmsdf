@@ -13,9 +13,13 @@ ttf-parser = { version = "0.25", optional = true }
 unicode-segmentation = "1.13"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-msdfgen = { version = "0.2", default-features = false, features = ["ttf-parser"], optional = true }
+# Pinned exactly: msdfgen's float output IS the texels, so a bake is only
+# reproducible against one version (bundled fonts plan, section 4.8).
+msdfgen = { version = "=0.2.1", default-features = false, features = ["ttf-parser"], optional = true }
 # msdfgen's FontExt is implemented against ttf-parser 0.18; metrics use 0.25.
-ttf-parser-018 = { package = "ttf-parser", version = "0.18", optional = true }
+ttf-parser-018 = { package = "ttf-parser", version = "=0.18.1", optional = true }
+# Input pinning: every bundled face's sha256 is checked before it is baked.
+sha2 = { version = "0.10", optional = true }
 
 [features]
 default = ["shaper"]
@@ -24,7 +28,7 @@ default = ["shaper"]
 shaper = ["dep:rustybuzz", "dep:ttf-parser"]
 # CPU msdfgen baking (libmsdf's `cpu-bake`). msdfgen is C++ built by `cc`;
 # it never builds for wasm32.
-bake = ["shaper", "dep:msdfgen", "dep:ttf-parser-018"]
+bake = ["shaper", "dep:msdfgen", "dep:ttf-parser-018", "dep:sha2"]
 # The bundled TTF constants (`faces`), forwarded from libmsdf's features of
 # the same names; off by default. See libmsdf's Cargo.toml and README.md.
 font-apache-roboto-regular = []
@@ -33,3 +37,7 @@ font-apache-roboto-italic = []
 font-apache-roboto-msymbols = []
 font-ofl-grenze-gotisch = []
 font-ofl-texturina = []
+
+[[bin]]
+name = "libmsdf-bake"
+required-features = ["bake"]

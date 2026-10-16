@@ -19,6 +19,10 @@ pub const LINE_BOX_RATIO: f32 = 1.3;
 
 pub mod atlas;
 pub mod atlas_shaper;
+#[cfg(all(feature = "bake", not(target_arch = "wasm32")))]
+pub mod bake;
+pub mod bundled;
+pub mod coverage;
 pub mod faces;
 pub mod glyph_table;
 pub mod layout;
@@ -41,6 +45,11 @@ pub use atlas::{
 #[cfg(feature = "shaper")]
 pub use atlas::{FontAtlasBuilder, cap_height, glyph_projection};
 pub use atlas_shaper::{AtlasShaper, NoLayout, RunShaper, is_default_ignorable};
+pub use bundled::{BUNDLED_ATLAS_GLYPH_SIZE, BUNDLED_ATLAS_PX_RANGE, BundledAtlas, BundledFace};
+pub use coverage::{
+    COVERAGE_MATH, COVERAGE_SYMBOLS, COVERAGE_TEXT, Coverage, CoverageGroup, CoverageGroupId,
+    FaceCoverage, GroupCoverage, MissingPolicy,
+};
 pub use glyph_table::GlyphEntry;
 pub use layout::{
     AtlasLayout, ContextSide, ContextSingle, FaceLayout, GsubLookup, GsubRules, Ligature,

@@ -687,6 +687,10 @@ pub struct FontAtlas {
     /// one built in memory. [`FontAtlas::to_bytes`] always writes
     /// [`ATLAS_FORMAT_VERSION`] whatever this says.
     pub read_version: AtlasFileVersion,
+    /// The declared coverage groups of each face baked with them (`CVRG`;
+    /// empty for `Coverage::Shipped` bakes, runtime atlases and legacy
+    /// files). Read it through [`FontAtlas::coverage`].
+    pub coverage: Vec<crate::FaceCoverage>,
 }
 
 impl FontAtlas {
@@ -699,6 +703,43 @@ impl FontAtlas {
     /// Every licence record of this atlas.
     pub fn licences(&self) -> &[crate::LicenceRecord] {
         &self.licences
+    }
+
+    /// The declared coverage groups of one style's face, if it has a `CVRG`.
+    pub fn coverage(&self, style: GlyphStyle) -> Option<&crate::FaceCoverage> {
+        self.coverage.iter().find(|c| c.style == style)
+    }
+
+    /// **This atlas on a larger texture**: every layer padded on the right
+    /// and bottom with empty texels to `width` x `height`. Every glyph keeps
+    /// its texel coordinates, so it draws exactly as before; this is what a
+    /// consumer stacking atlases of different widths into one texture array
+    /// needs (bundled fonts plan, 13:34 EDT amendment). Refuses dimensions
+    /// smaller than the atlas.
+    pub fn padded_to(&self, width: u32, height: u32) -> Result<FontAtlas, &'static str> {
+        if width < self.width || height < self.height {
+            return Err("an atlas can only be padded to dimensions at least its own");
+        }
+        let ch = self.channels as usize;
+        let (ow, oh) = (self.width as usize, self.height as usize);
+        let (nw, nh) = (width as usize, height as usize);
+        let layers = self.layer_count() as usize;
+        let mut pixel_data = vec![0u8; nw * nh * ch * layers];
+        for l in 0..layers {
+            for row in 0..oh {
+                let src = (l * oh + row) * ow * ch;
+                let dst = (l * nh + row) * nw * ch;
+                if let Some(s) = self.pixel_data.get(src..src + ow * ch) {
+                    pixel_data[dst..dst + ow * ch].copy_from_slice(s);
+                }
+            }
+        }
+        Ok(FontAtlas {
+            width,
+            height,
+            pixel_data,
+            ..self.clone()
+        })
     }
 
     /// The metrics of one glyph set, or `None` for a set this atlas has no
@@ -993,6 +1034,7 @@ impl FontAtlas {
         let mut tables: Vec<TableBody> = Vec::new();
         tables.extend(crate::layout::encode_tables(self.layout.as_ref())?);
         tables.extend(crate::licence::encode_tables(&self.licences)?);
+        tables.extend(crate::coverage::encode_tables(&self.coverage)?);
         tables.sort_by(|a, b| (a.face, a.tag).cmp(&(b.face, b.tag)));
         if tables.len() > MAX_ATLAS_TABLES {
             return Err("atlas would carry more than 64 tables");
@@ -1213,7 +1255,7 @@ impl FontAtlas {
         } else {
             (entries_end, Vec::new())
         };
-        let (layout, licences) = Self::read_tables(data, &records)?;
+        let (layout, licences, coverage) = Self::read_tables(data, &records)?;
 
         let expected_pixels =
             (width as usize) * (height as usize) * (channels as usize) * layer_count;
@@ -1234,6 +1276,7 @@ impl FontAtlas {
             layout,
             licences,
             read_version: version,
+            coverage,
         })
     }
 
@@ -1312,7 +1355,14 @@ impl FontAtlas {
     fn read_tables(
         data: &[u8],
         records: &[TableRecord],
-    ) -> Result<(Option<crate::AtlasLayout>, Vec<crate::LicenceRecord>), &'static str> {
+    ) -> Result<
+        (
+            Option<crate::AtlasLayout>,
+            Vec<crate::LicenceRecord>,
+            Vec<crate::FaceCoverage>,
+        ),
+        &'static str,
+    > {
         let bodies: Vec<(&[u8; 4], u8, &[u8])> = records
             .iter()
             .map(|r| {
@@ -1322,7 +1372,8 @@ impl FontAtlas {
             .collect();
         let layout = crate::layout::decode_tables(&bodies)?;
         let licences = crate::licence::decode_tables(&bodies)?;
-        Ok((layout, licences))
+        let coverage = crate::coverage::decode_tables(&bodies, layout.as_ref())?;
+        Ok((layout, licences, coverage))
     }
 
     /// Build an atlas shell (no pixel data yet) for dynamic population via
@@ -1383,6 +1434,7 @@ impl FontAtlas {
             layout: None,
             licences: Vec::new(),
             read_version: AtlasFileVersion::Split(ATLAS_FORMAT_VERSION),
+            coverage: Vec::new(),
         }
     }
 
@@ -1781,6 +1833,9 @@ pub struct FontAtlasBuilder {
     /// Licence records asked for with [`FontAtlasBuilder::add_licence`]:
     /// the styles covered, the SPDX identifier and the source.
     licences: Vec<(Vec<GlyphStyle>, String, String)>,
+    /// Cell columns per layer ([`ATLAS_COLS`] unless
+    /// [`FontAtlasBuilder::with_columns`] says otherwise).
+    columns: u32,
 }
 
 #[cfg(feature = "shaper")]
@@ -1798,7 +1853,23 @@ impl FontAtlasBuilder {
             style_faces: Vec::new(),
             layout: None,
             licences: Vec::new(),
+            columns: ATLAS_COLS,
         }
+    }
+
+    /// **Bake `columns` cell columns per layer** instead of [`ATLAS_COLS`]:
+    /// a layer then holds `columns x ATLAS_ROWS` cells and is
+    /// `columns x (glyph_size + 2)` texels wide. [`ATLAS_COLS`] explains why
+    /// columns, not rows, are the axis with headroom: 16 columns at 48px is
+    /// 800x2000, inside the 2048 floor. No format change: the width is in the
+    /// header and every entry holds texel coordinates.
+    pub fn with_columns(&mut self, columns: u32) {
+        self.columns = columns.max(1);
+    }
+
+    /// Cell columns per layer.
+    pub fn columns(&self) -> u32 {
+        self.columns
     }
 
     /// **Bake layout tables** (`Head`, `Cmap`, `Hmtx`, `Gsub`, `Gpos`) for
@@ -2210,6 +2281,24 @@ impl FontAtlasBuilder {
         Ok(())
     }
 
+    /// **Register a face for `style` without queueing anything**, for a
+    /// caller that queues its own coverage (the `Baker`'s coverage groups).
+    /// Refuses Regular (the builder's own face) and a style that already has
+    /// one.
+    pub fn add_styled_face(&mut self, style: GlyphStyle, font_data: Vec<u8>) -> Result<(), String> {
+        if style == GlyphStyle::Regular {
+            return Err("GlyphStyle::Regular is the face this builder was constructed with".into());
+        }
+        if self.style_face(style).is_some() {
+            return Err(format!(
+                "{style:?} already has a face registered on this builder"
+            ));
+        }
+        ttf_parser::Face::parse(&font_data, 0).map_err(|e| format!("{style:?} face: {e}"))?;
+        self.style_faces.push((style, font_data));
+        Ok(())
+    }
+
     /// The styles this builder will bake cells for, in cell order.
     pub fn styles(&self) -> Vec<GlyphStyle> {
         let mut styles: Vec<GlyphStyle> =
@@ -2217,6 +2306,31 @@ impl FontAtlasBuilder {
         styles.sort_unstable();
         styles.dedup();
         styles
+    }
+}
+
+/// Why a bake failed: a layout error kept whole, or any other refusal.
+#[cfg(all(feature = "bake", not(target_arch = "wasm32")))]
+#[derive(Debug)]
+pub(crate) enum BuildError {
+    Layout(GlyphStyle, crate::LayoutError),
+    Other(String),
+}
+
+#[cfg(all(feature = "bake", not(target_arch = "wasm32")))]
+impl core::fmt::Display for BuildError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            BuildError::Layout(style, e) => write!(f, "{style:?} layout: {e}"),
+            BuildError::Other(e) => f.write_str(e),
+        }
+    }
+}
+
+#[cfg(all(feature = "bake", not(target_arch = "wasm32")))]
+impl From<String> for BuildError {
+    fn from(e: String) -> Self {
+        BuildError::Other(e)
     }
 }
 
@@ -2357,6 +2471,11 @@ impl FontAtlasBuilder {
     /// [`FontAtlasBuilder::with_layout`], a face whose layout the tables
     /// cannot carry exactly.
     pub fn build(&self) -> Result<FontAtlas, String> {
+        self.build_checked().map_err(|e| e.to_string())
+    }
+
+    /// [`FontAtlasBuilder::build`], keeping a layout error as one.
+    pub(crate) fn build_checked(&self) -> Result<FontAtlas, BuildError> {
         let licences = self.licence_records()?;
         let (builder, layout) = match &self.layout {
             None => (None, None),
@@ -2373,7 +2492,7 @@ impl FontAtlasBuilder {
                         .map(|(_, o)| o.clone())
                         .unwrap_or_default();
                     let layout = crate::FaceLayout::extract(face, style, &opts)
-                        .map_err(|e| format!("{style:?} layout: {e}"))?;
+                        .map_err(|e| BuildError::Layout(style, e))?;
                     // A cell for every glyph the tables can output; glyph 0
                     // is the style-invariant placeholder cell.
                     for &(raw, _) in &layout.hmtx {
@@ -2497,7 +2616,7 @@ impl FontAtlasBuilder {
         let padded = gs + 2; // 1px padding on each side
         let channels = 3u32;
 
-        let atlas_w = ATLAS_COLS * padded;
+        let atlas_w = self.columns * padded;
 
         struct Placed {
             cell: BakedGlyphCell,
@@ -2632,14 +2751,15 @@ impl FontAtlasBuilder {
         // layer's.
         for (i, layer) in layers.iter().enumerate() {
             let n = placed.iter().filter(|p| p.layer as usize == i).count();
-            if n > atlas_capacity() {
+            if n > (self.columns * ATLAS_ROWS) as usize {
                 return Err(format!(
                     "layer {i} ({layer}) has {n} cells, but a layer is pinned at {} \
-                     ({ATLAS_ROWS} rows x {ATLAS_COLS} columns) - read ATLAS_COLS and then \
+                     ({ATLAS_ROWS} rows x {} columns) - read ATLAS_COLS and then \
                      ATLAS_ROWS before raising either; columns are the axis with headroom and \
                      rows are the one without. A second STYLE is a second layer and does not \
                      spend this budget; a wider vocabulary at one size does",
-                    atlas_capacity()
+                    self.columns * ATLAS_ROWS,
+                    self.columns
                 ));
             }
         }
@@ -2694,6 +2814,7 @@ impl FontAtlasBuilder {
             layout: None,
             licences: Vec::new(),
             read_version: AtlasFileVersion::Split(ATLAS_FORMAT_VERSION),
+            coverage: Vec::new(),
         })
     }
 
