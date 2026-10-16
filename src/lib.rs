@@ -20,6 +20,9 @@
 
 #![forbid(unsafe_code)]
 
+/// The baker (`libmsdf-font`'s `bake` module), with `cpu-bake`.
+#[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
+pub use libmsdf_font::bake;
 pub mod bundled;
 pub mod core;
 pub mod drawlist;

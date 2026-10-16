@@ -103,6 +103,9 @@
 //! not the cells fill it, and most of that is zeros.
 
 #[cfg(not(target_arch = "wasm32"))]
+use libmsdf::bake::{BakeOptions, Baker, LicenceSpec};
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let check = args.iter().any(|a| a == "--check");
@@ -110,7 +113,7 @@ fn main() {
     // `--style bold`, or `--style bold=<face.ttf>`. Parsed before the
     // positionals so a style argument can never be taken for the font or the
     // output path.
-    let styles: Vec<(libmsdf::GlyphStyle, Vec<u8>)> = args
+    let styles: Vec<(libmsdf::GlyphStyle, std::path::PathBuf)> = args
         .iter()
         .zip(args.iter().skip(1))
         .filter(|(flag, _)| *flag == "--style")
@@ -124,30 +127,35 @@ fn main() {
                 "bolditalic" => libmsdf::GlyphStyle::BoldItalic,
                 other => panic!("--style takes bold, italic or bolditalic, not {other:?}"),
             };
-            let data = match path {
-                Some(p) => std::fs::read(p).unwrap_or_else(|e| panic!("read style face {p}: {e}")),
-                // The bundled face, which is `None` for a style this build
-                // ships nothing for - a missing asset the caller must supply,
-                // never a substitution.
-                // The bundled face needs its font feature
-                // (`font-apache-roboto-bold`, `-italic`).
-                None => libmsdf::bundled_style_face(style)
-                    .unwrap_or_else(|| {
+            let path = match path {
+                Some(p) => std::path::PathBuf::from(p),
+                // The bundled face, which needs its font feature; a style
+                // with no bundled face is a missing asset the caller must
+                // supply, never a substitution.
+                None => {
+                    if libmsdf::bundled_style_face(style).is_none() {
                         let feature = match style {
                             libmsdf::GlyphStyle::Bold => "font-apache-roboto-bold",
                             libmsdf::GlyphStyle::Italic => "font-apache-roboto-italic",
-                            _ => {
-                                panic!("no face is bundled for {style:?} - pass --style {name}=<face.ttf>")
-                            }
+                            _ => panic!(
+                                "no face is bundled for {style:?} - pass --style {name}=<face.ttf>"
+                            ),
                         };
                         panic!(
                             "`--style {name}` without a path needs the `{feature}` feature; pass \
                              `--style {name}=<face.ttf>`"
                         )
-                    })
-                    .to_vec(),
+                    }
+                    let file = match style {
+                        libmsdf::GlyphStyle::Bold => "Roboto-Bold-ascii.ttf",
+                        _ => "Roboto-Italic-ascii.ttf",
+                    };
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("fonts")
+                        .join(file)
+                }
             };
-            (style, data)
+            (style, path)
         })
         .collect();
     // `--licence <SPDX>=<source>[@<style>,...]` (repeatable; style defaults
@@ -175,7 +183,7 @@ fn main() {
             .map(|(_, v)| v.clone())
             .collect()
     };
-    let licences: Vec<(Vec<libmsdf::GlyphStyle>, String, String)> = flag_values("--licence")
+    let licences: Vec<LicenceSpec> = flag_values("--licence")
         .iter()
         .map(|spec| {
             let (body, styles) = spec
@@ -184,7 +192,11 @@ fn main() {
             let (spdx, source) = body.split_once('=').unwrap_or_else(|| {
                 panic!("--licence takes <SPDX>=<source>[@<style>,...], not {spec:?}")
             });
-            (parse_styles(styles), spdx.to_string(), source.to_string())
+            LicenceSpec {
+                spdx: spdx.to_string(),
+                source: source.to_string(),
+                styles: parse_styles(styles),
+            }
         })
         .collect();
     let mut features: Vec<(libmsdf::GlyphStyle, [u8; 4])> = Vec::new();
@@ -225,18 +237,13 @@ fn main() {
         positional
     };
 
-    let (font_data, out_path) = if args.len() >= 3 {
-        let data = std::fs::read(&args[1]).unwrap_or_else(|e| panic!("read font {}: {e}", args[1]));
-        (data, args[2].clone())
+    let (ttf, out_path) = if args.len() >= 3 {
+        (std::path::PathBuf::from(&args[1]), args[2].clone())
     } else {
+        // The bundled plain face, read from the repository: this tool
+        // needs no font feature.
         (
-            // The bundled plain face, read from the repository: this tool
-            // needs no font feature.
-            std::fs::read(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/fonts/Roboto-Regular-ascii.ttf"
-            ))
-            .expect("read fonts/Roboto-Regular-ascii.ttf"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts/Roboto-Regular-ascii.ttf"),
             "roboto-ascii-48.atlas".to_string(),
         )
     };
@@ -249,91 +256,70 @@ fn main() {
         .map(|s| s.parse().expect("px_range"))
         .unwrap_or(6.0);
 
-    let mut builder = libmsdf::FontAtlasBuilder::new(font_data, glyph_size, px_range);
-    builder.add_shipped_coverage();
-    for (style, data) in styles {
-        builder
-            .add_styled_coverage(style, data)
-            .unwrap_or_else(|e| panic!("{e}"));
-    }
-    for (styles, spdx, source) in &licences {
-        builder
-            .add_licence(styles, spdx, source)
-            .unwrap_or_else(|e| panic!("--licence: {e}"));
-    }
+    // A thin wrapper over the baker every caller uses
+    // (`libmsdf::bake::Baker::bake_face`).
+    let mut opts = BakeOptions::new(glyph_size, px_range);
+    opts.styles = styles;
+    opts.licences = licences;
+    let mut faces = vec![(libmsdf::GlyphStyle::Regular, ttf.clone())];
+    faces.extend(opts.styles.iter().cloned());
+    let options_of = |style: libmsdf::GlyphStyle| libmsdf::LayoutOptions {
+        extra_features: features
+            .iter()
+            .filter(|(s, _)| *s == style)
+            .map(|(_, t)| *t)
+            .collect(),
+        ..Default::default()
+    };
     if layout {
-        let started = std::time::Instant::now();
-        for style in builder.styles() {
-            let extra_features = features
-                .iter()
-                .filter(|(s, _)| *s == style)
-                .map(|(_, t)| *t)
-                .collect();
-            builder.with_style_layout(
-                style,
-                libmsdf::LayoutOptions {
-                    extra_features,
-                    ..Default::default()
-                },
-            );
-        }
+        opts.layout = Some(faces.iter().map(|(s, _)| (*s, options_of(*s))).collect());
+    }
+    let started = std::time::Instant::now();
+    let bytes = Baker::bake_face(&ttf, &opts).unwrap_or_else(|e| {
+        eprintln!("bake_atlas: FAILED - {e}");
+        std::process::exit(1);
+    });
+    if layout {
         eprintln!(
-            "bake_atlas: layout tables requested for {:?}",
-            builder.styles()
-        );
-        let atlas = builder.build().unwrap_or_else(|e| {
-            eprintln!("bake_atlas: FAILED - {e}");
-            std::process::exit(1);
-        });
-        eprintln!(
-            "bake_atlas: layout extracted and checked in {:.2?} (whole bake)",
+            "bake_atlas: layout extracted and checked for {:?} in {:.2?} (whole bake)",
+            faces.iter().map(|f| f.0).collect::<Vec<_>>(),
             started.elapsed()
         );
         // The check once more per face, timed on its own, for the log: the
         // corpus size and how long one face's check takes.
-        if let Some(layout) = &atlas.layout {
-            for face in layout.faces() {
-                let data = builder
-                    .face_data(face.style)
-                    .expect("a baked style has a face");
-                let opts = libmsdf::LayoutOptions {
-                    coverage: libmsdf::TEXT_RANGES.to_vec(),
-                    extra_features: features
-                        .iter()
-                        .filter(|(s, _)| *s == face.style)
-                        .map(|(_, t)| *t)
-                        .collect(),
-                };
-                let t = std::time::Instant::now();
-                let n = libmsdf::font::layout_bake::check_equivalence(data, face, &opts)
+        let atlas = libmsdf::FontAtlas::from_bytes(&bytes).expect("the bake loads");
+        for face in atlas.layout.as_ref().expect("layout was baked").faces() {
+            let path = &faces
+                .iter()
+                .find(|f| f.0 == face.style)
+                .expect("a baked face")
+                .1;
+            let data = std::fs::read(path).expect("read face");
+            let t = std::time::Instant::now();
+            let n =
+                libmsdf::font::layout_bake::check_equivalence(&data, face, &options_of(face.style))
                     .expect("the bake's own check passed");
-                eprintln!(
-                    "bake_atlas: {:?}: {n} corpus strings shape identically with rustybuzz and \
-                     AtlasShaper ({:.2?}); features {:?}; {} Gsub lookups, {} Gpos pairs",
-                    face.style,
-                    t.elapsed(),
-                    face.features
-                        .iter()
-                        .map(|f| String::from_utf8_lossy(f).into_owned())
-                        .collect::<Vec<_>>(),
-                    face.gsub.len(),
-                    face.gpos.len()
-                );
-            }
+            eprintln!(
+                "bake_atlas: {:?}: {n} corpus strings shape identically with rustybuzz and \
+                 AtlasShaper ({:.2?}); features {:?}; {} Gsub lookups, {} Gpos pairs",
+                face.style,
+                t.elapsed(),
+                face.features
+                    .iter()
+                    .map(|f| String::from_utf8_lossy(f).into_owned())
+                    .collect::<Vec<_>>(),
+                face.gsub.len(),
+                face.gpos.len()
+            );
         }
-        return finish(atlas, check, &out_path);
     }
-    let atlas = builder.build().unwrap_or_else(|e| {
-        eprintln!("bake_atlas: FAILED - {e}");
-        std::process::exit(1);
-    });
-    finish(atlas, check, &out_path);
+    finish(bytes, check, &out_path);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn finish(atlas: libmsdf::FontAtlas, check: bool, out_path: &str) {
+fn finish(bytes: Vec<u8>, check: bool, out_path: &str) {
     let out_path = out_path.to_string();
-    let bytes = atlas.to_bytes();
+    let atlas = libmsdf::FontAtlas::from_bytes(&bytes).expect("the bake loads");
 
     // **`--check` compares instead of writing.** The atlas is a COMMITTED
     // artifact that five test files `include_bytes!`, produced by this example

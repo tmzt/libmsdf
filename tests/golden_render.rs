@@ -116,8 +116,11 @@ fn scene(atlas: &FontAtlas) -> DrawList {
 }
 
 fn render_scene() -> Option<Vec<u8>> {
+    render_scene_with(&FontAtlas::from_bytes(ATLAS_FIXTURE).expect("fixture atlas parses"))
+}
+
+fn render_scene_with(atlas: &FontAtlas) -> Option<Vec<u8>> {
     let (device, queue) = gpu()?;
-    let atlas = FontAtlas::from_bytes(ATLAS_FIXTURE).expect("fixture atlas parses");
 
     let renderer = GpuSdfRenderer::new_with_msdf(
         &device,
@@ -144,7 +147,7 @@ fn render_scene() -> Option<Vec<u8>> {
     });
     let view = target.create_view(&Default::default());
 
-    let list = scene(&atlas);
+    let list = scene(atlas);
     renderer.render_draw_list(&device, &queue, &view, WIDTH, HEIGHT, 1.0, &list, 0.0);
 
     // Readback.
@@ -292,4 +295,20 @@ fn golden_scene_renders() {
         "golden mismatch: {mismatched}/{total} px ({:.3}%) differ beyond ±{tolerance}",
         frac * 100.0
     );
+}
+
+/// **A padded atlas draws the same frame** (bundled fonts plan, 13:34 EDT
+/// amendment): the 8-column Roboto fixture padded to 800 x 2000 texels, the
+/// size of a 16-column OFL atlas, renders the scene identically.
+#[test]
+fn a_padded_atlas_draws_the_same_frame() {
+    let atlas = FontAtlas::from_bytes(ATLAS_FIXTURE).expect("fixture atlas parses");
+    let padded = atlas.padded_to(800, 2000).expect("pads");
+    assert_eq!((padded.width, padded.height), (800, 2000));
+    let (Some(a), Some(b)) = (render_scene_with(&atlas), render_scene_with(&padded)) else {
+        eprintln!("no GPU adapter; skipping");
+        return;
+    };
+    assert!(a == b, "the padded atlas drew a different frame");
+    assert!(atlas.padded_to(399, 2000).is_err());
 }
