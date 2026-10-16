@@ -131,3 +131,14 @@ becomes fixed-size (fourcc, version, styles mask, `lict_index`). Non-ASCII
 strings, and strings starting with a digit, are refused at bake. The
 amendment replaces section 4.8's `LICS` layout and adds codec tests to step 2.
 Still no code changes until the owner approves the plan.
+
+## 2026-10-16 12:56 EDT — Atlas layout tables plan: `LICT` length bytes
+
+Plan: `docs/design/20261016_01_ATLAS_LAYOUT_TABLES_PLAN.md` (Draft). On the
+owner's correction, an amendment changes `LICT`'s string encoding from a
+decimal count to one length byte (0 to 255) followed by that many printable
+ASCII bytes. The decimal-count rules of the 12:41 EDT amendment (leading
+zeros, digit count, the 4096 maximum, no leading digit in text) are
+withdrawn; strings over 255 bytes are refused at bake (the longest measured
+is 98). Truncation, non-ASCII text and `LICS`/`LICT` mismatches are still
+refused. Still no code changes until the owner approves the plan.
