@@ -15,7 +15,7 @@ msdfgen baseline, dynamic atlas management, cubic-Bézier arc strokes, and the
 `DrawList` render contract. Native + wasm32 (WebGPU) compile-clean; GPU tests run
 headless on Metal. See `Cargo.toml` for the `cpu-bake` / `gpu-tests` feature notes.
 
-## License
+## Licensing
 
 Licensed under either of
 
@@ -25,6 +25,33 @@ Licensed under either of
    ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
+
+### Bundled fonts are optional
+
+libmsdf can bundle font files and the MSDF atlases baked from them. Every
+one is behind a cargo feature that is **off by default**, and the
+feature's name says which licence it brings:
+
+| Feature | Face | Licence | Licence file |
+|---|---|---|---|
+| `font-apache-roboto-regular` | Roboto Regular | Apache-2.0 | [FONTS-LICENSE-APACHE.txt](FONTS-LICENSE-APACHE.txt) |
+| `font-apache-roboto-bold` | Roboto Bold | Apache-2.0 | [FONTS-LICENSE-APACHE.txt](FONTS-LICENSE-APACHE.txt) |
+| `font-apache-roboto-italic` | Roboto Italic | Apache-2.0 | [FONTS-LICENSE-APACHE.txt](FONTS-LICENSE-APACHE.txt) |
+| `font-apache-roboto-msymbols` | Roboto Regular with Material Symbols | Apache-2.0 | [FONTS-LICENSE-APACHE.txt](FONTS-LICENSE-APACHE.txt) |
+| `font-ofl-grenze-gotisch` | Grenze Gotisch (subset) | OFL-1.1 | [FONTS-LICENSE-OFL.txt](FONTS-LICENSE-OFL.txt) |
+| `font-ofl-texturina` | Texturina (subset) | OFL-1.1 | [FONTS-LICENSE-OFL.txt](FONTS-LICENSE-OFL.txt) |
+
+`fonts-apache-roboto` enables the four Roboto features and
+`fonts-ofl-ledger` the two OFL ones.
+
+A font's licence applies to a build only when its feature is enabled.
+With no font feature enabled, the compiled crate contains no font data and
+is licensed purely under MIT OR Apache-2.0. If you enable one and
+distribute the result, distribute the matching licence file with it.
+
+The repository itself contains the font files (under `fonts/`, and Roboto
+atlases under `tests/fixtures/` that the tests use); they stay under their
+own licences there whether or not a feature is enabled.
 
 ### Contribution
 
