@@ -8,7 +8,7 @@
 //!
 //! * `Head` - units per em, the glyph a default ignorable becomes, vertical
 //!   metrics and the features the bake applied;
-//! * `Cmap` - codepoint to glyph, over [`crate::font::TEXT_RANGES`] and the
+//! * `Cmap` - codepoint to glyph, over [`crate::TEXT_RANGES`] and the
 //!   control codepoints the face maps;
 //! * `Hmtx` - integer advances of every glyph the shaper can output;
 //! * `Gsub` - single, ligature and one-glyph-context substitutions, in the
@@ -21,10 +21,10 @@
 //! reader looks up (plan section 4.4).
 //!
 //! This module holds the parsed tables and their byte codecs and compiles
-//! without the `shaper` feature. [`crate::font::AtlasShaper`] lays text out
+//! without the `shaper` feature. [`crate::AtlasShaper`] lays text out
 //! from them.
 
-use crate::font::GlyphStyle;
+use crate::GlyphStyle;
 
 /// Units per em a `Head` table may state.
 pub const MIN_UNITS_PER_EM: u16 = 16;
@@ -71,7 +71,7 @@ impl AtlasLayout {
 }
 
 /// **One face's layout tables**, parsed. Glyph ids are the face's RAW ids
-/// (at most [`crate::font::MAX_RAW_GLYPH_ID`]); [`crate::font::AtlasShaper`]
+/// (at most [`crate::MAX_RAW_GLYPH_ID`]); [`crate::AtlasShaper`]
 /// turns them into atlas addresses with [`GlyphStyle::styled_glyph_id`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FaceLayout {
@@ -164,8 +164,8 @@ pub struct ContextSingle {
 
 // ── Byte codecs ─────────────────────────────────────────────────────────
 
-use crate::font::MAX_RAW_GLYPH_ID;
-use crate::font::atlas::TableBody;
+use crate::MAX_RAW_GLYPH_ID;
+use crate::atlas::TableBody;
 
 /// The five per-face layout tags, in the order a face's tables sort.
 pub const LAYOUT_TAGS: [&[u8; 4]; 5] = [b"Cmap", b"Gpos", b"Gsub", b"Head", b"Hmtx"];
@@ -641,7 +641,7 @@ pub(crate) fn decode_tables(
         let mut found: [Option<&[u8]>; 5] = [None; 5];
         for &(tag, face, body) in bodies {
             if let Some(i) = LAYOUT_TAGS.iter().position(|t| *t == tag) {
-                if face == crate::font::atlas::ATLAS_TABLE_FACE_ALL {
+                if face == crate::atlas::ATLAS_TABLE_FACE_ALL {
                     return Err("a layout table belongs to the whole atlas rather than a face");
                 }
                 if face == style as u8 {
@@ -666,7 +666,7 @@ pub(crate) fn decode_tables(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::font::FontAtlas;
+    use crate::FontAtlas;
 
     pub(crate) fn sample(style: GlyphStyle) -> FaceLayout {
         FaceLayout {

@@ -31,8 +31,8 @@ use crate::font::shaper::ShapedRun;
 pub const X_MARGIN_FRAC: f32 = 0.15;
 
 /// Line box height as a multiple of font size (matches the 1.3× em-square
-/// safety margin baked into atlas cells).
-pub const LINE_BOX_RATIO: f32 = 1.3;
+/// safety margin baked into atlas cells). Defined in `libmsdf-font`.
+pub use crate::font::LINE_BOX_RATIO;
 
 /// The narrowest alpha ramp the MSDF shader will use, in screen pixels.
 /// Below one pixel the ramp stops being antialiasing and starts being a
@@ -1854,7 +1854,7 @@ mod tests {
     #[test]
     fn shaped_text_packs_chars() {
         let shaper =
-            crate::font::TextShaper::new(crate::font::TEST_FACE.to_vec()).expect("fixture parses");
+            crate::font::TextShaper::new(crate::TEST_FACE.to_vec()).expect("fixture parses");
         // Atlas without real pixels: entries only, enough for packing.
         let mut atlas = FontAtlas::empty(64, 64, 3);
         for ch in ['H', 'i'] {
@@ -1998,7 +1998,7 @@ mod tests {
     #[cfg(feature = "shaper")]
     fn text_fixture() -> (crate::font::TextShaper, FontAtlas) {
         let shaper =
-            crate::font::TextShaper::new(crate::font::TEST_FACE.to_vec()).expect("fixture parses");
+            crate::font::TextShaper::new(crate::TEST_FACE.to_vec()).expect("fixture parses");
         let mut atlas = FontAtlas::empty(64, 64, 3);
         for ch in ['H', 'i', 'o', 'k'] {
             let gid = shaper.glyph_id_for_char(ch).unwrap();

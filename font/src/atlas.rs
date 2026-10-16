@@ -10,11 +10,11 @@
 //! packing. Each glyph is rendered as a 3-channel (RGB) MSDF bitmap.
 
 #[cfg(feature = "shaper")]
-use crate::font::CellKey;
-use crate::font::glyph_table::GlyphEntry;
-#[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
-use crate::font::packer::ShelfPacker;
-use crate::font::{GlyphSet, GlyphStyle};
+use crate::CellKey;
+use crate::glyph_table::GlyphEntry;
+#[cfg(all(feature = "bake", not(target_arch = "wasm32")))]
+use crate::packer::ShelfPacker;
+use crate::{GlyphSet, GlyphStyle};
 
 /// **The first four bytes of a baked atlas.** `hbfa` - highbay font atlas.
 ///
@@ -86,7 +86,7 @@ pub const MAX_ATLAS_LAYERS: usize = 256;
 /// * **Point size is what must AGREE inside a layer.** A run mixing prose with
 ///   an icon is the common case, and it costs nothing exactly when the icon's
 ///   cells and the text's cells are in ONE layer - which is what the merged
-///   face ([`crate::font::ROBOTO_ASCII_MSYMBOLS`]) has always bought and what
+///   face ([`crate::ROBOTO_ASCII_MSYMBOLS`]) has always bought and what
 ///   this keeps. So the merged vocabulary inside a layer is *text plus Private
 ///   Use Area, at that size*.
 /// * **Style is what must DIFFER between layers.** A second face is 215 more
@@ -604,11 +604,11 @@ impl SetMetrics {
 ///   upright text where the document says emphasis is a wrong render that
 ///   looks like a correct one.
 /// * [`StyledGlyphError::NoCell`] - the style is here and this glyph of it is
-///   not. A codepoint outside [`crate::font::TEXT_RANGES`], or a bake that
+///   not. A codepoint outside [`crate::TEXT_RANGES`], or a bake that
 ///   queued less than the face covers.
 /// * [`StyledGlyphError::NotARawGlyphId`] - the caller passed an id that is
 ///   already an address ([`GlyphStyle::styled_glyph_id`]), or a face wider
-///   than [`crate::font::MAX_RAW_GLYPH_ID`]. A programming error rather than
+///   than [`crate::MAX_RAW_GLYPH_ID`]. A programming error rather than
 ///   an asset one, and it is refused instead of being prefixed twice into
 ///   whatever cell that lands on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -659,7 +659,7 @@ pub struct FontAtlas {
     pub pixel_data: Vec<u8>,
     /// **Per-glyph entries, ordered by glyph id** — see
     /// [`FontAtlas::get_glyph`] for why that specific order, and
-    /// [`crate::font::GlyphSet`] for why it is not the order the CELLS are in.
+    /// [`crate::GlyphSet`] for why it is not the order the CELLS are in.
     pub glyphs: Vec<GlyphEntry>,
     /// **Per-set metrics, one entry per [`GlyphSet`] that has cells here** -
     /// see [`SetMetrics`] for what they are and why the file has to carry
@@ -678,11 +678,11 @@ pub struct FontAtlas {
     /// the lookup that goes the other way.
     pub layers: Vec<AtlasLayer>,
     /// Layout tables, if the atlas was baked with them
-    /// ([`crate::font::AtlasShaper`] reads them).
-    pub layout: Option<crate::font::AtlasLayout>,
+    /// ([`crate::AtlasShaper`] reads them).
+    pub layout: Option<crate::AtlasLayout>,
     /// One record per licence of a baked face (empty for a runtime atlas and
     /// for a legacy file).
-    pub licences: Vec<crate::font::LicenceRecord>,
+    pub licences: Vec<crate::LicenceRecord>,
     /// **The version this atlas was read at** - [`ATLAS_FORMAT_VERSION`] for
     /// one built in memory. [`FontAtlas::to_bytes`] always writes
     /// [`ATLAS_FORMAT_VERSION`] whatever this says.
@@ -697,7 +697,7 @@ impl FontAtlas {
     }
 
     /// Every licence record of this atlas.
-    pub fn licences(&self) -> &[crate::font::LicenceRecord] {
+    pub fn licences(&self) -> &[crate::LicenceRecord] {
         &self.licences
     }
 
@@ -796,7 +796,7 @@ impl FontAtlas {
     /// because the entries had no order worth searching. They have one now.
     ///
     /// The order the CELLS are packed in is a different thing:
-    /// `(set, glyph id)`, declared by [`crate::font::GlyphSet`], and it lives
+    /// `(set, glyph id)`, declared by [`crate::GlyphSet`], and it lives
     /// in each entry's `atlas_x`/`atlas_y`. Cell order is what has to stay put
     /// across a re-bake, because it decides the artifact's bytes and the
     /// texture coordinate every frame samples. Table order is derived on load
@@ -857,7 +857,7 @@ impl FontAtlas {
     /// places.
     ///
     /// `raw_glyph_id` is the id the STYLE's own face shapes to - what
-    /// [`crate::font::StyledShaper`] hands back before prefixing, or
+    /// [`crate::StyledShaper`] hands back before prefixing, or
     /// `ttf_parser`'s `glyph_index` on that face. Passing an already-prefixed
     /// id is refused as [`StyledGlyphError::NotARawGlyphId`] rather than
     /// silently double-prefixed.
@@ -991,8 +991,8 @@ impl FontAtlas {
     /// The tables this atlas carries, sorted by `(face, tag)`.
     pub(crate) fn table_bodies(&self) -> Result<Vec<TableBody>, &'static str> {
         let mut tables: Vec<TableBody> = Vec::new();
-        tables.extend(crate::font::layout::encode_tables(self.layout.as_ref())?);
-        tables.extend(crate::font::licence::encode_tables(&self.licences)?);
+        tables.extend(crate::layout::encode_tables(self.layout.as_ref())?);
+        tables.extend(crate::licence::encode_tables(&self.licences)?);
         tables.sort_by(|a, b| (a.face, a.tag).cmp(&(b.face, b.tag)));
         if tables.len() > MAX_ATLAS_TABLES {
             return Err("atlas would carry more than 64 tables");
@@ -1312,13 +1312,7 @@ impl FontAtlas {
     fn read_tables(
         data: &[u8],
         records: &[TableRecord],
-    ) -> Result<
-        (
-            Option<crate::font::AtlasLayout>,
-            Vec<crate::font::LicenceRecord>,
-        ),
-        &'static str,
-    > {
+    ) -> Result<(Option<crate::AtlasLayout>, Vec<crate::LicenceRecord>), &'static str> {
         let bodies: Vec<(&[u8; 4], u8, &[u8])> = records
             .iter()
             .map(|r| {
@@ -1326,8 +1320,8 @@ impl FontAtlas {
                 (&r.tag, r.face, &data[start..start + r.length as usize])
             })
             .collect();
-        let layout = crate::font::layout::decode_tables(&bodies)?;
-        let licences = crate::font::licence::decode_tables(&bodies)?;
+        let layout = crate::layout::decode_tables(&bodies)?;
+        let licences = crate::licence::decode_tables(&bodies)?;
         Ok((layout, licences))
     }
 
@@ -1424,7 +1418,7 @@ impl FontAtlas {
         if px_range <= 0.0 || cell <= 0.0 {
             return 0.0;
         }
-        cell / (crate::drawlist::LINE_BOX_RATIO * px_range)
+        cell / (crate::LINE_BOX_RATIO * px_range)
     }
 
     /// **Whether a run at `font_size` still has ink in it** — at or above HALF
@@ -1457,7 +1451,7 @@ impl FontAtlas {
     /// [`FontAtlas::get_glyph`] binary-searches the table. Table indices after
     /// the insertion point therefore shift — which is why an index is a value
     /// to use now, never one to cache across a later insert. (Its CELL does not
-    /// move: this path allocates cells through [`crate::font::AtlasManager`],
+    /// move: this path allocates cells through [`crate::AtlasManager`],
     /// which is a separate allocator over the texture.)
     pub fn insert_entry(&mut self, entry: GlyphEntry) -> usize {
         match self
@@ -1564,7 +1558,7 @@ pub const FALLBACK_CAP_HEIGHT_EM: f64 = 0.7;
 /// **Em per atlas cell**: a cell is 1.3 em tall, which is why one em of drawn
 /// text is exactly the font size.
 ///
-/// The same ratio as [`crate::drawlist::LINE_BOX_RATIO`] and it must stay that
+/// The same ratio as [`crate::LINE_BOX_RATIO`] and it must stay that
 /// way - `a_cell_is_the_line_box` asserts it - but it is written here as its
 /// own `f64` rather than converted from that `f32`. `LINE_BOX_RATIO as f64` is
 /// 1.2999999523162842, not 1.3, and this number multiplies the projection every
@@ -1683,7 +1677,7 @@ pub const ATLAS_COLS: u32 = 8;
 /// moves is a real finding**.
 ///
 /// (Cells still shift within the grid if a glyph sorts BEFORE an existing one
-/// — see [`crate::font::GlyphSet`], which declares the order so that a glyph
+/// — see [`crate::GlyphSet`], which declares the order so that a glyph
 /// added to the last set cannot. Pinning the height fixes the global
 /// denominator; the set order fixes the local numbering. Both are needed and
 /// they are different things.)
@@ -1721,7 +1715,7 @@ pub const ATLAS_COLS: u32 = 8;
 /// evaluation checklist had to carry a rule about em dashes rendering as
 /// invisible spaces. So this is what the budget is spent on rather than a
 /// prediction about what it will be: 191 declared text codepoints became 201,
-/// and [`crate::font::TEXT_RANGES`] argues each of the ten and names the nine
+/// and [`crate::TEXT_RANGES`] argues each of the ten and names the nine
 /// it turned down.
 ///
 /// The SYMBOL side grows on its own axis, and Tim's estimate (2026-08-16) is
@@ -1764,7 +1758,7 @@ pub struct FontAtlasBuilder {
     /// exists: the caller knows it is adding the marker block or the shaped
     /// superset at the moment it asks, and a glyph id carries no trace of it
     /// afterwards. Recovering it later would mean guessing from the id, which
-    /// is exactly the emergent ordering [`crate::font::GlyphSet`] replaces.
+    /// is exactly the emergent ordering [`crate::GlyphSet`] replaces.
     ///
     /// This is a QUEUE, not the layout: [`FontAtlasBuilder::cell_order`] sorts
     /// it.
@@ -1783,7 +1777,7 @@ pub struct FontAtlasBuilder {
     style_faces: Vec<(GlyphStyle, Vec<u8>)>,
     /// **Layout extraction**: `None` bakes no layout tables; otherwise the
     /// options for each style that has its own (others take the default).
-    layout: Option<Vec<(GlyphStyle, crate::font::LayoutOptions)>>,
+    layout: Option<Vec<(GlyphStyle, crate::LayoutOptions)>>,
     /// Licence records asked for with [`FontAtlasBuilder::add_licence`]:
     /// the styles covered, the SPDX identifier and the source.
     licences: Vec<(Vec<GlyphStyle>, String, String)>,
@@ -1808,21 +1802,21 @@ impl FontAtlasBuilder {
     }
 
     /// **Bake layout tables** (`Head`, `Cmap`, `Hmtx`, `Gsub`, `Gpos`) for
-    /// every face this builder bakes, so [`crate::font::AtlasShaper`] can lay
+    /// every face this builder bakes, so [`crate::AtlasShaper`] can lay
     /// text out from the atlas alone. `opts` applies to the regular face;
     /// [`FontAtlasBuilder::with_style_layout`] gives another style its own.
     ///
     /// [`FontAtlasBuilder::build`] then extracts each face's tables
-    /// ([`crate::font::FaceLayout::extract`], equivalence check included),
-    /// fails the bake on any [`crate::font::LayoutError`], and queues a cell
+    /// ([`crate::FaceLayout::extract`], equivalence check included),
+    /// fails the bake on any [`crate::LayoutError`], and queues a cell
     /// for every glyph a face's tables can output.
-    pub fn with_layout(&mut self, opts: crate::font::LayoutOptions) {
+    pub fn with_layout(&mut self, opts: crate::LayoutOptions) {
         self.with_style_layout(GlyphStyle::Regular, opts);
     }
 
     /// [`FontAtlasBuilder::with_layout`] for one style's face: enables layout
     /// tables and sets that face's options (the features apply to it alone).
-    pub fn with_style_layout(&mut self, style: GlyphStyle, opts: crate::font::LayoutOptions) {
+    pub fn with_style_layout(&mut self, style: GlyphStyle, opts: crate::LayoutOptions) {
         let list = self.layout.get_or_insert_with(Vec::new);
         list.retain(|(s, _)| *s != style);
         list.push((style, opts));
@@ -1839,7 +1833,7 @@ impl FontAtlasBuilder {
     }
 
     /// **Record the licence of the faces of `styles`**: an SPDX identifier
-    /// from [`crate::font::LICENCE_REGISTRY`] and what is licensed (the
+    /// from [`crate::LICENCE_REGISTRY`] and what is licensed (the
     /// family name, e.g. `Roboto`).
     ///
     /// Every style [`FontAtlasBuilder::build`] bakes needs at least one
@@ -1856,13 +1850,13 @@ impl FontAtlasBuilder {
         if styles.is_empty() {
             return Err("a licence must cover at least one style".into());
         }
-        if crate::font::licence_by_spdx(spdx).is_none() {
+        if crate::licence_by_spdx(spdx).is_none() {
             return Err(format!(
                 "{spdx:?} is not in LICENCE_REGISTRY - add a row there (with its round-trip                  test) to bake a face under it"
             ));
         }
         let mut probe = Vec::new();
-        crate::font::licence::put_pstr(&mut probe, source)
+        crate::licence::put_pstr(&mut probe, source)
             .map_err(|e| format!("licence source {source:?}: {e}"))?;
         let mut styles = styles.to_vec();
         styles.sort_unstable();
@@ -1967,7 +1961,7 @@ impl FontAtlasBuilder {
     }
 
     /// **The order cells are placed in**: every queued glyph as
-    /// `(set, glyph id)`, sorted — [`crate::font::GlyphSet`] first, glyph id
+    /// `(set, glyph id)`, sorted — [`crate::GlyphSet`] first, glyph id
     /// within it.
     ///
     /// [`FontAtlasBuilder::build`] lays the atlas out in exactly this sequence,
@@ -2018,7 +2012,7 @@ impl FontAtlasBuilder {
             debug_assert!(false, "no {style:?} face registered to shape with");
             return;
         };
-        let Ok(shaper) = crate::font::shaper::TextShaper::new(face_data.to_vec()) else {
+        let Ok(shaper) = crate::shaper::TextShaper::new(face_data.to_vec()) else {
             return;
         };
         let set = style.shaped_set();
@@ -2066,12 +2060,12 @@ impl FontAtlasBuilder {
     }
 
     /// **Queue exactly what a bundled face ships**, so the bake and
-    /// [`crate::font::TEXT_RANGES`] cannot disagree about coverage.
+    /// [`crate::TEXT_RANGES`] cannot disagree about coverage.
     ///
     /// Stated as ranges the face is asked about, never as a list of glyphs.
-    /// [`crate::font::PRIVATE_USE`] is asked for as its three declared BLOCKS,
+    /// [`crate::PRIVATE_USE`] is asked for as its three declared BLOCKS,
     /// so the merged face's borrowed icons, our own icons and both faces'
-    /// [`crate::font::MARKERS`] come along without this ever learning an icon
+    /// [`crate::MARKERS`] come along without this ever learning an icon
     /// name or a marker name, and a face that defines nothing in a block queues
     /// nothing for it. **Adding a glyph is therefore an edit to the FONT, not
     /// to this method** - which is the whole reason coverage has one home.
@@ -2086,7 +2080,7 @@ impl FontAtlasBuilder {
     /// except that ASCII and the icons had been baked first.
     ///
     /// The layout is now [`FontAtlasBuilder::cell_order`]: `(set, glyph id)`,
-    /// with the sets declared by [`crate::font::GlyphSet`]. Two consequences
+    /// with the sets declared by [`crate::GlyphSet`]. Two consequences
     /// worth naming, because they were the two live defects:
     ///
     /// * **A new PUA glyph is a true append.** Scanning that range by codepoint
@@ -2097,7 +2091,7 @@ impl FontAtlasBuilder {
     ///   glyph ids, so ordering by glyph id inside a set makes any additive
     ///   font edit append here too, borrowed icons included.
     /// * **The call sequence below is no longer load-bearing.** These lines can
-    ///   be reordered, and [`crate::font::TEXT_RANGES`] can be reordered or
+    ///   be reordered, and [`crate::TEXT_RANGES`] can be reordered or
     ///   widened, without moving a cell. The `debug_assert` that used to pin
     ///   `TEXT_RANGES[0]` to the range `add_ascii` covers is gone with the
     ///   coupling it guarded.
@@ -2111,7 +2105,7 @@ impl FontAtlasBuilder {
     /// `(atlas_gx + acx + 0.5) / atlas_dim.x` is a constant either way.
     pub fn add_shipped_coverage(&mut self) {
         // The declared TEXT coverage, every range of it, through the cmap.
-        for &(lo, hi) in crate::font::TEXT_RANGES {
+        for &(lo, hi) in crate::TEXT_RANGES {
             self.add_codepoint_range(GlyphSet::Text, lo, hi);
         }
         // ...unioned with what the SHAPER emits for ASCII, which is a superset.
@@ -2121,10 +2115,10 @@ impl FontAtlasBuilder {
 
         // The Private Use Area, as the three blocks that tile it: the vendor's
         // half, then ours. Still ranges, never names.
-        let (pua_lo, pua_hi) = crate::font::PRIVATE_USE;
-        let (own_lo, own_hi) = crate::font::OWNED_BLOCKS;
-        let (icons_lo, icons_hi) = crate::font::HIGHBAY_ICONS_BLOCK;
-        let (markers_lo, markers_hi) = crate::font::MARKERS;
+        let (pua_lo, pua_hi) = crate::PRIVATE_USE;
+        let (own_lo, own_hi) = crate::OWNED_BLOCKS;
+        let (icons_lo, icons_hi) = crate::HIGHBAY_ICONS_BLOCK;
+        let (markers_lo, markers_hi) = crate::MARKERS;
         debug_assert!(
             own_hi == pua_hi
                 && icons_lo == own_lo
@@ -2169,7 +2163,7 @@ impl FontAtlasBuilder {
     /// Material Symbols are style-INVARIANT (see [`GlyphSet::style`]): a bold
     /// arrowhead is not a thing, and a second copy of `send` in a heavier
     /// weight would be 18 cells spent on a distinction no caller can make. A
-    /// style face is prose, and prose is [`crate::font::TEXT_RANGES`].
+    /// style face is prose, and prose is [`crate::TEXT_RANGES`].
     ///
     /// # Every cell it queues sorts AFTER every cell that already existed
     ///
@@ -2206,7 +2200,7 @@ impl FontAtlasBuilder {
         ttf_parser::Face::parse(&font_data, 0).map_err(|e| format!("{style:?} face: {e}"))?;
         self.style_faces.push((style, font_data));
 
-        for &(lo, hi) in crate::font::TEXT_RANGES {
+        for &(lo, hi) in crate::TEXT_RANGES {
             self.add_codepoint_range(style.text_set(), lo, hi);
         }
         // ...and the superset ITS layout tables emit. A glyph already claimed
@@ -2229,13 +2223,13 @@ impl FontAtlasBuilder {
 /// One baked glyph cell: RGB MSDF pixels (`gs × gs × 3`, top-down rows) and
 /// its glyph-table entry with `atlas_x`/`atlas_y` left at 0 — the caller
 /// (atlas builder or dynamic-append manager) fills those in after packing.
-#[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
+#[cfg(all(feature = "bake", not(target_arch = "wasm32")))]
 pub struct BakedGlyphCell {
     pub rgb: Vec<u8>,
     pub entry: GlyphEntry,
 }
 
-#[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
+#[cfg(all(feature = "bake", not(target_arch = "wasm32")))]
 impl FontAtlasBuilder {
     /// Bake a single glyph cell via CPU msdfgen (the reference
     /// implementation; the compute-shader path is `gpu::MsdfCompute`).
@@ -2378,7 +2372,7 @@ impl FontAtlasBuilder {
                         .find(|(s, _)| *s == style)
                         .map(|(_, o)| o.clone())
                         .unwrap_or_default();
-                    let layout = crate::font::FaceLayout::extract(face, style, &opts)
+                    let layout = crate::FaceLayout::extract(face, style, &opts)
                         .map_err(|e| format!("{style:?} layout: {e}"))?;
                     // A cell for every glyph the tables can output; glyph 0
                     // is the style-invariant placeholder cell.
@@ -2393,8 +2387,8 @@ impl FontAtlasBuilder {
                     }
                     faces.push(layout);
                 }
-                let layout = crate::font::AtlasLayout::from_faces(faces)
-                    .map_err(|e| format!("layout: {e}"))?;
+                let layout =
+                    crate::AtlasLayout::from_faces(faces).map_err(|e| format!("layout: {e}"))?;
                 (Some(builder), Some(layout))
             }
         };
@@ -2408,7 +2402,7 @@ impl FontAtlasBuilder {
     }
 
     /// The licence records of this bake, checked against the faces.
-    fn licence_records(&self) -> Result<Vec<crate::font::LicenceRecord>, String> {
+    fn licence_records(&self) -> Result<Vec<crate::LicenceRecord>, String> {
         for style in self.styles() {
             if !self
                 .licences
@@ -2423,7 +2417,7 @@ impl FontAtlasBuilder {
         }
         let mut out = Vec::new();
         for (styles, spdx, source) in &self.licences {
-            let kind = crate::font::licence_by_spdx(spdx).expect("checked by add_licence");
+            let kind = crate::licence_by_spdx(spdx).expect("checked by add_licence");
             let mut copyright = None;
             for &style in styles {
                 let data = self.style_face(style).ok_or_else(|| {
@@ -2431,7 +2425,7 @@ impl FontAtlasBuilder {
                 })?;
                 let face = ttf_parser::Face::parse(data, 0)
                     .map_err(|e| format!("{style:?} face parse error: {e}"))?;
-                if let Some(declared) = crate::font::layout_bake::declared_licence(&face)
+                if let Some(declared) = crate::layout_bake::declared_licence(&face)
                     && declared != spdx
                 {
                     return Err(format!(
@@ -2439,25 +2433,24 @@ impl FontAtlasBuilder {
                     ));
                 }
                 if copyright.is_none() {
-                    copyright =
-                        Some(crate::font::layout_bake::copyright_of(&face).unwrap_or_default());
+                    copyright = Some(crate::layout_bake::copyright_of(&face).unwrap_or_default());
                 }
             }
             let copyright = copyright.unwrap_or_default();
-            let record = crate::font::LicenceRecord {
+            let record = crate::LicenceRecord {
                 fourcc: kind.fourcc,
                 version: kind.version,
                 styles: styles.clone(),
                 spdx: spdx.clone(),
                 source: source.clone(),
-                reserved_font_name: crate::font::layout_bake::reserved_font_name(&copyright),
+                reserved_font_name: crate::layout_bake::reserved_font_name(&copyright),
                 copyright,
             };
             for (field, text) in [
                 ("copyright", &record.copyright),
                 ("reserved font name", &record.reserved_font_name),
             ] {
-                crate::font::licence::put_pstr(&mut Vec::new(), text)
+                crate::licence::put_pstr(&mut Vec::new(), text)
                     .map_err(|e| format!("{:?} face's {field}: {e}", record.styles[0]))?;
             }
             out.push(record);
@@ -2744,7 +2737,7 @@ impl FontAtlasBuilder {
 /// the shader expects: 0.5 on the outline, 1.0 at `px_range/2` texels inside,
 /// 0.0 at `px_range/2` texels outside. All that is left is the clamp + scale.
 /// msdfgen with TrueType: positive = inside → inside maps > 0.5 (light).
-#[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
+#[cfg(all(feature = "bake", not(target_arch = "wasm32")))]
 pub(crate) fn msdf_to_u8(unit_value: f32) -> u8 {
     (unit_value.clamp(0.0, 1.0) * 255.0) as u8
 }
@@ -2754,7 +2747,7 @@ mod tests {
     use super::*;
 
     fn roboto() -> Vec<u8> {
-        crate::font::TEST_FACE.to_vec()
+        crate::TEST_FACE.to_vec()
     }
 
     /// **The cell IS the line box**, and two constants say so independently.
@@ -2767,7 +2760,7 @@ mod tests {
     /// which is stated in em, quietly means something else.
     #[test]
     fn a_cell_is_the_line_box() {
-        assert_eq!(CELL_EM_RATIO as f32, crate::drawlist::LINE_BOX_RATIO);
+        assert_eq!(CELL_EM_RATIO as f32, crate::LINE_BOX_RATIO);
     }
 
     /// **A v1 atlas is REFUSED, and the message says what to run.**
@@ -2917,7 +2910,7 @@ mod tests {
         assert!(atlas.sets.is_empty());
     }
 
-    #[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
+    #[cfg(all(feature = "bake", not(target_arch = "wasm32")))]
     #[test]
     fn build_ascii_atlas() {
         let mut builder = FontAtlasBuilder::new(roboto(), 32, 4.0);
@@ -2938,7 +2931,7 @@ mod tests {
         assert!(has_content, "atlas should have non-zero pixel data");
     }
 
-    #[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
+    #[cfg(all(feature = "bake", not(target_arch = "wasm32")))]
     #[test]
     fn atlas_roundtrip() {
         let mut builder = FontAtlasBuilder::new(roboto(), 32, 4.0);
@@ -3047,7 +3040,7 @@ mod tests {
     #[test]
     fn the_queue_call_order_no_longer_decides_anything() {
         let gid = |ch: char| {
-            ttf_parser::Face::parse(&crate::font::TEST_FACE, 0)
+            ttf_parser::Face::parse(&crate::TEST_FACE, 0)
                 .unwrap()
                 .glyph_index(ch)
                 .unwrap()
@@ -3100,7 +3093,7 @@ mod tests {
     /// font edit produces.
     #[test]
     fn a_later_set_never_moves_an_earlier_sets_cells() {
-        for face_bytes in [crate::font::TEST_FACE, crate::font::TEST_FACE_MSYMBOLS] {
+        for face_bytes in [crate::TEST_FACE, crate::TEST_FACE_MSYMBOLS] {
             let next_gid = ttf_parser::Face::parse(face_bytes, 0)
                 .unwrap()
                 .number_of_glyphs();
@@ -3155,7 +3148,7 @@ mod tests {
                     "a cell of set {set:?} sorted after an icon"
                 );
             }
-            if face_bytes == crate::font::TEST_FACE_MSYMBOLS {
+            if face_bytes == crate::TEST_FACE_MSYMBOLS {
                 assert!(
                     !later.is_empty(),
                     "the merged face should have borrowed cells after ours"
@@ -3183,13 +3176,13 @@ mod tests {
     ///
     /// Reads as the event it stands for: a face gains one icon, and everything
     /// baked before it — the text, the marker — is byte-for-byte where it was.
-    #[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
+    #[cfg(all(feature = "bake", not(target_arch = "wasm32")))]
     #[test]
     fn a_new_icon_leaves_every_earlier_cell_untouched() {
         use std::collections::BTreeMap;
 
         let gid = |ch: char| {
-            ttf_parser::Face::parse(&crate::font::TEST_FACE, 0)
+            ttf_parser::Face::parse(&crate::TEST_FACE, 0)
                 .unwrap()
                 .glyph_index(ch)
                 .map(|g| g.0)
@@ -3220,7 +3213,7 @@ mod tests {
                 .unwrap();
             b.add_glyph(GlyphSet::Placeholder, 0);
             b.add_codepoint_range(GlyphSet::Text, 'A', 'E');
-            b.add_glyph(GlyphSet::Markers, gid(crate::font::MARKER_ARROW));
+            b.add_glyph(GlyphSet::Markers, gid(crate::MARKER_ARROW));
             for &ch in icons {
                 b.add_glyph(GlyphSet::OwnedIcons, gid(ch));
             }
@@ -3259,12 +3252,12 @@ mod tests {
             .unwrap();
         widened.add_glyph(GlyphSet::Placeholder, 0);
         widened.add_codepoint_range(GlyphSet::Text, 'A', 'F');
-        widened.add_glyph(GlyphSet::Markers, gid(crate::font::MARKER_ARROW));
+        widened.add_glyph(GlyphSet::Markers, gid(crate::MARKER_ARROW));
         for ch in ['\u{F800}', '\u{F801}'] {
             widened.add_glyph(GlyphSet::OwnedIcons, gid(ch));
         }
         let widened = cells(&widened.build().expect("bake"));
-        let arrow = gid(crate::font::MARKER_ARROW);
+        let arrow = gid(crate::MARKER_ARROW);
         assert_ne!(
             widened[&arrow].0, b[&arrow].0,
             "adding a letter should push the marker's cell along - if it does not, \
@@ -3505,15 +3498,15 @@ mod format_v5 {
 }
 
 /// **Licences and layout at bake** (atlas layout tables plan, step 3).
-#[cfg(all(test, feature = "cpu-bake", not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "bake", not(target_arch = "wasm32")))]
 mod bake_licences {
     use super::*;
 
     #[test]
     fn a_bake_without_a_licence_names_the_style() {
-        let mut b = FontAtlasBuilder::new(crate::font::TEST_FACE.to_vec(), 16, 2.0);
+        let mut b = FontAtlasBuilder::new(crate::TEST_FACE.to_vec(), 16, 2.0);
         b.add_codepoint_range(GlyphSet::Text, 'A', 'C');
-        b.add_styled_coverage(GlyphStyle::Bold, crate::font::TEST_FACE_BOLD.to_vec())
+        b.add_styled_coverage(GlyphStyle::Bold, crate::TEST_FACE_BOLD.to_vec())
             .unwrap();
         b.add_licence(&[GlyphStyle::Regular], "Apache-2.0", "Roboto")
             .unwrap();
@@ -3523,7 +3516,7 @@ mod bake_licences {
 
     #[test]
     fn a_licence_the_face_contradicts_is_refused() {
-        let mut b = FontAtlasBuilder::new(crate::font::TEST_FACE_BOLD.to_vec(), 16, 2.0);
+        let mut b = FontAtlasBuilder::new(crate::TEST_FACE_BOLD.to_vec(), 16, 2.0);
         b.add_codepoint_range(GlyphSet::Text, 'A', 'C');
         b.add_licence(&[GlyphStyle::Regular], "OFL-1.1", "Roboto")
             .unwrap();
@@ -3538,11 +3531,11 @@ mod bake_licences {
 
     #[test]
     fn a_baked_atlas_carries_its_licence_and_layout() {
-        let mut b = FontAtlasBuilder::new(crate::font::TEST_FACE.to_vec(), 16, 2.0);
+        let mut b = FontAtlasBuilder::new(crate::TEST_FACE.to_vec(), 16, 2.0);
         b.add_codepoint_range(GlyphSet::Text, 'A', 'C');
         b.add_licence(&[GlyphStyle::Regular], "Apache-2.0", "Roboto")
             .unwrap();
-        b.with_layout(crate::font::LayoutOptions::default());
+        b.with_layout(crate::LayoutOptions::default());
         let atlas = b.build().expect("bakes");
         let back = FontAtlas::from_bytes(&atlas.to_bytes()).expect("loads");
         assert_eq!(back.licences().len(), 1);

@@ -43,7 +43,7 @@ pub struct GlyphEntry {
     /// pre-layer file decodes to, so a zero here is both "the first layer" and
     /// "this file predates layers", and those two mean the same thing.
     ///
-    /// See [`crate::font::AtlasLayer`] for what a layer IS - `(point size,
+    /// See [`crate::AtlasLayer`] for what a layer IS - `(point size,
     /// style)` - and [`crate::FontAtlas::layers`] for the table that names
     /// them.
     pub layer: u16,

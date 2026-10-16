@@ -12,8 +12,14 @@
 //! - **`manager`** — dynamic atlas region allocation + eviction hooks
 //! - **`outline`** — glyph outline → colored edge list (compute MSDF input)
 
+/// Line box height as a multiple of font size (matches the 1.3x em-square
+/// safety margin baked into atlas cells). Re-exported by libmsdf as
+/// `libmsdf::drawlist::LINE_BOX_RATIO`.
+pub const LINE_BOX_RATIO: f32 = 1.3;
+
 pub mod atlas;
 pub mod atlas_shaper;
+pub mod faces;
 pub mod glyph_table;
 pub mod layout;
 #[cfg(feature = "shaper")]
@@ -696,28 +702,28 @@ impl GlyphStyle {
 pub const fn bundled_style_face(style: GlyphStyle) -> Option<&'static [u8]> {
     match style {
         #[cfg(feature = "font-apache-roboto-regular")]
-        GlyphStyle::Regular => Some(crate::bundled::ROBOTO_REGULAR_ASCII),
+        GlyphStyle::Regular => Some(crate::faces::ROBOTO_REGULAR_ASCII),
         #[cfg(feature = "font-apache-roboto-bold")]
-        GlyphStyle::Bold => Some(crate::bundled::ROBOTO_BOLD_ASCII),
+        GlyphStyle::Bold => Some(crate::faces::ROBOTO_BOLD_ASCII),
         #[cfg(feature = "font-apache-roboto-italic")]
-        GlyphStyle::Italic => Some(crate::bundled::ROBOTO_ITALIC_ASCII),
+        GlyphStyle::Italic => Some(crate::faces::ROBOTO_ITALIC_ASCII),
         _ => None,
     }
 }
 
 /// The bundled TTF constants, re-exported under their old paths.
 #[cfg(all(feature = "font-ofl-grenze-gotisch", feature = "shaper"))]
-pub use crate::bundled::GRENZE_GOTISCH_TTF;
+pub use crate::faces::GRENZE_GOTISCH_TTF;
 #[cfg(all(feature = "font-apache-roboto-msymbols", feature = "shaper"))]
-pub use crate::bundled::ROBOTO_ASCII_MSYMBOLS;
+pub use crate::faces::ROBOTO_ASCII_MSYMBOLS;
 #[cfg(all(feature = "font-apache-roboto-bold", feature = "shaper"))]
-pub use crate::bundled::ROBOTO_BOLD_ASCII;
+pub use crate::faces::ROBOTO_BOLD_ASCII;
 #[cfg(all(feature = "font-apache-roboto-italic", feature = "shaper"))]
-pub use crate::bundled::ROBOTO_ITALIC_ASCII;
+pub use crate::faces::ROBOTO_ITALIC_ASCII;
 #[cfg(all(feature = "font-apache-roboto-regular", feature = "shaper"))]
-pub use crate::bundled::ROBOTO_REGULAR_ASCII;
+pub use crate::faces::ROBOTO_REGULAR_ASCII;
 #[cfg(all(feature = "font-ofl-texturina", feature = "shaper"))]
-pub use crate::bundled::TEXTURINA_TTF;
+pub use crate::faces::TEXTURINA_TTF;
 
 /// The bundled Roboto faces for libmsdf's own unit tests, whatever features
 /// are on (`cfg(test)` is never set in a consumer's build).

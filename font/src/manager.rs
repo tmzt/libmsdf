@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 
-use crate::font::packer::ShelfPacker;
+use crate::packer::ShelfPacker;
 
 /// A rectangular region inside the atlas texture (pixels).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

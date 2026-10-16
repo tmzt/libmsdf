@@ -275,7 +275,7 @@ mod tests {
     use super::*;
 
     fn roboto_face() -> ttf_parser::Face<'static> {
-        ttf_parser::Face::parse(crate::font::TEST_FACE, 0).unwrap()
+        ttf_parser::Face::parse(crate::TEST_FACE, 0).unwrap()
     }
 
     #[test]

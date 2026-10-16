@@ -1,17 +1,17 @@
 //! **`AtlasShaper`: text layout from an atlas alone** (plan section 4.10).
 //!
 //! A pure-Rust shaper over the layout tables a baked atlas carries
-//! ([`crate::font::layout`]): a `Cmap` lookup, the `Gsub` lookups in order,
+//! ([`crate::layout`]): a `Cmap` lookup, the `Gsub` lookups in order,
 //! `Hmtx` advances and `Gpos` pair kerning. It needs no TTF and no font
 //! parsing dependency, and produces the same [`ShapedRun`] as
-//! [`crate::font::TextShaper`] (and [`crate::font::StyledShaper`] for another
+//! [`crate::TextShaper`] (and [`crate::StyledShaper`] for another
 //! style), so [`crate::DrawList::push_shaped_text`] and its callers are
 //! unchanged.
 //!
 //! # The contract
 //!
 //! For any string whose characters are in the face's `Cmap` scope
-//! ([`crate::font::TEXT_RANGES`] and the control codepoints the face maps)
+//! ([`crate::TEXT_RANGES`] and the control codepoints the face maps)
 //! or are unmapped by the face, the output equals `TextShaper`'s with the
 //! bake's features, glyph for glyph and unit for unit; the bake proves it on
 //! a corpus and refuses a face it cannot represent. A character the face
@@ -19,12 +19,12 @@
 //! advance, where `TextShaper` returns the face's glyph: both draw the
 //! placeholder box (that glyph has no cell), but the advance can differ.
 
-use crate::font::layout::{ContextSide, FaceLayout, GsubRules};
-use crate::font::shaper::{ShapedGlyph, ShapedRun};
-use crate::font::{FontAtlas, GlyphStyle};
+use crate::layout::{ContextSide, FaceLayout, GsubRules};
+use crate::shaper::{ShapedGlyph, ShapedRun};
+use crate::{FontAtlas, GlyphStyle};
 
 /// **What a caller needs from a shaper**, implemented by
-/// [`crate::font::TextShaper`] and [`AtlasShaper`].
+/// [`crate::TextShaper`] and [`AtlasShaper`].
 pub trait RunShaper {
     /// Shape `text` into positioned glyphs, in font units.
     fn shape(&self, text: &str) -> ShapedRun;
@@ -390,7 +390,7 @@ fn delete_ignorables(glyphs: &mut Vec<(Slot, i32)>) {
 
 /// **Default_Ignorable_Code_Point, as rustybuzz 0.20.1 tests it**
 /// (`hb/unicode.rs`, `CharExt::is_default_ignorable`), copied range for
-/// range. U+00AD SOFT HYPHEN is the one inside [`crate::font::TEXT_RANGES`].
+/// range. U+00AD SOFT HYPHEN is the one inside [`crate::TEXT_RANGES`].
 pub fn is_default_ignorable(ch: char) -> bool {
     let c = ch as u32;
     matches!(c,
@@ -413,8 +413,8 @@ pub fn is_default_ignorable(ch: char) -> bool {
 #[cfg(all(test, feature = "shaper"))]
 mod tests {
     use super::*;
-    use crate::font::layout_bake::LayoutOptions;
-    use crate::font::{AtlasLayout, StyledShaper, TextShaper};
+    use crate::layout_bake::LayoutOptions;
+    use crate::{AtlasLayout, StyledShaper, TextShaper};
 
     const STEP4: &[&str] = &[
         "Hello",
@@ -436,21 +436,21 @@ mod tests {
 
     #[test]
     fn the_bundled_faces_shape_as_textshaper_does() {
-        for regular in [crate::font::TEST_FACE, crate::font::TEST_FACE_MSYMBOLS] {
+        for regular in [crate::TEST_FACE, crate::TEST_FACE_MSYMBOLS] {
             let text = TextShaper::new(regular.to_vec()).unwrap();
             let atlas = AtlasShaper::from_face(layout(regular, GlyphStyle::Regular));
             for s in STEP4 {
                 assert_eq!(atlas.shape(s), text.shape(s), "regular {s:?}");
             }
         }
-        let styled = StyledShaper::new(crate::font::TEST_FACE.to_vec())
+        let styled = StyledShaper::new(crate::TEST_FACE.to_vec())
             .unwrap()
-            .with_face(GlyphStyle::Bold, crate::font::TEST_FACE_BOLD.to_vec())
+            .with_face(GlyphStyle::Bold, crate::TEST_FACE_BOLD.to_vec())
             .unwrap()
-            .with_face(GlyphStyle::Italic, crate::font::TEST_FACE_ITALIC.to_vec())
+            .with_face(GlyphStyle::Italic, crate::TEST_FACE_ITALIC.to_vec())
             .unwrap();
         for style in [GlyphStyle::Bold, GlyphStyle::Italic] {
-            let face = crate::font::test_style_face(style).unwrap();
+            let face = crate::test_style_face(style).unwrap();
             let atlas = AtlasShaper::from_face(layout(face, style));
             assert_eq!(atlas.style(), style);
             for s in STEP4 {
@@ -465,7 +465,7 @@ mod tests {
 
     #[test]
     fn the_soft_hyphen_cases_are_what_rustybuzz_does() {
-        let face = crate::font::TEST_FACE;
+        let face = crate::TEST_FACE;
         let atlas = AtlasShaper::from_face(layout(face, GlyphStyle::Regular));
         // f + SHY + i: the fi ligature, then the hidden space glyph, both
         // cluster 0.
@@ -490,37 +490,12 @@ mod tests {
         );
         let mut with = legacy.clone();
         with.layout = Some(
-            AtlasLayout::from_faces(vec![layout(crate::font::TEST_FACE, GlyphStyle::Regular)])
-                .unwrap(),
+            AtlasLayout::from_faces(vec![layout(crate::TEST_FACE, GlyphStyle::Regular)]).unwrap(),
         );
         assert_eq!(
             AtlasShaper::new(&with, GlyphStyle::Bold).err(),
             Some(NoLayout::StyleNotBaked(GlyphStyle::Bold))
         );
         assert!(AtlasShaper::new(&with, GlyphStyle::Regular).is_ok());
-    }
-
-    #[test]
-    fn an_atlas_run_draws_the_same_draw_list() {
-        let mut atlas = FontAtlas::from_bytes(include_bytes!(
-            "../../tests/fixtures/legacy/roboto-ascii-48-v3.atlas"
-        ))
-        .unwrap();
-        atlas.layout = Some(
-            AtlasLayout::from_faces(vec![layout(crate::font::TEST_FACE, GlyphStyle::Regular)])
-                .unwrap(),
-        );
-        let text = TextShaper::new(crate::font::TEST_FACE.to_vec()).unwrap();
-        let shaper = AtlasShaper::new(&atlas, GlyphStyle::Regular).unwrap();
-        let draw = |run: &ShapedRun| {
-            let mut list = crate::DrawList::new();
-            list.push_shaped_text(run, &atlas, [10.0, 20.0], 18.0, 6.0, [1.0; 4]);
-            format!("{list:?}")
-        };
-        for s in ["The office of fifty T T", "Treasury 50G"] {
-            assert_eq!(draw(&shaper.shape(s)), draw(&text.shape(s)), "{s:?}");
-        }
-        assert!(RunShaper::covers(&shaper, 'A') && !RunShaper::covers(&shaper, '\u{2192}'));
-        assert_eq!(RunShaper::units_per_em(&shaper), 2048);
     }
 }

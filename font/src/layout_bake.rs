@@ -2,9 +2,9 @@
 //!
 //! [`FaceLayout::extract`] reads a TTF with ttf-parser 0.25 and flattens
 //! what rustybuzz would apply to the face's baked text into the tables of
-//! [`crate::font::layout`]: the lookups of the features rustybuzz enables
+//! [`crate::layout`]: the lookups of the features rustybuzz enables
 //! for horizontal left-to-right text (plus `lnum` and `pnum`, which
-//! [`crate::font::TextShaper`] enables, plus any extra features asked for),
+//! [`crate::TextShaper`] enables, plus any extra features asked for),
 //! under script `latn` (falling back to `DFLT`) with no language system,
 //! restricted to the glyphs reachable from the face's `Cmap`.
 //!
@@ -13,13 +13,13 @@
 //! (section 4.9, "The check") shapes a corpus with both shapers and refuses
 //! the face on the first difference.
 
-use crate::font::GlyphStyle;
-use crate::font::layout::{
+use crate::GlyphStyle;
+use crate::layout::{
     ContextSide, ContextSingle, FaceLayout, GsubLookup, GsubRules, Ligature,
     MAX_LIGATURE_COMPONENTS, MIN_LIGATURE_COMPONENTS,
 };
-use crate::font::shaper::ShapedRun;
-use crate::font::{MAX_RAW_GLYPH_ID, TEXT_RANGES};
+use crate::shaper::ShapedRun;
+use crate::{MAX_RAW_GLYPH_ID, TEXT_RANGES};
 use ttf_parser::GlyphId;
 use ttf_parser::gpos::{PairAdjustment, PositioningSubtable, ValueRecord};
 use ttf_parser::gsub::{SingleSubstitution, SubstitutionSubtable};
@@ -37,7 +37,7 @@ pub const RUSTYBUZZ_DEFAULT_FEATURES: &[[u8; 4]] = &[
     *b"mkmk", *b"rlig", *b"calt", *b"clig", *b"curs", *b"dist", *b"kern", *b"liga", *b"rclt",
 ];
 
-/// The features [`crate::font::TextShaper`] turns on by default.
+/// The features [`crate::TextShaper`] turns on by default.
 pub const TEXT_SHAPER_DEFAULT_FEATURES: &[[u8; 4]] = &[*b"lnum", *b"pnum"];
 
 /// What to extract beyond the defaults.
@@ -62,7 +62,7 @@ impl Default for LayoutOptions {
 }
 
 impl LayoutOptions {
-    /// The user features a [`crate::font::TextShaper`] must be given to shape
+    /// The user features a [`crate::TextShaper`] must be given to shape
     /// as this layout does: `lnum`, `pnum` and the extras.
     pub fn text_shaper_features(&self) -> Vec<(ttf_parser::Tag, u32)> {
         let mut tags: Vec<[u8; 4]> = TEXT_SHAPER_DEFAULT_FEATURES.to_vec();
@@ -653,7 +653,7 @@ fn pair_value(subs: &[PairAdjustment], left: u16, right: u16) -> Result<Option<i
     Ok(None)
 }
 
-#[cfg_attr(not(feature = "cpu-bake"), allow(dead_code))]
+#[cfg_attr(not(feature = "bake"), allow(dead_code))]
 fn name_string(face: &ttf_parser::Face, id: u16) -> Option<String> {
     let names = face.names();
     names
@@ -664,14 +664,14 @@ fn name_string(face: &ttf_parser::Face, id: u16) -> Option<String> {
 }
 
 /// A face's copyright line (`name` ID 0), if any.
-#[cfg_attr(not(feature = "cpu-bake"), allow(dead_code))]
+#[cfg_attr(not(feature = "bake"), allow(dead_code))]
 pub(crate) fn copyright_of(face: &ttf_parser::Face) -> Option<String> {
     name_string(face, 0)
 }
 
 /// The Reserved Font Name from a copyright line: the text after "with
 /// Reserved Font Name", without quotes or a final full stop.
-#[cfg_attr(not(feature = "cpu-bake"), allow(dead_code))]
+#[cfg_attr(not(feature = "bake"), allow(dead_code))]
 pub(crate) fn reserved_font_name(copyright: &str) -> String {
     const KEY: &str = "with Reserved Font Name";
     match copyright.find(KEY) {
@@ -687,7 +687,7 @@ pub(crate) fn reserved_font_name(copyright: &str) -> String {
 
 /// The SPDX identifier a face's `name` IDs 13 and 14 name, when they name
 /// one this bake recognises.
-#[cfg_attr(not(feature = "cpu-bake"), allow(dead_code))]
+#[cfg_attr(not(feature = "bake"), allow(dead_code))]
 pub(crate) fn declared_licence(face: &ttf_parser::Face) -> Option<&'static str> {
     let text = [name_string(face, 14), name_string(face, 13)]
         .into_iter()
@@ -802,7 +802,7 @@ impl FaceLayout {
                 break;
             }
         }
-        if gsub.len() > crate::font::layout::MAX_GSUB_LOOKUPS {
+        if gsub.len() > crate::layout::MAX_GSUB_LOOKUPS {
             return Err(LayoutError::TooLarge("more than 65535 Gsub lookups"));
         }
         if let Some(&g) = reach.iter().find(|&&g| g > MAX_RAW_GLYPH_ID) {
@@ -966,8 +966,8 @@ pub const LAYOUT_CHECK_NO_LETTERS: &[&str] = &[
 ];
 
 /// **The equivalence check** (plan section 4.9): shape the corpus with
-/// [`crate::font::TextShaper`] (with the bake's features) and with an
-/// [`crate::font::AtlasShaper`] over `layout`, and require every field of
+/// [`crate::TextShaper`] (with the bake's features) and with an
+/// [`crate::AtlasShaper`] over `layout`, and require every field of
 /// every run to agree. Returns the corpus size.
 ///
 /// The corpus: every `Cmap` codepoint alone and every ordered pair of them;
@@ -980,10 +980,10 @@ pub fn check_equivalence(
     layout: &FaceLayout,
     opts: &LayoutOptions,
 ) -> Result<usize, LayoutError> {
-    let mut text = crate::font::TextShaper::new(face_data.to_vec())
-        .map_err(|e| LayoutError::Face(e.to_string()))?;
+    let mut text =
+        crate::TextShaper::new(face_data.to_vec()).map_err(|e| LayoutError::Face(e.to_string()))?;
     text.set_default_features(opts.text_shaper_features());
-    let atlas = crate::font::AtlasShaper::from_face(layout.clone());
+    let atlas = crate::AtlasShaper::from_face(layout.clone());
     let style = layout.style;
 
     let chars: Vec<char> = layout
@@ -1128,9 +1128,9 @@ mod tests {
     #[test]
     fn the_bundled_roboto_faces_match_fonttools() {
         for face in [
-            crate::font::TEST_FACE,
-            crate::font::TEST_FACE_BOLD,
-            crate::font::TEST_FACE_ITALIC,
+            crate::TEST_FACE,
+            crate::TEST_FACE_BOLD,
+            crate::TEST_FACE_ITALIC,
         ] {
             let l = extract(face);
             assert_eq!(l.features, vec![*b"kern", *b"liga", *b"lnum", *b"pnum"]);
@@ -1185,7 +1185,7 @@ mod tests {
         }
         // Regular's kerning: 434 non-zero pairs, (space, T) and (T, space)
         // among them at -40; the figure forms add none.
-        let face = crate::font::TEST_FACE;
+        let face = crate::TEST_FACE;
         let l = extract(face);
         assert_eq!(l.gpos.len(), 434);
         let (sp, t) = (gid(face, ' ') as u32, gid(face, 'T') as u32);
@@ -1228,7 +1228,7 @@ mod tests {
     /// while the check still passes.
     #[test]
     fn the_coverage_parameter_scopes_the_cmap() {
-        let face = crate::font::TEST_FACE;
+        let face = crate::TEST_FACE;
         let default = extract(face);
         let explicit = FaceLayout::extract_tables(
             face,
@@ -1274,10 +1274,10 @@ mod equivalence {
     #[test]
     fn the_bundled_faces_pass() {
         for (face, style) in [
-            (crate::font::TEST_FACE, GlyphStyle::Regular),
-            (crate::font::TEST_FACE_BOLD, GlyphStyle::Bold),
-            (crate::font::TEST_FACE_ITALIC, GlyphStyle::Italic),
-            (crate::font::TEST_FACE_MSYMBOLS, GlyphStyle::Regular),
+            (crate::TEST_FACE, GlyphStyle::Regular),
+            (crate::TEST_FACE_BOLD, GlyphStyle::Bold),
+            (crate::TEST_FACE_ITALIC, GlyphStyle::Italic),
+            (crate::TEST_FACE_MSYMBOLS, GlyphStyle::Regular),
         ] {
             let opts = LayoutOptions::default();
             let layout = FaceLayout::extract_tables(face, style, &opts).expect("extracts");
@@ -1290,7 +1290,7 @@ mod equivalence {
 
     #[test]
     fn a_corrupted_gpos_value_is_caught() {
-        let face = crate::font::TEST_FACE;
+        let face = crate::TEST_FACE;
         let opts = LayoutOptions::default();
         let mut layout = FaceLayout::extract_tables(face, GlyphStyle::Regular, &opts).unwrap();
         layout.gpos[0].1 += 1;

@@ -1,0 +1,35 @@
+[package]
+name = "libmsdf-font"
+version = "0.3.0"
+edition = "2024"
+description = "libmsdf's font half: MSDF atlases, layout tables, shaping and baking, without wgpu"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+# Shaping and font parsing: optional behind `shaper` (on by default).
+rustybuzz = { version = "0.20", optional = true }
+ttf-parser = { version = "0.25", optional = true }
+unicode-segmentation = "1.13"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+msdfgen = { version = "0.2", default-features = false, features = ["ttf-parser"], optional = true }
+# msdfgen's FontExt is implemented against ttf-parser 0.18; metrics use 0.25.
+ttf-parser-018 = { package = "ttf-parser", version = "0.18", optional = true }
+
+[features]
+default = ["shaper"]
+# TextShaper, StyledShaper, FontAtlasBuilder, outline extraction and the
+# layout-table extraction: everything that reads a TTF.
+shaper = ["dep:rustybuzz", "dep:ttf-parser"]
+# CPU msdfgen baking (libmsdf's `cpu-bake`). msdfgen is C++ built by `cc`;
+# it never builds for wasm32.
+bake = ["shaper", "dep:msdfgen", "dep:ttf-parser-018"]
+# The bundled TTF constants (`faces`), forwarded from libmsdf's features of
+# the same names; off by default. See libmsdf's Cargo.toml and README.md.
+font-apache-roboto-regular = []
+font-apache-roboto-bold = []
+font-apache-roboto-italic = []
+font-apache-roboto-msymbols = []
+font-ofl-grenze-gotisch = []
+font-ofl-texturina = []

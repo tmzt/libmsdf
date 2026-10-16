@@ -94,6 +94,7 @@ fn every_roboto_style_is_bundled() {
 mod ofl {
     use libmsdf::TextShaper;
 
+    #[allow(clippy::vec_init_then_push)]
     fn faces() -> Vec<(&'static str, &'static [u8], &'static str)> {
         let mut v = Vec::new();
         #[cfg(feature = "font-ofl-grenze-gotisch")]

@@ -23,7 +23,11 @@
 pub mod bundled;
 pub mod core;
 pub mod drawlist;
-pub mod font;
+/// The font half of libmsdf: the `libmsdf-font` crate, with every path it
+/// had as `libmsdf::font` unchanged.
+pub mod font {
+    pub use libmsdf_font::*;
+}
 pub mod gpu;
 pub mod pane;
 
@@ -69,3 +73,8 @@ pub use pane::{PaneGate, PaneMark};
 /// Human-readable crate status, printed by the root `highbay` bin.
 pub const PHASE_STATUS: &str =
     "Phase 5: wgpu SDF/MSDF engine (extracted from matter-stream; native + wasm32)";
+
+/// The bundled Roboto Regular face for libmsdf's own unit tests, whatever
+/// features are on.
+#[cfg(all(test, feature = "shaper"))]
+pub(crate) const TEST_FACE: &[u8] = include_bytes!("../fonts/Roboto-Regular-ascii.ttf");

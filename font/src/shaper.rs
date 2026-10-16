@@ -51,7 +51,7 @@ impl ShapedRun {
     /// this reports rather than decides, and every caller is free to ignore it.
     /// What it is for is the case the panic was actually right about: a test or
     /// a lint asserting that a string the REPO authored stays inside
-    /// [`crate::font::TEXT_RANGES`], without that assertion also being able to
+    /// [`crate::TEXT_RANGES`], without that assertion also being able to
     /// fire on a stranger's name.
     pub fn notdef_count(&self) -> usize {
         self.glyphs.iter().filter(|g| g.glyph_id == 0).count()
@@ -178,7 +178,7 @@ impl TextShaper {
         }
 
         // **A codepoint this face cannot draw shapes to glyph 0, and glyph 0 is
-        // a BOX** ([`crate::font::ROBOTO_REGULAR_ASCII`]). Nothing is checked
+        // a BOX** ([`crate::ROBOTO_REGULAR_ASCII`]). Nothing is checked
         // here, and nothing needs to be.
         //
         // There used to be a debug-only `panic!` on exactly this condition. It
@@ -217,7 +217,7 @@ impl TextShaper {
     /// caller for whom the placeholder box is the wrong answer.
     ///
     /// That caller is the icon path (see
-    /// [`crate::font::msymbols_codepoint`]). Text wants the box: a character
+    /// [`crate::msymbols_codepoint`]). Text wants the box: a character
     /// the face has no glyph for is the user's, and a box says so while
     /// leaving the rest of the string readable. An icon does not: a name in
     /// the coverage manifest that the live face turns out not to carry is a
@@ -282,7 +282,7 @@ impl TextShaper {
 }
 
 #[cfg(feature = "shaper")]
-impl crate::font::RunShaper for TextShaper {
+impl crate::RunShaper for TextShaper {
     fn shape(&self, text: &str) -> ShapedRun {
         TextShaper::shape(self, text)
     }
@@ -294,7 +294,7 @@ impl crate::font::RunShaper for TextShaper {
     }
 }
 
-/// **One shaper per [`crate::font::GlyphStyle`]**, and a refusal for a style it has no face
+/// **One shaper per [`crate::GlyphStyle`]**, and a refusal for a style it has no face
 /// for.
 ///
 /// # Why a styled run cannot be shaped by the regular face
@@ -309,14 +309,14 @@ impl crate::font::RunShaper for TextShaper {
 /// # It hands back ADDRESSES, not the face's own ids
 ///
 /// Every [`ShapedGlyph::glyph_id`] in a run from [`StyledShaper::shape`] has
-/// already been through [`crate::font::GlyphStyle::styled_glyph_id`], so it is an atlas
-/// address and [`crate::font::FontAtlas::get_glyph`] takes it directly. Two consequences
+/// already been through [`crate::GlyphStyle::styled_glyph_id`], so it is an atlas
+/// address and [`crate::FontAtlas::get_glyph`] takes it directly. Two consequences
 /// worth being explicit about:
 ///
 /// * Nothing downstream of shaping needs to learn about styles. The draw list
 ///   packs a 16-bit glyph id and packs a styled one without noticing.
 /// * A regular run is bit-for-bit the run it was before this type existed
-///   ([`crate::font::GlyphStyle::Regular`] is prefix 0), so this cannot change what any
+///   ([`crate::GlyphStyle::Regular`] is prefix 0), so this cannot change what any
 ///   existing caller draws.
 ///
 /// [`ShapedRun::notdef_count`] still counts, because the placeholder is
@@ -325,22 +325,22 @@ impl crate::font::RunShaper for TextShaper {
 /// # The refusal is the point of the type
 ///
 /// [`StyledShaper::shape`] returns `Err` for a style with no face. It does not
-/// fall back to the regular one, for [`crate::font::msymbols_codepoint`]'s
+/// fall back to the regular one, for [`crate::msymbols_codepoint`]'s
 /// reason: upright text where the document said emphasis is a wrong render
 /// that looks like a correct one, and the only place the gap can still be
 /// reported is here.
 #[cfg(feature = "shaper")]
 pub struct StyledShaper {
-    faces: Vec<(crate::font::GlyphStyle, TextShaper)>,
+    faces: Vec<(crate::GlyphStyle, TextShaper)>,
 }
 
 /// Why a styled shape came back empty: [`StyledShaper`] has no face for that
-/// style. Distinct from [`crate::font::StyledGlyphError`], which is the same
+/// style. Distinct from [`crate::StyledGlyphError`], which is the same
 /// question asked of an ATLAS - a caller can have the face and not the cells,
 /// or the cells and not the face, and the two are fixed in different places.
 #[cfg(feature = "shaper")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NoFaceForStyle(pub crate::font::GlyphStyle);
+pub struct NoFaceForStyle(pub crate::GlyphStyle);
 
 #[cfg(feature = "shaper")]
 impl core::fmt::Display for NoFaceForStyle {
@@ -356,30 +356,30 @@ impl core::fmt::Display for NoFaceForStyle {
 
 #[cfg(feature = "shaper")]
 impl StyledShaper {
-    /// A shaper carrying only [`crate::font::GlyphStyle::Regular`], from an explicit face.
+    /// A shaper carrying only [`crate::GlyphStyle::Regular`], from an explicit face.
     pub fn new(regular: Vec<u8>) -> Result<Self, &'static str> {
         Ok(Self {
-            faces: vec![(crate::font::GlyphStyle::Regular, TextShaper::new(regular)?)],
+            faces: vec![(crate::GlyphStyle::Regular, TextShaper::new(regular)?)],
         })
     }
 
     /// The bundled answer: `regular` plus every style
-    /// [`crate::font::bundled_style_face`] ships a face for - Bold with the
+    /// [`crate::bundled_style_face`] ships a face for - Bold with the
     /// `font-apache-roboto-bold` feature, Italic with
     /// `font-apache-roboto-italic`. A style whose feature is off is not
     /// carried, and shaping it is [`NoFaceForStyle`].
     ///
     /// `regular` is passed in rather than assumed because there are two of them
-    /// ([`crate::font::ROBOTO_REGULAR_ASCII`] and
-    /// [`crate::font::ROBOTO_ASCII_MSYMBOLS`]) and only the caller knows which
+    /// ([`crate::ROBOTO_REGULAR_ASCII`] and
+    /// [`crate::ROBOTO_ASCII_MSYMBOLS`]) and only the caller knows which
     /// atlas it is drawing against. The style faces are the same for both -
-    /// they carry no icons at all, by [`crate::font::ROBOTO_BOLD_ASCII`]'s
+    /// they carry no icons at all, by [`crate::ROBOTO_BOLD_ASCII`]'s
     /// argument.
     pub fn bundled(regular: Vec<u8>) -> Result<Self, &'static str> {
         let mut shaper = Self::new(regular)?;
-        for &style in crate::font::GlyphStyle::ALL {
-            if let Some(face) = crate::font::bundled_style_face(style) {
-                if style != crate::font::GlyphStyle::Regular {
+        for &style in crate::GlyphStyle::ALL {
+            if let Some(face) = crate::bundled_style_face(style) {
+                if style != crate::GlyphStyle::Regular {
                     shaper = shaper.with_face(style, face.to_vec())?;
                 }
             }
@@ -391,7 +391,7 @@ impl StyledShaper {
     /// than picking a winner.
     pub fn with_face(
         mut self,
-        style: crate::font::GlyphStyle,
+        style: crate::GlyphStyle,
         font_data: Vec<u8>,
     ) -> Result<Self, &'static str> {
         if self.carries(style) {
@@ -403,14 +403,14 @@ impl StyledShaper {
 
     /// Whether a face is loaded for `style`. Asked BEFORE shaping by a caller
     /// that wants to degrade deliberately rather than by accident.
-    pub fn carries(&self, style: crate::font::GlyphStyle) -> bool {
+    pub fn carries(&self, style: crate::GlyphStyle) -> bool {
         self.faces.iter().any(|(s, _)| *s == style)
     }
 
-    /// Every style this shaper can set, in [`crate::font::GlyphStyle::ALL`]
+    /// Every style this shaper can set, in [`crate::GlyphStyle::ALL`]
     /// order.
-    pub fn styles(&self) -> Vec<crate::font::GlyphStyle> {
-        crate::font::GlyphStyle::ALL
+    pub fn styles(&self) -> Vec<crate::GlyphStyle> {
+        crate::GlyphStyle::ALL
             .iter()
             .copied()
             .filter(|&s| self.carries(s))
@@ -419,7 +419,7 @@ impl StyledShaper {
 
     /// The face for one style, for a caller that needs the plain
     /// [`TextShaper`] API (coverage, grapheme boundaries, metrics).
-    pub fn face(&self, style: crate::font::GlyphStyle) -> Result<&TextShaper, NoFaceForStyle> {
+    pub fn face(&self, style: crate::GlyphStyle) -> Result<&TextShaper, NoFaceForStyle> {
         self.faces
             .iter()
             .find(|(s, _)| *s == style)
@@ -429,15 +429,11 @@ impl StyledShaper {
 
     /// **Shape `text` in `style`**, with atlas addresses for glyph ids.
     ///
-    /// A glyph the face numbers above [`crate::font::MAX_RAW_GLYPH_ID`] cannot
+    /// A glyph the face numbers above [`crate::MAX_RAW_GLYPH_ID`] cannot
     /// be addressed, and becomes the placeholder (address 0) rather than
     /// another style's cell - the same answer the shaper already gives for a
     /// codepoint the face cannot draw, and countable the same way.
-    pub fn shape(
-        &self,
-        style: crate::font::GlyphStyle,
-        text: &str,
-    ) -> Result<ShapedRun, NoFaceForStyle> {
+    pub fn shape(&self, style: crate::GlyphStyle, text: &str) -> Result<ShapedRun, NoFaceForStyle> {
         let mut run = self.face(style)?.shape(text);
         for glyph in &mut run.glyphs {
             glyph.glyph_id = style.styled_glyph_id(glyph.glyph_id).unwrap_or(0);
@@ -452,7 +448,7 @@ impl StyledShaper {
     /// character rather than laying out a run.
     pub fn glyph_id_for_char(
         &self,
-        style: crate::font::GlyphStyle,
+        style: crate::GlyphStyle,
         ch: char,
     ) -> Result<Option<u16>, NoFaceForStyle> {
         Ok(self
@@ -469,7 +465,7 @@ mod tests {
     // Deterministic fixture: the bundled Roboto ASCII subset (upstream used
     // whatever system font was installed).
     fn roboto() -> Vec<u8> {
-        crate::font::TEST_FACE.to_vec()
+        crate::TEST_FACE.to_vec()
     }
 
     #[test]
@@ -535,7 +531,7 @@ mod tests {
 /// `tests/coverage.rs`; these only pin the shaper's half.
 ///
 /// **The uncovered examples have moved once already.** A curly quote and an
-/// ellipsis were the two here until [`crate::font::TEXT_RANGES`] gained the
+/// ellipsis were the two here until [`crate::TEXT_RANGES`] gained the
 /// typographic ten, and they are covered now - so what stands in for them is
 /// the ARROW, which this tree's own prose reaches for constantly and which the
 /// upstream drop every bundled glyph comes from does not define, and the
@@ -547,7 +543,7 @@ mod uncovered_text_shapes_to_the_placeholder {
     use super::TextShaper;
 
     fn shaper() -> TextShaper {
-        TextShaper::new(crate::font::TEST_FACE.to_vec()).expect("face parses")
+        TextShaper::new(crate::TEST_FACE.to_vec()).expect("face parses")
     }
 
     /// The strings that used to abort a debug build. A user's name is the case

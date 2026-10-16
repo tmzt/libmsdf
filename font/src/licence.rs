@@ -8,8 +8,8 @@
 //! (`docs/design/20261016_01_ATLAS_LAYOUT_TABLES_PLAN.md`, section 4.8 and
 //! its 12:41 and 12:56 EDT amendments).
 
-use crate::font::GlyphStyle;
-use crate::font::atlas::{ATLAS_TABLE_FACE_ALL, TableBody};
+use crate::GlyphStyle;
+use crate::atlas::{ATLAS_TABLE_FACE_ALL, TableBody};
 
 /// One licence of a baked atlas: which licence, which styles it covers and
 /// whose work it is.
@@ -312,7 +312,7 @@ pub(crate) fn decode_tables(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::font::FontAtlas;
+    use crate::FontAtlas;
 
     const GRENZE: &str = "Copyright 2020 The Grenze Gotisch Project Authors \
                           (https://github.com/Omnibus-Type/Grenze-Gotisch)";
