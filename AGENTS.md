@@ -7,7 +7,8 @@ from matter-stream: SDF primitive instancing (boxes, circles, lines, Bézier
 strokes), MSDF text from baked and runtime-generated font atlases, rustybuzz
 shaping, and the `DrawList` render contract that UI code lowers into. It runs
 natively and on wasm32 (WebGPU). The critical rules below are copied verbatim
-from Noble's Keep's `AGENTS.md` and govern every agent working here.
+from libcontrols' `AGENTS.md` (Rules 0 to 4 are also Noble's Keep's) and
+govern every agent working here.
 
 ## CRITICAL RULE 0: THE CHANGES.MD PROTOCOL
 
@@ -112,3 +113,26 @@ Before writing, modifying or deleting code for a new planned work item:
    same commit as every status-change amendment. This is an exception to
    Rule 3.1. The table is a summary: the documents and their amendments stay
    the record.
+
+## CRITICAL RULE 5: VERSIONS AND TAGS
+
+1. The commit that changes the crate's `version` in `Cargo.toml` is tagged
+   `v<version>` (for example `git tag v0.3.0 <commit>`) as soon as it is
+   committed. A tag that has been pushed is never moved or deleted.
+2. `VERSIONS.md` records each version change, and only version changes:
+   one entry per version, appended oldest first, headed
+   `## <version> — YYYY-MM-DD (<short commit>, tag v<version>)`. The entry
+   lists the public API changes since the previous version: what was added,
+   changed or removed, with breaking changes marked **Breaking**. Internal
+   changes are not listed, and commits that do not change the version get no
+   entry. Earlier entries are never edited.
+3. The `VERSIONS.md` entry is in the same commit as the version change. This
+   is an exception to Rule 3.1.
+4. While the version is `0.x`, the bump follows the public API change. A
+   release whose public API changes are not strictly additive bumps the minor
+   version (`0.x.y` to `0.(x+1).0`): anything removed, renamed or changed in
+   signature or type, behaviour a caller can observe changing, or a variant or
+   field added to an exhaustive public enum or struct. A release whose changes
+   are strictly additive, or change no public API, bumps the patch version
+   (`0.x.y` to `0.x.(y+1)`). This applies from 0.3.0 on; earlier versions are
+   not re-labelled.
