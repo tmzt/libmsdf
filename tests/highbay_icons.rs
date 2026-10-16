@@ -26,7 +26,7 @@ use libmsdf::font::{
     msymbols_codepoint,
 };
 
-const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/legacy/roboto-ascii-48-v3.atlas");
+const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
 const PX_RANGE: f32 = 6.0;
 /// Roboto's cap height, which `glyph_projection` aligns every cell to.
 const CAP_HEIGHT: f32 = 1456.0;

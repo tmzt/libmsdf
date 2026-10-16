@@ -25,7 +25,7 @@ use libmsdf::font::{
 
 /// The same committed artifact `coverage.rs` reads: the plain face, baked at
 /// 48px, with no styled cell in it. It is the regression bar in file form.
-const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/legacy/roboto-ascii-48-v3.atlas");
+const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
 
 fn atlas() -> FontAtlas {
     FontAtlas::from_bytes(ATLAS_FIXTURE).expect("fixture atlas parses")

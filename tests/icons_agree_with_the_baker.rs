@@ -38,7 +38,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/legacy/roboto-ascii-48-v3.atlas");
+const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
 
 use libmsdf::{
     FontAtlas, HIGHBAY_ICONS, MARKER_ARROW, MARKERS, MSYMBOLS_ICONS, ROBOTO_ASCII_MSYMBOLS,

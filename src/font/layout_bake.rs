@@ -1087,7 +1087,11 @@ pub fn check_equivalence(
     // (it draws the placeholder at the .notdef advance).
     let in_contract = |s: &str| {
         s.chars().all(|c| {
-            layout.cmap.binary_search_by_key(&(c as u32), |m| m.0).is_ok() || !text.covers(c)
+            layout
+                .cmap
+                .binary_search_by_key(&(c as u32), |m| m.0)
+                .is_ok()
+                || !text.covers(c)
         })
     };
     for s in LAYOUT_CHECK_PANGRAMS

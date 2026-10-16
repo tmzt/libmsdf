@@ -14,7 +14,7 @@
 use libmsdf::drawlist::{LINE_BOX_RATIO, screen_px_range};
 use libmsdf::font::{FontAtlas, TextShaper};
 
-const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/legacy/roboto-ascii-48-v3.atlas");
+const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
 /// Distance range the fixture was baked with, in atlas texels (`bake_atlas`
 /// default — keep in step with `highbay/src/scene.rs`'s `PX_RANGE`).
 const PX_RANGE: f32 = 6.0;
