@@ -1747,6 +1747,7 @@ pub const fn atlas_capacity() -> usize {
 ///
 /// Queueing works on every target; [`FontAtlasBuilder::build`] (the msdfgen
 /// CPU bake) is native-only.
+#[derive(Clone)]
 pub struct FontAtlasBuilder {
     font_data: Vec<u8>,
     glyph_size: u32,
@@ -1774,6 +1775,12 @@ pub struct FontAtlasBuilder {
     /// Empty for every bake that exists today, which is what makes the styled
     /// path unable to disturb them.
     style_faces: Vec<(GlyphStyle, Vec<u8>)>,
+    /// **Layout extraction**: `None` bakes no layout tables; otherwise the
+    /// options for each style that has its own (others take the default).
+    layout: Option<Vec<(GlyphStyle, crate::font::LayoutOptions)>>,
+    /// Licence records asked for with [`FontAtlasBuilder::add_licence`]:
+    /// the styles covered, the SPDX identifier and the source.
+    licences: Vec<(Vec<GlyphStyle>, String, String)>,
 }
 
 impl FontAtlasBuilder {
@@ -1788,7 +1795,69 @@ impl FontAtlasBuilder {
             px_range,
             queued_glyphs: Vec::new(),
             style_faces: Vec::new(),
+            layout: None,
+            licences: Vec::new(),
         }
+    }
+
+    /// **Bake layout tables** (`Head`, `Cmap`, `Hmtx`, `Gsub`, `Gpos`) for
+    /// every face this builder bakes, so [`crate::font::AtlasShaper`] can lay
+    /// text out from the atlas alone. `opts` applies to the regular face;
+    /// [`FontAtlasBuilder::with_style_layout`] gives another style its own.
+    ///
+    /// [`FontAtlasBuilder::build`] then extracts each face's tables
+    /// ([`crate::font::FaceLayout::extract`], equivalence check included),
+    /// fails the bake on any [`crate::font::LayoutError`], and queues a cell
+    /// for every glyph a face's tables can output.
+    pub fn with_layout(&mut self, opts: crate::font::LayoutOptions) {
+        self.with_style_layout(GlyphStyle::Regular, opts);
+    }
+
+    /// [`FontAtlasBuilder::with_layout`] for one style's face: enables layout
+    /// tables and sets that face's options (the features apply to it alone).
+    pub fn with_style_layout(&mut self, style: GlyphStyle, opts: crate::font::LayoutOptions) {
+        let list = self.layout.get_or_insert_with(Vec::new);
+        list.retain(|(s, _)| *s != style);
+        list.push((style, opts));
+    }
+
+    /// Whether this builder bakes layout tables.
+    pub fn bakes_layout(&self) -> bool {
+        self.layout.is_some()
+    }
+
+    /// **Record the licence of the faces of `styles`**: an SPDX identifier
+    /// from [`crate::font::LICENCE_REGISTRY`] and what is licensed (the
+    /// family name, e.g. `Roboto`).
+    ///
+    /// Every style [`FontAtlasBuilder::build`] bakes needs at least one
+    /// record. At build the copyright line is read from the face's `name`
+    /// ID 0 (the first covered style's face) and the Reserved Font Name from
+    /// it, and a face whose `name` ID 13 or 14 names a different licence is
+    /// refused.
+    pub fn add_licence(
+        &mut self,
+        styles: &[GlyphStyle],
+        spdx: &str,
+        source: &str,
+    ) -> Result<(), String> {
+        if styles.is_empty() {
+            return Err("a licence must cover at least one style".into());
+        }
+        if crate::font::licence_by_spdx(spdx).is_none() {
+            return Err(format!(
+                "{spdx:?} is not in LICENCE_REGISTRY - add a row there (with its round-trip                  test) to bake a face under it"
+            ));
+        }
+        let mut probe = Vec::new();
+        crate::font::licence::put_pstr(&mut probe, source)
+            .map_err(|e| format!("licence source {source:?}: {e}"))?;
+        let mut styles = styles.to_vec();
+        styles.sort_unstable();
+        styles.dedup();
+        self.licences
+            .push((styles, spdx.to_string(), source.to_string()));
+        Ok(())
     }
 
     /// The face a style's cells are baked from: the builder's own for
@@ -2276,7 +2345,116 @@ impl FontAtlasBuilder {
     /// `(set, glyph id)` order - and the finished table is then sorted by glyph
     /// id, which is the key it is looked up by ([`FontAtlas::get_glyph`]). The
     /// two orders are deliberately different and neither is the queue's.
+    ///
+    /// It refuses a bake with a style that no licence record covers
+    /// ([`FontAtlasBuilder::add_licence`]), and, with
+    /// [`FontAtlasBuilder::with_layout`], a face whose layout the tables
+    /// cannot carry exactly.
     pub fn build(&self) -> Result<FontAtlas, String> {
+        let licences = self.licence_records()?;
+        let (builder, layout) = match &self.layout {
+            None => (None, None),
+            Some(options) => {
+                let mut builder = self.clone();
+                let mut faces = Vec::new();
+                for style in self.styles() {
+                    let face = self
+                        .style_face(style)
+                        .ok_or_else(|| format!("no {style:?} face is registered"))?;
+                    let opts = options
+                        .iter()
+                        .find(|(s, _)| *s == style)
+                        .map(|(_, o)| o.clone())
+                        .unwrap_or_default();
+                    let layout = crate::font::FaceLayout::extract(face, style, &opts)
+                        .map_err(|e| format!("{style:?} layout: {e}"))?;
+                    // A cell for every glyph the tables can output; glyph 0
+                    // is the style-invariant placeholder cell.
+                    for &(raw, _) in &layout.hmtx {
+                        if raw == 0 {
+                            builder.add_glyph(GlyphSet::Placeholder, 0);
+                            continue;
+                        }
+                        if let Some(addr) = style.styled_glyph_id(raw) {
+                            builder.add_glyph(style.shaped_set(), addr);
+                        }
+                    }
+                    faces.push(layout);
+                }
+                let layout = crate::font::AtlasLayout::from_faces(faces)
+                    .map_err(|e| format!("layout: {e}"))?;
+                (Some(builder), Some(layout))
+            }
+        };
+        let mut atlas = builder.as_ref().unwrap_or(self).bake_cells()?;
+        atlas.layout = layout;
+        atlas.licences = licences;
+        atlas
+            .try_to_bytes()
+            .map_err(|e| format!("the baked atlas breaks a table rule: {e}"))?;
+        Ok(atlas)
+    }
+
+    /// The licence records of this bake, checked against the faces.
+    fn licence_records(&self) -> Result<Vec<crate::font::LicenceRecord>, String> {
+        for style in self.styles() {
+            if !self
+                .licences
+                .iter()
+                .any(|(styles, _, _)| styles.contains(&style))
+            {
+                return Err(format!(
+                    "{style:?} is baked but no licence covers it - call add_licence (bake_atlas \
+                     --licence <SPDX>=<source>[@<style>,...])"
+                ));
+            }
+        }
+        let mut out = Vec::new();
+        for (styles, spdx, source) in &self.licences {
+            let kind = crate::font::licence_by_spdx(spdx).expect("checked by add_licence");
+            let mut copyright = None;
+            for &style in styles {
+                let data = self.style_face(style).ok_or_else(|| {
+                    format!("the {spdx} licence covers {style:?}, which has no face registered")
+                })?;
+                let face = ttf_parser::Face::parse(data, 0)
+                    .map_err(|e| format!("{style:?} face parse error: {e}"))?;
+                if let Some(declared) = crate::font::layout_bake::declared_licence(&face)
+                    && declared != spdx
+                {
+                    return Err(format!(
+                        "{style:?}: the face's name table says {declared}, not {spdx}"
+                    ));
+                }
+                if copyright.is_none() {
+                    copyright =
+                        Some(crate::font::layout_bake::copyright_of(&face).unwrap_or_default());
+                }
+            }
+            let copyright = copyright.unwrap_or_default();
+            let record = crate::font::LicenceRecord {
+                fourcc: kind.fourcc,
+                version: kind.version,
+                styles: styles.clone(),
+                spdx: spdx.clone(),
+                source: source.clone(),
+                reserved_font_name: crate::font::layout_bake::reserved_font_name(&copyright),
+                copyright,
+            };
+            for (field, text) in [
+                ("copyright", &record.copyright),
+                ("reserved font name", &record.reserved_font_name),
+            ] {
+                crate::font::licence::put_pstr(&mut Vec::new(), text)
+                    .map_err(|e| format!("{:?} face's {field}: {e}", record.styles[0]))?;
+            }
+            out.push(record);
+        }
+        Ok(out)
+    }
+
+    /// The msdfgen bake of the queued cells, without layout or licences.
+    fn bake_cells(&self) -> Result<FontAtlas, String> {
         let face25 = ttf_parser::Face::parse(&self.font_data, 0)
             .map_err(|e| format!("font parse error: {e}"))?;
 
@@ -2731,6 +2909,9 @@ mod tests {
     #[test]
     fn build_ascii_atlas() {
         let mut builder = FontAtlasBuilder::new(roboto(), 32, 4.0);
+        builder
+            .add_licence(&[GlyphStyle::Regular], "Apache-2.0", "Roboto")
+            .unwrap();
         builder.add_ascii();
         let atlas = builder.build().expect("atlas build failed");
 
@@ -2749,6 +2930,9 @@ mod tests {
     #[test]
     fn atlas_roundtrip() {
         let mut builder = FontAtlasBuilder::new(roboto(), 32, 4.0);
+        builder
+            .add_licence(&[GlyphStyle::Regular], "Apache-2.0", "Roboto")
+            .unwrap();
         builder.add_codepoint_range(GlyphSet::Text, 'A', 'Z');
         let atlas = builder.build().expect("build failed");
         let bytes = atlas.to_bytes();
@@ -2859,12 +3043,18 @@ mod tests {
         };
 
         let mut forwards = FontAtlasBuilder::new(roboto(), 48, 6.0);
+        forwards
+            .add_licence(&[GlyphStyle::Regular], "Apache-2.0", "Roboto")
+            .unwrap();
         forwards.add_codepoint_range(GlyphSet::Text, 'a', 'z');
         forwards.add_glyph(GlyphSet::ShapedText, gid('a'));
         forwards.add_codepoint_range(GlyphSet::OwnedIcons, '\u{F800}', '\u{F8EF}');
         forwards.add_glyph(GlyphSet::Placeholder, 0);
 
         let mut backwards = FontAtlasBuilder::new(roboto(), 48, 6.0);
+        backwards
+            .add_licence(&[GlyphStyle::Regular], "Apache-2.0", "Roboto")
+            .unwrap();
         backwards.add_glyph(GlyphSet::Placeholder, 0);
         backwards.add_codepoint_range(GlyphSet::OwnedIcons, '\u{F800}', '\u{F8EF}');
         backwards.add_glyph(GlyphSet::ShapedText, gid('a'));
@@ -2907,10 +3097,16 @@ mod tests {
                 .number_of_glyphs();
 
             let mut before = FontAtlasBuilder::new(face_bytes.to_vec(), 48, 6.0);
+            before
+                .add_licence(&[GlyphStyle::Regular], "Apache-2.0", "Roboto")
+                .unwrap();
             before.add_shipped_coverage();
             let before = before.cell_order();
 
             let mut after = FontAtlasBuilder::new(face_bytes.to_vec(), 48, 6.0);
+            after
+                .add_licence(&[GlyphStyle::Regular], "Apache-2.0", "Roboto")
+                .unwrap();
             after.add_shipped_coverage();
             after.add_glyph(GlyphSet::OwnedIcons, next_gid);
             let after = after.cell_order();
@@ -3011,6 +3207,8 @@ mod tests {
 
         let bake = |icons: &[char]| {
             let mut b = FontAtlasBuilder::new(roboto(), 32, 4.0);
+            b.add_licence(&[GlyphStyle::Regular], "Apache-2.0", "Roboto")
+                .unwrap();
             b.add_glyph(GlyphSet::Placeholder, 0);
             b.add_codepoint_range(GlyphSet::Text, 'A', 'E');
             b.add_glyph(GlyphSet::Markers, gid(crate::font::MARKER_ARROW));
@@ -3047,6 +3245,9 @@ mod tests {
         // ...and this comparison can SEE a cell move: adding to an earlier set
         // (one more letter, in Text) shifts the marker and the icons.
         let mut widened = FontAtlasBuilder::new(roboto(), 32, 4.0);
+        widened
+            .add_licence(&[GlyphStyle::Regular], "Apache-2.0", "Roboto")
+            .unwrap();
         widened.add_glyph(GlyphSet::Placeholder, 0);
         widened.add_codepoint_range(GlyphSet::Text, 'A', 'F');
         widened.add_glyph(GlyphSet::Markers, gid(crate::font::MARKER_ARROW));
@@ -3291,5 +3492,66 @@ mod format_v5 {
             AtlasFileVersion::Split(ATLAS_FORMAT_VERSION)
         );
         assert_eq!(ATLAS_FORMAT_VERSION.to_string(), "5:0.1.0");
+    }
+}
+
+/// **Licences and layout at bake** (atlas layout tables plan, step 3).
+#[cfg(all(test, feature = "cpu-bake", not(target_arch = "wasm32")))]
+mod bake_licences {
+    use super::*;
+
+    #[test]
+    fn a_bake_without_a_licence_names_the_style() {
+        let mut b = FontAtlasBuilder::new(crate::font::ROBOTO_REGULAR_ASCII.to_vec(), 16, 2.0);
+        b.add_codepoint_range(GlyphSet::Text, 'A', 'C');
+        b.add_styled_coverage(GlyphStyle::Bold, crate::font::ROBOTO_BOLD_ASCII.to_vec())
+            .unwrap();
+        b.add_licence(&[GlyphStyle::Regular], "Apache-2.0", "Roboto")
+            .unwrap();
+        let err = b.build().expect_err("Bold has no licence");
+        assert!(err.contains("Bold") && err.contains("licence"), "{err}");
+    }
+
+    #[test]
+    fn a_licence_the_face_contradicts_is_refused() {
+        let mut b = FontAtlasBuilder::new(crate::font::ROBOTO_BOLD_ASCII.to_vec(), 16, 2.0);
+        b.add_codepoint_range(GlyphSet::Text, 'A', 'C');
+        b.add_licence(&[GlyphStyle::Regular], "OFL-1.1", "Roboto")
+            .unwrap();
+        let err = b.build().expect_err("the name table says Apache-2.0");
+        assert!(err.contains("Apache-2.0"), "{err}");
+        assert!(
+            b.add_licence(&[GlyphStyle::Regular], "GPL-3.0", "x")
+                .is_err(),
+            "a licence outside the registry"
+        );
+    }
+
+    #[test]
+    fn a_baked_atlas_carries_its_licence_and_layout() {
+        let mut b = FontAtlasBuilder::new(crate::font::ROBOTO_REGULAR_ASCII.to_vec(), 16, 2.0);
+        b.add_codepoint_range(GlyphSet::Text, 'A', 'C');
+        b.add_licence(&[GlyphStyle::Regular], "Apache-2.0", "Roboto")
+            .unwrap();
+        b.with_layout(crate::font::LayoutOptions::default());
+        let atlas = b.build().expect("bakes");
+        let back = FontAtlas::from_bytes(&atlas.to_bytes()).expect("loads");
+        assert_eq!(back.licences().len(), 1);
+        let r = &back.licences()[0];
+        assert_eq!(
+            (r.spdx.as_str(), r.source.as_str()),
+            ("Apache-2.0", "Roboto")
+        );
+        assert_eq!(
+            r.copyright,
+            "Copyright 2011 Google Inc. All Rights Reserved."
+        );
+        assert_eq!(&r.fourcc, b"APAC");
+        let layout = back.layout.as_ref().expect("layout survives");
+        let face = layout.face(GlyphStyle::Regular).expect("regular layout");
+        // Every glyph the tables can output has a cell.
+        for &(g, _) in &face.hmtx {
+            assert!(back.get_glyph(g).is_some(), "glyph {g} has no cell");
+        }
     }
 }

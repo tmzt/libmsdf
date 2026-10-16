@@ -495,6 +495,9 @@ fn a_bold_ligature_is_a_bold_glyph() {
 #[test]
 fn a_styled_queue_appends_to_the_shipped_one() {
     let mut builder = FontAtlasBuilder::new(ROBOTO_ASCII_MSYMBOLS.to_vec(), 48, 6.0);
+    builder
+        .add_licence(&[libmsdf::GlyphStyle::Regular], "Apache-2.0", "Roboto")
+        .unwrap();
     builder.add_shipped_coverage();
     let shipped = builder.cell_order();
 
@@ -502,8 +505,14 @@ fn a_styled_queue_appends_to_the_shipped_one() {
         .add_styled_coverage(GlyphStyle::Bold, ROBOTO_BOLD_ASCII.to_vec())
         .expect("the bold face parses");
     builder
+        .add_licence(&[libmsdf::GlyphStyle::Bold], "Apache-2.0", "Roboto")
+        .unwrap();
+    builder
         .add_styled_coverage(GlyphStyle::Italic, ROBOTO_ITALIC_ASCII.to_vec())
         .expect("the italic face parses");
+    builder
+        .add_licence(&[libmsdf::GlyphStyle::Italic], "Apache-2.0", "Roboto")
+        .unwrap();
     let with_styles = builder.cell_order();
 
     assert_eq!(
@@ -531,23 +540,38 @@ fn a_styled_queue_appends_to_the_shipped_one() {
 fn the_builder_refuses_a_second_face_for_a_style() {
     let mut builder = FontAtlasBuilder::new(ROBOTO_REGULAR_ASCII.to_vec(), 16, 2.0);
     builder
+        .add_licence(&[libmsdf::GlyphStyle::Regular], "Apache-2.0", "Roboto")
+        .unwrap();
+    builder
         .add_styled_coverage(GlyphStyle::Bold, ROBOTO_BOLD_ASCII.to_vec())
         .expect("first bold face");
+    builder
+        .add_licence(&[libmsdf::GlyphStyle::Bold], "Apache-2.0", "Roboto")
+        .unwrap();
     assert!(
         builder
             .add_styled_coverage(GlyphStyle::Bold, ROBOTO_ITALIC_ASCII.to_vec())
             .is_err()
     );
+    builder
+        .add_licence(&[libmsdf::GlyphStyle::Bold], "Apache-2.0", "Roboto")
+        .unwrap();
     assert!(
         builder
             .add_styled_coverage(GlyphStyle::Regular, ROBOTO_BOLD_ASCII.to_vec())
             .is_err()
     );
+    builder
+        .add_licence(&[libmsdf::GlyphStyle::Regular], "Apache-2.0", "Roboto")
+        .unwrap();
     assert!(
         builder
             .add_styled_coverage(GlyphStyle::Italic, b"not a font".to_vec())
             .is_err()
     );
+    builder
+        .add_licence(&[libmsdf::GlyphStyle::Italic], "Apache-2.0", "Roboto")
+        .unwrap();
 }
 
 /// **One style does not fit beside the shipped coverage in today's atlas**, and
@@ -570,11 +594,17 @@ fn the_builder_refuses_a_second_face_for_a_style() {
 #[test]
 fn a_style_does_not_fit_beside_the_shipped_coverage_today() {
     let mut builder = FontAtlasBuilder::new(ROBOTO_ASCII_MSYMBOLS.to_vec(), 48, 6.0);
+    builder
+        .add_licence(&[libmsdf::GlyphStyle::Regular], "Apache-2.0", "Roboto")
+        .unwrap();
     builder.add_shipped_coverage();
     let shipped = builder.cell_order().len();
     builder
         .add_styled_coverage(GlyphStyle::Bold, ROBOTO_BOLD_ASCII.to_vec())
         .expect("the bold face parses");
+    builder
+        .add_licence(&[libmsdf::GlyphStyle::Bold], "Apache-2.0", "Roboto")
+        .unwrap();
     let with_bold = builder.cell_order().len();
 
     assert_eq!(
@@ -648,6 +678,8 @@ mod baked {
 
     fn regular_only() -> FontAtlas {
         let mut b = FontAtlasBuilder::new(ROBOTO_REGULAR_ASCII.to_vec(), GS, PX_RANGE);
+        b.add_licence(&[libmsdf::GlyphStyle::Regular], "Apache-2.0", "Roboto")
+            .unwrap();
         b.add_ascii();
         b.add_glyph(GlyphSet::Placeholder, 0);
         b.build().expect("regular bake")
@@ -655,10 +687,14 @@ mod baked {
 
     fn regular_and_bold() -> FontAtlas {
         let mut b = FontAtlasBuilder::new(ROBOTO_REGULAR_ASCII.to_vec(), GS, PX_RANGE);
+        b.add_licence(&[libmsdf::GlyphStyle::Regular], "Apache-2.0", "Roboto")
+            .unwrap();
         b.add_ascii();
         b.add_glyph(GlyphSet::Placeholder, 0);
         b.add_styled_coverage(GlyphStyle::Bold, ROBOTO_BOLD_ASCII.to_vec())
             .expect("the bold face parses");
+        b.add_licence(&[libmsdf::GlyphStyle::Bold], "Apache-2.0", "Roboto")
+            .unwrap();
         b.build().expect("styled bake")
     }
 

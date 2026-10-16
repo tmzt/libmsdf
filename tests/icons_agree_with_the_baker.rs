@@ -479,6 +479,8 @@ fn dump_the_borrowed_set() {
 
     const PX_RANGE: f32 = 6.0;
     let mut b = FontAtlasBuilder::new(ROBOTO_ASCII_MSYMBOLS.to_vec(), 48, PX_RANGE as f64);
+    b.add_licence(&[libmsdf::GlyphStyle::Regular], "Apache-2.0", "Roboto")
+        .unwrap();
     b.add_shipped_coverage();
     let atlas = b.build().expect("the merged coverage bakes");
     let shaper = TextShaper::new(ROBOTO_ASCII_MSYMBOLS.to_vec()).expect("the merged face parses");

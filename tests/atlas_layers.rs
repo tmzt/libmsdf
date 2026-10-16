@@ -225,9 +225,13 @@ fn a_style_carries_text_only_and_never_a_second_copy_of_the_icons() {
         CellKey, FontAtlasBuilder, GlyphSet, ROBOTO_ASCII_MSYMBOLS, ROBOTO_BOLD_ASCII,
     };
     let mut b = FontAtlasBuilder::new(ROBOTO_ASCII_MSYMBOLS.to_vec(), 16, 2.0);
+    b.add_licence(&[libmsdf::GlyphStyle::Regular], "Apache-2.0", "Roboto")
+        .unwrap();
     b.add_shipped_coverage();
     b.add_styled_coverage(GlyphStyle::Bold, ROBOTO_BOLD_ASCII.to_vec())
         .expect("the bold face parses");
+    b.add_licence(&[libmsdf::GlyphStyle::Bold], "Apache-2.0", "Roboto")
+        .unwrap();
     let order: Vec<CellKey> = b.cell_order();
 
     let icons = |style: GlyphStyle| {
@@ -454,17 +458,25 @@ mod baked {
 
     fn shipped_only() -> FontAtlas {
         let mut b = FontAtlasBuilder::new(ROBOTO_ASCII_MSYMBOLS.to_vec(), GS, PX_RANGE);
+        b.add_licence(&[libmsdf::GlyphStyle::Regular], "Apache-2.0", "Roboto")
+            .unwrap();
         b.add_shipped_coverage();
         b.build().expect("the shipped coverage bakes")
     }
 
     fn shipped_with_both_styles() -> FontAtlas {
         let mut b = FontAtlasBuilder::new(ROBOTO_ASCII_MSYMBOLS.to_vec(), GS, PX_RANGE);
+        b.add_licence(&[libmsdf::GlyphStyle::Regular], "Apache-2.0", "Roboto")
+            .unwrap();
         b.add_shipped_coverage();
         b.add_styled_coverage(GlyphStyle::Bold, ROBOTO_BOLD_ASCII.to_vec())
             .expect("the bold face parses");
+        b.add_licence(&[libmsdf::GlyphStyle::Bold], "Apache-2.0", "Roboto")
+            .unwrap();
         b.add_styled_coverage(GlyphStyle::Italic, ROBOTO_ITALIC_ASCII.to_vec())
             .expect("the italic face parses");
+        b.add_licence(&[libmsdf::GlyphStyle::Italic], "Apache-2.0", "Roboto")
+            .unwrap();
         b.build()
             .expect("a styled bake fits now - that is the point of the wave")
     }

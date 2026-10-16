@@ -530,6 +530,9 @@ fn the_shipped_atlas_is_pinned_and_has_the_reserved_headroom() {
 /// The queue the shipped atlas was baked from, for either bundled face.
 fn shipped_queue(face: &[u8]) -> FontAtlasBuilder {
     let mut builder = FontAtlasBuilder::new(face.to_vec(), 48, PX_RANGE as f64);
+    builder
+        .add_licence(&[libmsdf::GlyphStyle::Regular], "Apache-2.0", "Roboto")
+        .unwrap();
     builder.add_shipped_coverage();
     builder
 }
@@ -944,6 +947,8 @@ mod baked {
     /// widen along with it and stop measuring anything.
     fn narrow(face: &[u8]) -> FontAtlas {
         let mut b = FontAtlasBuilder::new(face.to_vec(), GS, PX);
+        b.add_licence(&[libmsdf::GlyphStyle::Regular], "Apache-2.0", "Roboto")
+            .unwrap();
         b.add_codepoint_range(GlyphSet::Text, '\u{0020}', '\u{007E}');
         b.add_codepoint_range(GlyphSet::Text, '\u{00A0}', '\u{00FF}');
         b.add_shaped_ascii();
@@ -961,6 +966,8 @@ mod baked {
 
     fn wide(face: &[u8]) -> FontAtlas {
         let mut b = FontAtlasBuilder::new(face.to_vec(), GS, PX);
+        b.add_licence(&[libmsdf::GlyphStyle::Regular], "Apache-2.0", "Roboto")
+            .unwrap();
         b.add_shipped_coverage();
         b.build().expect("the shipped coverage bakes")
     }

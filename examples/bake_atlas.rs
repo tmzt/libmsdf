@@ -105,6 +105,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    let check = args.iter().any(|a| a == "--check");
 
     // `--style bold`, or `--style bold=<face.ttf>`. Parsed before the
     // positionals so a style argument can never be taken for the font or the
@@ -137,6 +138,61 @@ fn main() {
             (style, data)
         })
         .collect();
+    // `--licence <SPDX>=<source>[@<style>,...]` (repeatable; style defaults
+    // to regular), `--feature <tag>[@<style>,...]` (repeatable; style
+    // defaults to regular) and `--layout`.
+    let parse_styles = |list: Option<&str>| -> Vec<libmsdf::GlyphStyle> {
+        match list {
+            None => vec![libmsdf::GlyphStyle::Regular],
+            Some(l) => l
+                .split(',')
+                .map(|n| match n.to_ascii_lowercase().as_str() {
+                    "regular" => libmsdf::GlyphStyle::Regular,
+                    "bold" => libmsdf::GlyphStyle::Bold,
+                    "italic" => libmsdf::GlyphStyle::Italic,
+                    "bolditalic" => libmsdf::GlyphStyle::BoldItalic,
+                    other => panic!("unknown style {other:?}"),
+                })
+                .collect(),
+        }
+    };
+    let flag_values = |flag: &str| -> Vec<String> {
+        args.iter()
+            .zip(args.iter().skip(1))
+            .filter(|(f, _)| *f == flag)
+            .map(|(_, v)| v.clone())
+            .collect()
+    };
+    let licences: Vec<(Vec<libmsdf::GlyphStyle>, String, String)> = flag_values("--licence")
+        .iter()
+        .map(|spec| {
+            let (body, styles) = spec
+                .split_once('@')
+                .map_or((spec.as_str(), None), |(b, s)| (b, Some(s)));
+            let (spdx, source) = body.split_once('=').unwrap_or_else(|| {
+                panic!("--licence takes <SPDX>=<source>[@<style>,...], not {spec:?}")
+            });
+            (parse_styles(styles), spdx.to_string(), source.to_string())
+        })
+        .collect();
+    let mut features: Vec<(libmsdf::GlyphStyle, [u8; 4])> = Vec::new();
+    for spec in flag_values("--feature") {
+        let (tag, styles) = spec
+            .split_once('@')
+            .map_or((spec.as_str(), None), |(t, s)| (t, Some(s)));
+        let tag: [u8; 4] = format!("{tag:<4}")
+            .as_bytes()
+            .try_into()
+            .unwrap_or_else(|_| panic!("--feature takes a 4-letter tag, not {tag:?}"));
+        for style in parse_styles(styles) {
+            features.push((style, tag));
+        }
+    }
+    let layout = args.iter().any(|a| a == "--layout");
+    if !features.is_empty() && !layout {
+        panic!("--feature needs --layout");
+    }
+
     let args: Vec<String> = {
         let mut positional = Vec::new();
         let mut skip = false;
@@ -145,8 +201,11 @@ fn main() {
                 skip = false;
                 continue;
             }
-            if a == "--style" {
+            if a == "--style" || a == "--licence" || a == "--feature" {
                 skip = true;
+                continue;
+            }
+            if a.starts_with("--") {
                 continue;
             }
             positional.push(a.clone());
@@ -179,7 +238,45 @@ fn main() {
             .add_styled_coverage(style, data)
             .unwrap_or_else(|e| panic!("{e}"));
     }
-    let atlas = builder.build().expect("atlas bake failed");
+    for (styles, spdx, source) in &licences {
+        builder
+            .add_licence(styles, spdx, source)
+            .unwrap_or_else(|e| panic!("--licence: {e}"));
+    }
+    if layout {
+        let started = std::time::Instant::now();
+        for style in builder.styles() {
+            let extra_features = features
+                .iter()
+                .filter(|(s, _)| *s == style)
+                .map(|(_, t)| *t)
+                .collect();
+            builder.with_style_layout(style, libmsdf::LayoutOptions { extra_features });
+        }
+        eprintln!(
+            "bake_atlas: layout tables requested for {:?}",
+            builder.styles()
+        );
+        let atlas = builder.build().unwrap_or_else(|e| {
+            eprintln!("bake_atlas: FAILED - {e}");
+            std::process::exit(1);
+        });
+        eprintln!(
+            "bake_atlas: layout extracted and checked in {:.2?} (whole bake)",
+            started.elapsed()
+        );
+        return finish(atlas, check, &out_path);
+    }
+    let atlas = builder.build().unwrap_or_else(|e| {
+        eprintln!("bake_atlas: FAILED - {e}");
+        std::process::exit(1);
+    });
+    finish(atlas, check, &out_path);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn finish(atlas: libmsdf::FontAtlas, check: bool, out_path: &str) {
+    let out_path = out_path.to_string();
     let bytes = atlas.to_bytes();
 
     // **`--check` compares instead of writing.** The atlas is a COMMITTED
@@ -197,7 +294,7 @@ fn main() {
     // this check where the artifact was baked; if it ever runs somewhere else
     // and fails on pixels alone, compare the index (glyph ids, cell
     // coordinates, dimensions) rather than raising the tolerance.
-    if args.iter().any(|a| a == "--check") {
+    if check {
         let committed = std::fs::read(&out_path)
             .unwrap_or_else(|e| panic!("read {out_path} to check against: {e}"));
         if committed == bytes {

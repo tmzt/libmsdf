@@ -15,6 +15,7 @@
 pub mod atlas;
 pub mod glyph_table;
 pub mod layout;
+pub mod layout_bake;
 pub mod licence;
 pub mod manager;
 pub mod outline;
@@ -33,6 +34,7 @@ pub use glyph_table::GlyphEntry;
 pub use layout::{
     AtlasLayout, ContextSide, ContextSingle, FaceLayout, GsubLookup, GsubRules, Ligature,
 };
+pub use layout_bake::{LayoutError, LayoutOptions};
 pub use licence::{
     LICENCE_REGISTRY, LicenceKind, LicenceRecord, LicenceTextError, licence_by_key, licence_by_spdx,
 };
