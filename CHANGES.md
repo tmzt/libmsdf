@@ -446,3 +446,30 @@ copied in or substituted; changing a face, the bundled table or the baker
 means re-baking, verifying (`--check fonts/atlases`, the `bundled_fonts`
 test) and committing `fonts/atlases/` with `fonts/bundled.sha256`, the
 latter only with the owner's agreement when the bytes change.
+
+## 2026-10-16 14:55 EDT — 0.4.0 released (local tag); both plans stay In implementation
+
+Plans: [Atlas-carried layout tables and a shaper without rustybuzz](docs/design/20261016_01_ATLAS_LAYOUT_TABLES_PLAN.md)
+and [Bundled fonts as optional, licence-named features, baked at build time](docs/design/20261016_02_BUNDLED_FONT_FEATURES_PLAN.md).
+The joint release step (the first plan's step 8, the second's step 10) is
+`b48d066`: libmsdf and libmsdf-font at 0.4.0, the VERSIONS.md entry with
+its Format line, and the tag `v0.4.0` on that commit (local; not pushed,
+on the owner's instruction). Step 9 of the bundled fonts plan built
+libcontrols (306 tests pass, no font feature) and checked the tower defense
+game's atlases read-only.
+
+**Neither plan is marked Implemented**, because some **Done when:** items
+could not be met here, and Rule 1.3 sets `Implemented` only when every one
+holds. Open, for the owner:
+
+- atlas layout tables step 7, and bundled fonts step 9: the tower defense
+  game was not built (the owner's instruction not to touch it); tinytrowel,
+  sigilweaver and highbay were not built (disk under 1 GB free); the game's
+  Android build and ledger-capture comparison were not run;
+- bundled fonts step 6 (13:34 EDT answer 5) and switch criteria 3 and 5:
+  no Linux host, so `fonts/bundled.sha256` has no
+  `x86_64-unknown-linux-gnu` lines.
+
+When these are done, the `Implemented` amendments and README rows follow
+(Rule 4.3). The branch `impl/0.4.0` is fast-forwarded onto `main` (no
+squash, so every step commit and the tag stay on `main`).
