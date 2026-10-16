@@ -1,0 +1,5 @@
+Regular Text: 287 of 287 carried, 0 skipped, 0 waived
+Regular Symbols: 57 of 63 carried, 6 skipped, 0 waived
+  skipped: U+2012 U+2015 U+201B U+201F U+20B4 U+20BE
+Regular Math: 47 of 77 carried, 30 skipped, 0 waived
+  skipped: U+207A U+207B U+207C U+207D U+207E U+208A U+208B U+208C U+208D U+208E U+2153 U+2154 U+2155 U+2156 U+2157 U+2158 U+2159 U+215A U+215B U+215C U+215D U+215E U+2207 U+2208 U+2209 U+2213 U+2229 U+222A U+2282 U+2283

@@ -30,6 +30,25 @@ pub mod drawlist;
 /// had as `libmsdf::font` unchanged.
 pub mod font {
     pub use libmsdf_font::*;
+
+    #[cfg(feature = "font-ofl-grenze-gotisch")]
+    pub use crate::bundled::GRENZE_GOTISCH_ATLAS;
+    #[cfg(feature = "font-apache-roboto-bold")]
+    pub use crate::bundled::ROBOTO_BOLD_ATLAS;
+    #[cfg(feature = "font-apache-roboto-italic")]
+    pub use crate::bundled::ROBOTO_ITALIC_ATLAS;
+    #[cfg(feature = "font-apache-roboto-msymbols")]
+    pub use crate::bundled::ROBOTO_MSYMBOLS_ATLAS;
+    #[cfg(all(
+        feature = "font-apache-roboto-msymbols",
+        feature = "font-apache-roboto-bold",
+        feature = "font-apache-roboto-italic"
+    ))]
+    pub use crate::bundled::ROBOTO_MSYMBOLS_STYLED_ATLAS;
+    #[cfg(feature = "font-apache-roboto-regular")]
+    pub use crate::bundled::ROBOTO_REGULAR_ATLAS;
+    #[cfg(feature = "font-ofl-texturina")]
+    pub use crate::bundled::TEXTURINA_ATLAS;
 }
 pub mod gpu;
 pub mod pane;
@@ -39,18 +58,37 @@ pub use crate::core::{
     DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_PATH_FILL, DRAW_TYPE_SLAB, DRAW_TYPE_TEXT,
     GpuFont, PARAM_BANK_CAPACITY, RenderFrame, SdfDrawCmd,
 };
+#[cfg(feature = "font-ofl-grenze-gotisch")]
+pub use bundled::GRENZE_GOTISCH_ATLAS;
 #[cfg(all(feature = "font-ofl-grenze-gotisch", feature = "shaper"))]
 pub use bundled::GRENZE_GOTISCH_TTF;
 #[cfg(all(feature = "font-apache-roboto-msymbols", feature = "shaper"))]
 pub use bundled::ROBOTO_ASCII_MSYMBOLS;
 #[cfg(all(feature = "font-apache-roboto-bold", feature = "shaper"))]
 pub use bundled::ROBOTO_BOLD_ASCII;
+#[cfg(feature = "font-apache-roboto-bold")]
+pub use bundled::ROBOTO_BOLD_ATLAS;
 #[cfg(all(feature = "font-apache-roboto-italic", feature = "shaper"))]
 pub use bundled::ROBOTO_ITALIC_ASCII;
+#[cfg(feature = "font-apache-roboto-italic")]
+pub use bundled::ROBOTO_ITALIC_ATLAS;
+#[cfg(feature = "font-apache-roboto-msymbols")]
+pub use bundled::ROBOTO_MSYMBOLS_ATLAS;
+#[cfg(all(
+    feature = "font-apache-roboto-msymbols",
+    feature = "font-apache-roboto-bold",
+    feature = "font-apache-roboto-italic"
+))]
+pub use bundled::ROBOTO_MSYMBOLS_STYLED_ATLAS;
 #[cfg(all(feature = "font-apache-roboto-regular", feature = "shaper"))]
 pub use bundled::ROBOTO_REGULAR_ASCII;
+#[cfg(feature = "font-apache-roboto-regular")]
+pub use bundled::ROBOTO_REGULAR_ATLAS;
+#[cfg(feature = "font-ofl-texturina")]
+pub use bundled::TEXTURINA_ATLAS;
 #[cfg(all(feature = "font-ofl-texturina", feature = "shaper"))]
 pub use bundled::TEXTURINA_TTF;
+pub use bundled::{BUNDLED_ATLAS_GLYPH_SIZE, BUNDLED_ATLAS_PX_RANGE};
 pub use drawlist::{
     Contour, DrawEffects, DrawList, Elevation, PATH_CUBIC_TOLERANCE, PATH_MAX_SEGMENTS, Path,
     PathBuilder, PathError, PathSegment, SdfFrame, SdfInstance, SdfKind, SdfRotate, rotate_rect,

@@ -19,3 +19,48 @@ pub use crate::font::faces::ROBOTO_ITALIC_ASCII;
 pub use crate::font::faces::ROBOTO_REGULAR_ASCII;
 #[cfg(all(feature = "font-ofl-texturina", feature = "shaper"))]
 pub use crate::font::faces::TEXTURINA_TTF;
+
+// ── The bundled atlases ─────────────────────────────────────────────────
+//
+// Baked by `libmsdf-bake bundled --out fonts/atlases --hashes` and
+// committed: the fallback of the bundled fonts plan's section 4.10, taken
+// because the build-time bake did not meet switch criterion 2 (CHANGES.md).
+// Each is format 5:0.1.0 with layout and licence tables; never hand-edited
+// (AGENTS.md, "Bundled fonts and atlases").
+
+/// Roboto Regular as the Regular style, one layer (the same bake as
+/// `tests/fixtures/roboto-ascii-48.atlas`).
+#[cfg(feature = "font-apache-roboto-regular")]
+pub const ROBOTO_REGULAR_ATLAS: &[u8] = include_bytes!("../fonts/atlases/roboto-regular-48.atlas");
+/// Roboto Bold baked as a face of its own (Regular style), one layer: its
+/// glyph ids are the face's raw ids, so it pairs with
+/// `TextShaper::new(ROBOTO_BOLD_ASCII)` or `AtlasShaper::new(&atlas,
+/// GlyphStyle::Regular)`.
+#[cfg(feature = "font-apache-roboto-bold")]
+pub const ROBOTO_BOLD_ATLAS: &[u8] = include_bytes!("../fonts/atlases/roboto-bold-48.atlas");
+/// Roboto Italic baked as a face of its own (Regular style), one layer.
+#[cfg(feature = "font-apache-roboto-italic")]
+pub const ROBOTO_ITALIC_ATLAS: &[u8] = include_bytes!("../fonts/atlases/roboto-italic-48.atlas");
+/// Roboto Regular merged with Material Symbols, one layer.
+#[cfg(feature = "font-apache-roboto-msymbols")]
+pub const ROBOTO_MSYMBOLS_ATLAS: &[u8] =
+    include_bytes!("../fonts/atlases/roboto-msymbols-48.atlas");
+/// The merged face with Bold and Italic as style layers (three layers), for
+/// `StyledShaper` and styled `AtlasShaper`s.
+#[cfg(all(
+    feature = "font-apache-roboto-msymbols",
+    feature = "font-apache-roboto-bold",
+    feature = "font-apache-roboto-italic"
+))]
+pub const ROBOTO_MSYMBOLS_STYLED_ATLAS: &[u8] =
+    include_bytes!("../fonts/atlases/roboto-msymbols-styled-48.atlas");
+/// Grenze Gotisch (subset) as the Regular style, one 16-column layer
+/// (800 x 2000 texels).
+#[cfg(feature = "font-ofl-grenze-gotisch")]
+pub const GRENZE_GOTISCH_ATLAS: &[u8] = include_bytes!("../fonts/atlases/grenze-gotisch-48.atlas");
+/// Texturina (subset) as the Regular style, one 16-column layer
+/// (800 x 2000 texels).
+#[cfg(feature = "font-ofl-texturina")]
+pub const TEXTURINA_ATLAS: &[u8] = include_bytes!("../fonts/atlases/texturina-48.atlas");
+
+pub use crate::font::{BUNDLED_ATLAS_GLYPH_SIZE, BUNDLED_ATLAS_PX_RANGE};

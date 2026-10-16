@@ -1,0 +1,6 @@
+Regular Text: 286 of 287 carried, 0 skipped, 1 waived
+  waived: U+017F (long s (U+017F): Texturina has no glyph; archaic)
+Regular Symbols: 55 of 63 carried, 8 skipped, 0 waived
+  skipped: U+2011 U+2012 U+2015 U+201B U+201F U+20B4 U+20BE U+212E
+Regular Math: 49 of 77 carried, 28 skipped, 0 waived
+  skipped: U+207A U+207B U+207C U+207D U+207E U+207F U+208A U+208B U+208C U+208D U+208E U+2153 U+2154 U+2155 U+2156 U+2157 U+2158 U+2159 U+215A U+2205 U+2207 U+2208 U+2209 U+2213 U+2229 U+222A U+2282 U+2283
