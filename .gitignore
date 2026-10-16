@@ -5,9 +5,8 @@ Cargo.lock
 # not an artifact of this repo. Apache-2.0, (c) Google - `FONTS-LICENSE-APACHE.txt`
 # is committed and is what records the provenance.
 #
-# Fetch it to this exact path before re-baking the merged face:
-#   curl -sSL -o 'fonts/MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].ttf' \
-#     'https://github.com/google/material-design-icons/raw/master/variablefont/MaterialSymbolsOutlined%5BFILL%2CGRAD%2Copsz%2Cwght%5D.ttf'
+# `scripts/fetch-upstream-fonts.sh` fetches it, at a pinned commit and
+# SHA-256, to `fonts/upstream/` (ignored below); this older path stays ignored.
 #
 # Uncommitted on purpose: 10.7 MB that only the bake consumes, in a subunit that is
 # meant to stay liftable. `msymbols.py` verifies every already-shipped icon against
@@ -15,9 +14,10 @@ Cargo.lock
 # silently producing a face built half from one build and half from another.
 fonts/MaterialSymbolsOutlined*.ttf
 
-# The upstream OFL faces: BUILD INPUTS to `fonts/ofl_subset.py`, fetched from
-# google/fonts at the commits named in `FONTS-LICENSE-OFL.txt`. Only the
-# subsets (`fonts/*-subset.ttf`) are committed.
+# The upstream faces: BUILD INPUTS to `fonts/*.py`, fetched with SHA-256
+# checks by `scripts/fetch-upstream-fonts.sh` (the OFL faces from google/fonts
+# at the commits named in `FONTS-LICENSE-OFL.txt`). Only the faces made from
+# them (`fonts/*.ttf`) are committed.
 fonts/upstream/
 
 # Bake output: `scripts/bake-atlases.py` writes here and nowhere else, so a
