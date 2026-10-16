@@ -436,19 +436,21 @@ mod tests {
 
     #[test]
     fn the_bundled_faces_shape_as_textshaper_does() {
-        for regular in [
-            crate::font::ROBOTO_REGULAR_ASCII,
-            crate::font::ROBOTO_ASCII_MSYMBOLS,
-        ] {
+        for regular in [crate::font::TEST_FACE, crate::font::TEST_FACE_MSYMBOLS] {
             let text = TextShaper::new(regular.to_vec()).unwrap();
             let atlas = AtlasShaper::from_face(layout(regular, GlyphStyle::Regular));
             for s in STEP4 {
                 assert_eq!(atlas.shape(s), text.shape(s), "regular {s:?}");
             }
         }
-        let styled = StyledShaper::bundled(crate::font::ROBOTO_REGULAR_ASCII.to_vec()).unwrap();
+        let styled = StyledShaper::new(crate::font::TEST_FACE.to_vec())
+            .unwrap()
+            .with_face(GlyphStyle::Bold, crate::font::TEST_FACE_BOLD.to_vec())
+            .unwrap()
+            .with_face(GlyphStyle::Italic, crate::font::TEST_FACE_ITALIC.to_vec())
+            .unwrap();
         for style in [GlyphStyle::Bold, GlyphStyle::Italic] {
-            let face = crate::font::bundled_style_face(style).unwrap();
+            let face = crate::font::test_style_face(style).unwrap();
             let atlas = AtlasShaper::from_face(layout(face, style));
             assert_eq!(atlas.style(), style);
             for s in STEP4 {
@@ -463,7 +465,7 @@ mod tests {
 
     #[test]
     fn the_soft_hyphen_cases_are_what_rustybuzz_does() {
-        let face = crate::font::ROBOTO_REGULAR_ASCII;
+        let face = crate::font::TEST_FACE;
         let atlas = AtlasShaper::from_face(layout(face, GlyphStyle::Regular));
         // f + SHY + i: the fi ligature, then the hidden space glyph, both
         // cluster 0.
@@ -488,11 +490,8 @@ mod tests {
         );
         let mut with = legacy.clone();
         with.layout = Some(
-            AtlasLayout::from_faces(vec![layout(
-                crate::font::ROBOTO_REGULAR_ASCII,
-                GlyphStyle::Regular,
-            )])
-            .unwrap(),
+            AtlasLayout::from_faces(vec![layout(crate::font::TEST_FACE, GlyphStyle::Regular)])
+                .unwrap(),
         );
         assert_eq!(
             AtlasShaper::new(&with, GlyphStyle::Bold).err(),
@@ -508,13 +507,10 @@ mod tests {
         ))
         .unwrap();
         atlas.layout = Some(
-            AtlasLayout::from_faces(vec![layout(
-                crate::font::ROBOTO_REGULAR_ASCII,
-                GlyphStyle::Regular,
-            )])
-            .unwrap(),
+            AtlasLayout::from_faces(vec![layout(crate::font::TEST_FACE, GlyphStyle::Regular)])
+                .unwrap(),
         );
-        let text = TextShaper::new(crate::font::ROBOTO_REGULAR_ASCII.to_vec()).unwrap();
+        let text = TextShaper::new(crate::font::TEST_FACE.to_vec()).unwrap();
         let shaper = AtlasShaper::new(&atlas, GlyphStyle::Regular).unwrap();
         let draw = |run: &ShapedRun| {
             let mut list = crate::DrawList::new();

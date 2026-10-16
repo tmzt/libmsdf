@@ -17,10 +17,13 @@
 
 #![cfg(feature = "shaper")]
 
+mod common;
+use common::faces::{
+    ROBOTO_ASCII_MSYMBOLS, ROBOTO_BOLD_ASCII, ROBOTO_ITALIC_ASCII, ROBOTO_REGULAR_ASCII, style_face,
+};
 use libmsdf::font::{
-    CellKey, FontAtlas, FontAtlasBuilder, GlyphSet, GlyphStyle, MAX_RAW_GLYPH_ID,
-    ROBOTO_ASCII_MSYMBOLS, ROBOTO_BOLD_ASCII, ROBOTO_ITALIC_ASCII, ROBOTO_REGULAR_ASCII,
-    StyledGlyphError, StyledShaper, TEXT_RANGES, TextShaper, atlas_capacity, bundled_style_face,
+    CellKey, FontAtlas, FontAtlasBuilder, GlyphSet, GlyphStyle, MAX_RAW_GLYPH_ID, StyledGlyphError,
+    StyledShaper, TEXT_RANGES, TextShaper, atlas_capacity,
 };
 
 /// The same committed artifact `coverage.rs` reads: the plain face, baked at
@@ -32,7 +35,7 @@ fn atlas() -> FontAtlas {
 }
 
 fn styled_shaper() -> StyledShaper {
-    StyledShaper::bundled(ROBOTO_REGULAR_ASCII.to_vec()).expect("the bundled faces parse")
+    common::faces::styled_shaper(ROBOTO_REGULAR_ASCII)
 }
 
 // ── the faces ───────────────────────────────────────────────────────────
@@ -47,7 +50,7 @@ fn styled_shaper() -> StyledShaper {
 #[test]
 fn every_style_face_covers_the_declared_text_ranges() {
     for &style in GlyphStyle::ALL {
-        let Some(face) = bundled_style_face(style) else {
+        let Some(face) = style_face(style) else {
             continue;
         };
         let shaper = TextShaper::new(face.to_vec()).expect("bundled face parses");
@@ -380,7 +383,7 @@ fn the_shaper_refuses_a_style_it_has_no_face_for() {
             .glyph_id_for_char(GlyphStyle::BoldItalic, 'a')
             .is_err()
     );
-    assert!(bundled_style_face(GlyphStyle::BoldItalic).is_none());
+    assert!(style_face(GlyphStyle::BoldItalic).is_none());
 }
 
 // ── shaping ─────────────────────────────────────────────────────────────

@@ -10,6 +10,8 @@
 
 #![cfg(all(feature = "gpu-tests", feature = "shaper"))]
 
+mod common;
+use common::faces::ROBOTO_REGULAR_ASCII;
 use libmsdf::drawlist::{DrawList, SdfInstance, SdfKind};
 use libmsdf::font::{FontAtlas, TextShaper};
 use libmsdf::gpu::GpuSdfRenderer;
@@ -36,7 +38,7 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 }
 
 fn scene(atlas: &FontAtlas) -> DrawList {
-    let shaper = TextShaper::new(libmsdf::ROBOTO_REGULAR_ASCII.to_vec()).unwrap();
+    let shaper = TextShaper::new(ROBOTO_REGULAR_ASCII.to_vec()).unwrap();
     let mut list = DrawList::new();
 
     // Background card.

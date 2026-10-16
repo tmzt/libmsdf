@@ -17,6 +17,9 @@
 //!   same rule `StyledGlyphError` enforces one axis over, for the same reason.
 //! * **An older file loads, and a newer one is refused cleanly.**
 
+mod common;
+#[cfg(feature = "cpu-bake")]
+use common::faces::{ROBOTO_ASCII_MSYMBOLS, ROBOTO_BOLD_ASCII, ROBOTO_ITALIC_ASCII};
 use libmsdf::font::{
     ATLAS_FORMAT_VERSION, ATLAS_VERSION, ATLAS_VERSION_LAYERED, AtlasFileVersion, AtlasLayer,
     FontAtlas, GlyphEntry, GlyphStyle, LayerNotBaked, MAX_ATLAS_LAYERS,
@@ -221,9 +224,7 @@ fn text_and_the_private_use_area_share_a_layer_at_a_size() {
 #[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
 #[test]
 fn a_style_carries_text_only_and_never_a_second_copy_of_the_icons() {
-    use libmsdf::font::{
-        CellKey, FontAtlasBuilder, GlyphSet, ROBOTO_ASCII_MSYMBOLS, ROBOTO_BOLD_ASCII,
-    };
+    use libmsdf::font::{CellKey, FontAtlasBuilder, GlyphSet};
     let mut b = FontAtlasBuilder::new(ROBOTO_ASCII_MSYMBOLS.to_vec(), 16, 2.0);
     b.add_licence(&[libmsdf::GlyphStyle::Regular], "Apache-2.0", "Roboto")
         .unwrap();
@@ -445,10 +446,7 @@ fn the_layer_stride_has_one_definition() {
 #[cfg(all(feature = "cpu-bake", not(target_arch = "wasm32")))]
 mod baked {
     use super::*;
-    use libmsdf::font::{
-        FontAtlasBuilder, GlyphSet, ROBOTO_ASCII_MSYMBOLS, ROBOTO_BOLD_ASCII, ROBOTO_ITALIC_ASCII,
-        atlas_capacity,
-    };
+    use libmsdf::font::{FontAtlasBuilder, GlyphSet, atlas_capacity};
 
     /// Small cells and a small range: this is a test about LAYERS and cell
     /// placement, not about field quality, and 669 cells of msdfgen at 48px

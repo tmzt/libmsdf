@@ -129,9 +129,21 @@ fn main() {
                 // The bundled face, which is `None` for a style this build
                 // ships nothing for - a missing asset the caller must supply,
                 // never a substitution.
+                // The bundled face needs its font feature
+                // (`font-apache-roboto-bold`, `-italic`).
                 None => libmsdf::bundled_style_face(style)
                     .unwrap_or_else(|| {
-                        panic!("no face is bundled for {style:?} - pass --style {name}=<face.ttf>")
+                        let feature = match style {
+                            libmsdf::GlyphStyle::Bold => "font-apache-roboto-bold",
+                            libmsdf::GlyphStyle::Italic => "font-apache-roboto-italic",
+                            _ => {
+                                panic!("no face is bundled for {style:?} - pass --style {name}=<face.ttf>")
+                            }
+                        };
+                        panic!(
+                            "`--style {name}` without a path needs the `{feature}` feature; pass \
+                             `--style {name}=<face.ttf>`"
+                        )
                     })
                     .to_vec(),
             };
@@ -218,7 +230,13 @@ fn main() {
         (data, args[2].clone())
     } else {
         (
-            libmsdf::ROBOTO_REGULAR_ASCII.to_vec(),
+            // The bundled plain face, read from the repository: this tool
+            // needs no font feature.
+            std::fs::read(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/fonts/Roboto-Regular-ascii.ttf"
+            ))
+            .expect("read fonts/Roboto-Regular-ascii.ttf"),
             "roboto-ascii-48.atlas".to_string(),
         )
     };

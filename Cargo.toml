@@ -39,6 +39,23 @@ cpu-bake = ["shaper", "dep:msdfgen", "dep:ttf-parser-018"]
 #   CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm \
 #     cargo test -p libmsdf --features gpu-tests,cpu-bake
 gpu-tests = []
+# Bundled fonts. Every one is OFF by default. The licence is in the name:
+# enabling one takes on that font's licence (FONTS-LICENSE-*.txt, README.md
+# "Licensing"). With none enabled, the compiled crate contains no font data
+# and is MIT OR Apache-2.0 only. A face's TTF bytes also need `shaper`.
+font-apache-roboto-regular = []
+font-apache-roboto-bold = []
+font-apache-roboto-italic = []
+font-apache-roboto-msymbols = []
+font-ofl-grenze-gotisch = []
+font-ofl-texturina = []
+fonts-apache-roboto = [
+    "font-apache-roboto-regular",
+    "font-apache-roboto-bold",
+    "font-apache-roboto-italic",
+    "font-apache-roboto-msymbols",
+]
+fonts-ofl-ledger = ["font-ofl-grenze-gotisch", "font-ofl-texturina"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 msdfgen = { version = "0.2", default-features = false, features = ["ttf-parser"], optional = true }

@@ -1853,8 +1853,8 @@ mod tests {
     #[cfg(feature = "shaper")]
     #[test]
     fn shaped_text_packs_chars() {
-        let shaper = crate::font::TextShaper::new(crate::font::ROBOTO_REGULAR_ASCII.to_vec())
-            .expect("fixture parses");
+        let shaper =
+            crate::font::TextShaper::new(crate::font::TEST_FACE.to_vec()).expect("fixture parses");
         // Atlas without real pixels: entries only, enough for packing.
         let mut atlas = FontAtlas::empty(64, 64, 3);
         for ch in ['H', 'i'] {
@@ -1997,8 +1997,8 @@ mod tests {
 
     #[cfg(feature = "shaper")]
     fn text_fixture() -> (crate::font::TextShaper, FontAtlas) {
-        let shaper = crate::font::TextShaper::new(crate::font::ROBOTO_REGULAR_ASCII.to_vec())
-            .expect("fixture parses");
+        let shaper =
+            crate::font::TextShaper::new(crate::font::TEST_FACE.to_vec()).expect("fixture parses");
         let mut atlas = FontAtlas::empty(64, 64, 3);
         for ch in ['H', 'i', 'o', 'k'] {
             let gid = shaper.glyph_id_for_char(ch).unwrap();

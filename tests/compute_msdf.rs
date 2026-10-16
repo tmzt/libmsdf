@@ -9,6 +9,8 @@
 
 #![cfg(all(feature = "gpu-tests", feature = "shaper"))]
 
+mod common;
+use common::faces::ROBOTO_REGULAR_ASCII;
 use libmsdf::font::atlas::glyph_projection;
 use libmsdf::font::outline::extract_outline;
 use libmsdf::gpu::MsdfCompute;
@@ -30,7 +32,7 @@ fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
 }
 
 fn roboto_face() -> ttf_parser::Face<'static> {
-    ttf_parser::Face::parse(libmsdf::ROBOTO_REGULAR_ASCII, 0).unwrap()
+    ttf_parser::Face::parse(ROBOTO_REGULAR_ASCII, 0).unwrap()
 }
 
 /// Generate one glyph cell on the GPU, returning tightly packed RGBA rows.
@@ -212,11 +214,8 @@ fn compute_matches_cpu_baseline() {
         return;
     };
 
-    let builder = libmsdf::FontAtlasBuilder::new(
-        libmsdf::ROBOTO_REGULAR_ASCII.to_vec(),
-        CELL,
-        PX_RANGE as f64,
-    );
+    let builder =
+        libmsdf::FontAtlasBuilder::new(ROBOTO_REGULAR_ASCII.to_vec(), CELL, PX_RANGE as f64);
     let face = roboto_face();
 
     for ch in ['A', 'o', 'g', '5', '#'] {

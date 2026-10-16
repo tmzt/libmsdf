@@ -364,7 +364,10 @@ impl StyledShaper {
     }
 
     /// The bundled answer: `regular` plus every style
-    /// [`crate::font::bundled_style_face`] ships a face for.
+    /// [`crate::font::bundled_style_face`] ships a face for - Bold with the
+    /// `font-apache-roboto-bold` feature, Italic with
+    /// `font-apache-roboto-italic`. A style whose feature is off is not
+    /// carried, and shaping it is [`NoFaceForStyle`].
     ///
     /// `regular` is passed in rather than assumed because there are two of them
     /// ([`crate::font::ROBOTO_REGULAR_ASCII`] and
@@ -466,7 +469,7 @@ mod tests {
     // Deterministic fixture: the bundled Roboto ASCII subset (upstream used
     // whatever system font was installed).
     fn roboto() -> Vec<u8> {
-        crate::font::ROBOTO_REGULAR_ASCII.to_vec()
+        crate::font::TEST_FACE.to_vec()
     }
 
     #[test]
@@ -544,7 +547,7 @@ mod uncovered_text_shapes_to_the_placeholder {
     use super::TextShaper;
 
     fn shaper() -> TextShaper {
-        TextShaper::new(crate::font::ROBOTO_REGULAR_ASCII.to_vec()).expect("face parses")
+        TextShaper::new(crate::font::TEST_FACE.to_vec()).expect("face parses")
     }
 
     /// The strings that used to abort a debug build. A user's name is the case

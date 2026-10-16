@@ -1,7 +1,7 @@
 ---
 title: Bundled fonts as optional, licence-named features, baked at build time
 date: 2026-10-16
-status: Draft
+status: In implementation
 covers: >
   Every font face libmsdf bundles (Roboto Regular, Bold, Italic, Roboto
   Regular merged with Material Symbols, and two SIL OFL 1.1 faces, Grenze
@@ -1731,3 +1731,13 @@ stands as written. Coverage groups and missing codepoints are not folded
 into `Head`. The amendment's text carried no open caveat on this point;
 this note records the confirmation, which was asked for when it was
 reported. Nothing else changes.
+
+## Amendment — 2026-10-16 13:55 EDT: implementation started; the document is immutable
+
+The owner approved this plan with its 13:34, 13:40 and 13:42 EDT
+amendments, and the coordinating agent extended the implementing agent's
+scope to it on the owner's approval (2026-10-16). Implementation starts
+with step 1 on the branch `impl/0.4.0`, after the atlas layout tables
+plan's steps 1 to 7, and the status is now `In implementation`. From here
+the document is immutable (Rule 1.5): departures are recorded in
+`CHANGES.md`, and only the owner's explicit instruction changes it.

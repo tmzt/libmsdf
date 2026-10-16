@@ -35,14 +35,16 @@
 
 #![cfg(feature = "shaper")]
 
+mod common;
+use common::faces::{ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII};
 use std::collections::BTreeMap;
 use std::path::Path;
 
 const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
 
 use libmsdf::{
-    FontAtlas, HIGHBAY_ICONS, MARKER_ARROW, MARKERS, MSYMBOLS_ICONS, ROBOTO_ASCII_MSYMBOLS,
-    ROBOTO_REGULAR_ASCII, TextShaper, highbay_codepoint, msymbols_codepoint,
+    FontAtlas, HIGHBAY_ICONS, MARKER_ARROW, MARKERS, MSYMBOLS_ICONS, TextShaper, highbay_codepoint,
+    msymbols_codepoint,
 };
 
 /// The `ICONS = [...]` list out of `fonts/icon.py`, as `(name, codepoint)`.

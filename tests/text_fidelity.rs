@@ -11,6 +11,8 @@
 
 #![cfg(feature = "shaper")]
 
+mod common;
+use common::faces::ROBOTO_REGULAR_ASCII;
 use libmsdf::drawlist::{LINE_BOX_RATIO, screen_px_range};
 use libmsdf::font::{FontAtlas, TextShaper};
 
@@ -89,7 +91,7 @@ fn alpha_column(a: &FontAtlas, gid: u16, cell_col: f32, font_size: f32, line_top
 #[test]
 fn baked_field_is_a_usable_distance_ramp() {
     let a = atlas();
-    let sh = TextShaper::new(libmsdf::ROBOTO_REGULAR_ASCII.to_vec()).unwrap();
+    let sh = TextShaper::new(ROBOTO_REGULAR_ASCII.to_vec()).unwrap();
     let gid = sh.glyph_id_for_char('t').unwrap();
     let e = a.get_glyph(gid).unwrap();
 
@@ -128,7 +130,7 @@ fn baked_field_is_a_usable_distance_ramp() {
 #[test]
 fn thin_crossbar_survives_every_subpixel_phase() {
     let a = atlas();
-    let sh = TextShaper::new(libmsdf::ROBOTO_REGULAR_ASCII.to_vec()).unwrap();
+    let sh = TextShaper::new(ROBOTO_REGULAR_ASCII.to_vec()).unwrap();
     let gid = sh.glyph_id_for_char('t').unwrap();
     let e = a.get_glyph(gid).unwrap();
     let line_h = CLI_FONT_SIZE * LINE_BOX_RATIO;
@@ -172,7 +174,7 @@ fn thin_crossbar_survives_every_subpixel_phase() {
 #[test]
 fn every_glyph_the_shaper_emits_for_ascii_is_baked() {
     let a = atlas();
-    let sh = TextShaper::new(libmsdf::ROBOTO_REGULAR_ASCII.to_vec()).unwrap();
+    let sh = TextShaper::new(ROBOTO_REGULAR_ASCII.to_vec()).unwrap();
     let printable: Vec<char> = (0x20u8..=0x7e).map(|b| b as char).collect();
 
     let mut missing: Vec<(String, u16)> = Vec::new();

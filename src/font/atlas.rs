@@ -2754,7 +2754,7 @@ mod tests {
     use super::*;
 
     fn roboto() -> Vec<u8> {
-        crate::font::ROBOTO_REGULAR_ASCII.to_vec()
+        crate::font::TEST_FACE.to_vec()
     }
 
     /// **The cell IS the line box**, and two constants say so independently.
@@ -3047,7 +3047,7 @@ mod tests {
     #[test]
     fn the_queue_call_order_no_longer_decides_anything() {
         let gid = |ch: char| {
-            ttf_parser::Face::parse(&crate::font::ROBOTO_REGULAR_ASCII, 0)
+            ttf_parser::Face::parse(&crate::font::TEST_FACE, 0)
                 .unwrap()
                 .glyph_index(ch)
                 .unwrap()
@@ -3100,10 +3100,7 @@ mod tests {
     /// font edit produces.
     #[test]
     fn a_later_set_never_moves_an_earlier_sets_cells() {
-        for face_bytes in [
-            crate::font::ROBOTO_REGULAR_ASCII,
-            crate::font::ROBOTO_ASCII_MSYMBOLS,
-        ] {
+        for face_bytes in [crate::font::TEST_FACE, crate::font::TEST_FACE_MSYMBOLS] {
             let next_gid = ttf_parser::Face::parse(face_bytes, 0)
                 .unwrap()
                 .number_of_glyphs();
@@ -3158,7 +3155,7 @@ mod tests {
                     "a cell of set {set:?} sorted after an icon"
                 );
             }
-            if face_bytes == crate::font::ROBOTO_ASCII_MSYMBOLS {
+            if face_bytes == crate::font::TEST_FACE_MSYMBOLS {
                 assert!(
                     !later.is_empty(),
                     "the merged face should have borrowed cells after ours"
@@ -3192,7 +3189,7 @@ mod tests {
         use std::collections::BTreeMap;
 
         let gid = |ch: char| {
-            ttf_parser::Face::parse(&crate::font::ROBOTO_REGULAR_ASCII, 0)
+            ttf_parser::Face::parse(&crate::font::TEST_FACE, 0)
                 .unwrap()
                 .glyph_index(ch)
                 .map(|g| g.0)
@@ -3514,9 +3511,9 @@ mod bake_licences {
 
     #[test]
     fn a_bake_without_a_licence_names_the_style() {
-        let mut b = FontAtlasBuilder::new(crate::font::ROBOTO_REGULAR_ASCII.to_vec(), 16, 2.0);
+        let mut b = FontAtlasBuilder::new(crate::font::TEST_FACE.to_vec(), 16, 2.0);
         b.add_codepoint_range(GlyphSet::Text, 'A', 'C');
-        b.add_styled_coverage(GlyphStyle::Bold, crate::font::ROBOTO_BOLD_ASCII.to_vec())
+        b.add_styled_coverage(GlyphStyle::Bold, crate::font::TEST_FACE_BOLD.to_vec())
             .unwrap();
         b.add_licence(&[GlyphStyle::Regular], "Apache-2.0", "Roboto")
             .unwrap();
@@ -3526,7 +3523,7 @@ mod bake_licences {
 
     #[test]
     fn a_licence_the_face_contradicts_is_refused() {
-        let mut b = FontAtlasBuilder::new(crate::font::ROBOTO_BOLD_ASCII.to_vec(), 16, 2.0);
+        let mut b = FontAtlasBuilder::new(crate::font::TEST_FACE_BOLD.to_vec(), 16, 2.0);
         b.add_codepoint_range(GlyphSet::Text, 'A', 'C');
         b.add_licence(&[GlyphStyle::Regular], "OFL-1.1", "Roboto")
             .unwrap();
@@ -3541,7 +3538,7 @@ mod bake_licences {
 
     #[test]
     fn a_baked_atlas_carries_its_licence_and_layout() {
-        let mut b = FontAtlasBuilder::new(crate::font::ROBOTO_REGULAR_ASCII.to_vec(), 16, 2.0);
+        let mut b = FontAtlasBuilder::new(crate::font::TEST_FACE.to_vec(), 16, 2.0);
         b.add_codepoint_range(GlyphSet::Text, 'A', 'C');
         b.add_licence(&[GlyphStyle::Regular], "Apache-2.0", "Roboto")
             .unwrap();

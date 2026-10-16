@@ -1128,9 +1128,9 @@ mod tests {
     #[test]
     fn the_bundled_roboto_faces_match_fonttools() {
         for face in [
-            crate::font::ROBOTO_REGULAR_ASCII,
-            crate::font::ROBOTO_BOLD_ASCII,
-            crate::font::ROBOTO_ITALIC_ASCII,
+            crate::font::TEST_FACE,
+            crate::font::TEST_FACE_BOLD,
+            crate::font::TEST_FACE_ITALIC,
         ] {
             let l = extract(face);
             assert_eq!(l.features, vec![*b"kern", *b"liga", *b"lnum", *b"pnum"]);
@@ -1185,7 +1185,7 @@ mod tests {
         }
         // Regular's kerning: 434 non-zero pairs, (space, T) and (T, space)
         // among them at -40; the figure forms add none.
-        let face = crate::font::ROBOTO_REGULAR_ASCII;
+        let face = crate::font::TEST_FACE;
         let l = extract(face);
         assert_eq!(l.gpos.len(), 434);
         let (sp, t) = (gid(face, ' ') as u32, gid(face, 'T') as u32);
@@ -1228,7 +1228,7 @@ mod tests {
     /// while the check still passes.
     #[test]
     fn the_coverage_parameter_scopes_the_cmap() {
-        let face = crate::font::ROBOTO_REGULAR_ASCII;
+        let face = crate::font::TEST_FACE;
         let default = extract(face);
         let explicit = FaceLayout::extract_tables(
             face,
@@ -1274,10 +1274,10 @@ mod equivalence {
     #[test]
     fn the_bundled_faces_pass() {
         for (face, style) in [
-            (crate::font::ROBOTO_REGULAR_ASCII, GlyphStyle::Regular),
-            (crate::font::ROBOTO_BOLD_ASCII, GlyphStyle::Bold),
-            (crate::font::ROBOTO_ITALIC_ASCII, GlyphStyle::Italic),
-            (crate::font::ROBOTO_ASCII_MSYMBOLS, GlyphStyle::Regular),
+            (crate::font::TEST_FACE, GlyphStyle::Regular),
+            (crate::font::TEST_FACE_BOLD, GlyphStyle::Bold),
+            (crate::font::TEST_FACE_ITALIC, GlyphStyle::Italic),
+            (crate::font::TEST_FACE_MSYMBOLS, GlyphStyle::Regular),
         ] {
             let opts = LayoutOptions::default();
             let layout = FaceLayout::extract_tables(face, style, &opts).expect("extracts");
@@ -1290,7 +1290,7 @@ mod equivalence {
 
     #[test]
     fn a_corrupted_gpos_value_is_caught() {
-        let face = crate::font::ROBOTO_REGULAR_ASCII;
+        let face = crate::font::TEST_FACE;
         let opts = LayoutOptions::default();
         let mut layout = FaceLayout::extract_tables(face, GlyphStyle::Regular, &opts).unwrap();
         layout.gpos[0].1 += 1;

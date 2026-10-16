@@ -9,12 +9,11 @@
 
 #![cfg(feature = "shaper")]
 
+mod common;
+use common::faces::{ROBOTO_ASCII_MSYMBOLS, ROBOTO_REGULAR_ASCII};
 use libmsdf::DrawList;
 use libmsdf::drawlist::{LINE_BOX_RATIO, X_MARGIN_FRAC};
-use libmsdf::font::{
-    FontAtlas, MARKER_ARROW, MARKERS, MSYMBOLS_ICONS, PRIVATE_USE, ROBOTO_ASCII_MSYMBOLS,
-    ROBOTO_REGULAR_ASCII, TextShaper,
-};
+use libmsdf::font::{FontAtlas, MARKER_ARROW, MARKERS, MSYMBOLS_ICONS, PRIVATE_USE, TextShaper};
 
 const ATLAS_FIXTURE: &[u8] = include_bytes!("fixtures/roboto-ascii-48.atlas");
 const PX_RANGE: f32 = 6.0;

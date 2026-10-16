@@ -20,6 +20,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod bundled;
 pub mod core;
 pub mod drawlist;
 pub mod font;
@@ -31,6 +32,14 @@ pub use crate::core::{
     DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_OUTLINE, DRAW_TYPE_PATH_FILL, DRAW_TYPE_SLAB, DRAW_TYPE_TEXT,
     GpuFont, PARAM_BANK_CAPACITY, RenderFrame, SdfDrawCmd,
 };
+#[cfg(all(feature = "font-apache-roboto-msymbols", feature = "shaper"))]
+pub use bundled::ROBOTO_ASCII_MSYMBOLS;
+#[cfg(all(feature = "font-apache-roboto-bold", feature = "shaper"))]
+pub use bundled::ROBOTO_BOLD_ASCII;
+#[cfg(all(feature = "font-apache-roboto-italic", feature = "shaper"))]
+pub use bundled::ROBOTO_ITALIC_ASCII;
+#[cfg(all(feature = "font-apache-roboto-regular", feature = "shaper"))]
+pub use bundled::ROBOTO_REGULAR_ASCII;
 pub use drawlist::{
     Contour, DrawEffects, DrawList, Elevation, PATH_CUBIC_TOLERANCE, PATH_MAX_SEGMENTS, Path,
     PathBuilder, PathError, PathSegment, SdfFrame, SdfInstance, SdfKind, SdfRotate, rotate_rect,
@@ -42,13 +51,13 @@ pub use font::{
     FALLBACK_BASELINE_FRAC, FALLBACK_MAX_INK_DESCENT_EM, FaceLayout, FontAtlas, GlyphEntry,
     GlyphSet, GlyphStyle, HIGHBAY_ICONS, HIGHBAY_ICONS_BLOCK, LICENCE_REGISTRY, LayerNotBaked,
     LicenceRecord, MARKER_ARROW, MARKERS, MAX_ATLAS_LAYERS, MAX_RAW_GLYPH_ID, MSYMBOLS_ICONS,
-    NoLayout, OWNED_BLOCKS, ROBOTO_ASCII_MSYMBOLS, ROBOTO_BOLD_ASCII, ROBOTO_ITALIC_ASCII,
-    ROBOTO_REGULAR_ASCII, RunShaper, SetMetrics, ShapedRun, StyledGlyphError, TEXT_RANGES,
-    atlas_capacity, bundled_style_face, highbay_codepoint, msymbols_codepoint,
+    NoLayout, OWNED_BLOCKS, RunShaper, SetMetrics, ShapedRun, StyledGlyphError, TEXT_RANGES,
+    atlas_capacity, highbay_codepoint, msymbols_codepoint,
 };
 #[cfg(feature = "shaper")]
 pub use font::{
     FontAtlasBuilder, LayoutError, LayoutOptions, NoFaceForStyle, StyledShaper, TextShaper,
+    bundled_style_face,
 };
 pub use gpu::{BlurPass, GpuSdfRenderer, MsdfCompute, blur_params};
 pub use pane::{PaneGate, PaneMark};
