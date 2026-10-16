@@ -370,3 +370,67 @@ plan already changes:
   Roboto Regular 46,695 strings, Bold 48,469, Italic 48,447,
   Grenze Gotisch 153,766, Texturina 48,291; the slowest single-face check
   took 1.14 s (Grenze), under the 10 s budget.
+
+## 2026-10-16 14:50 EDT — Bundled fonts: steps 1 to 6, the switch to the fallback, and departures
+
+Plan: [Bundled fonts as optional, licence-named features, baked at build time](docs/design/20261016_02_BUNDLED_FONT_FEATURES_PLAN.md)
+(In implementation since `817d24a`). Commits on `impl/0.4.0`: `817d24a` (1),
+`2164d0c` and `c716b49` (2), `50422a7` (3), `508f50d` and `84bc0b8` (4),
+`053e8b3` (5), `b42ac2c` (6), with the script commit `a707cc1`.
+
+**Switch to the fallback (section 4.10).** Criterion 2 failed: the build
+script would run the baker at the default build-override opt-level 0, and
+the baker built at opt-level 0 takes 5 min 28 s (user time) for the seven
+atlases, Grenze Gotisch alone about 220 s, against the 30 s budget for the
+build script's run. Nothing inside the plan's design brings that under 30 s
+at opt-level 0 (the equivalence check over Grenze's ~150,000-string corpus
+dominates). So the atlases are committed under `fonts/atlases/`, made by
+`libmsdf-bake bundled --out fonts/atlases --hashes`, and included from
+there; `build.rs` does not bake and there is no build-time baker
+dependency. A consumer needs no C++ compiler to use the bundled atlases.
+Criteria 3 and 5 could not be measured on Linux from this machine, and the
+`x86_64-unknown-linux-gnu` lines the 13:34 EDT amendment asks for in
+`fonts/bundled.sha256` are not recorded: **open, for the owner** (a Linux
+bake with `libmsdf-bake bundled --hashes`). Evidence: `out/fonts/LOG.md`.
+
+Small departures (Rule 1.7):
+
+- **Step 3, where the TTF constants live.** `bundled_style_face` and
+  `StyledShaper::bundled` live in `libmsdf-font` and must see the TTF
+  constants, which a dependency cannot read from libmsdf. So the six TTF
+  constants are in `libmsdf-font`'s `faces` module behind font features
+  of the same names, which libmsdf's `font-*` features forward; libmsdf's
+  `src/bundled.rs` re-exports them (and holds the atlas constants), and
+  every path the plan names (`libmsdf::ROBOTO_REGULAR_ASCII`,
+  `libmsdf::font::ROBOTO_REGULAR_ASCII`, ...) resolves. `ttf-parser` stays an
+  optional libmsdf dependency under `shaper`, used only by the integration
+  tests, so `cargo tree -p libmsdf --no-default-features` lists none.
+- **Step 3.** The `AtlasShaper` DrawList test moved to
+  `tests/atlas_shaper_draws.rs`, since `DrawList` stays in libmsdf. Unit
+  tests in both crates use `cfg(test)` face constants (`TEST_FACE` and,
+  in `libmsdf-font`, its Bold, Italic and msymbols siblings).
+- **Step 4, one crate per commit.** Split into a `libmsdf-font` commit
+  (`508f50d`) and a libmsdf commit (`84bc0b8`).
+- **Step 4, additions.** `BakeOptions::new`, `Baker::{bundled_options,
+  bake_bundled_report}`, `BundledAtlas::{licences, waivers, is_ofl}`,
+  `bundled::hex_of`, `bake::sha256`, `FontAtlasBuilder::add_styled_face`
+  (registers a style face without queueing coverage, for coverage groups),
+  and `FontAtlasBuilder::columns`. All additive.
+- **Step 4, `CVRG` on read.** "Every codepoint in `Cmap` lies in a
+  declared range" exempts the C0/C1 control codepoints, which the `Cmap`
+  carries by the atlas layout tables plan's section 4.6 whatever the
+  coverage.
+- **13:40 EDT amendment, MATH count.** Its MATH list has 77 codepoints, not
+  78 (the 411-codepoint union is consistent with 77); the carried MATH
+  counts are therefore Grenze 47 and Texturina 49, with exactly the missing
+  codepoints the amendment lists.
+- **Step 2.** The upstream OFL files come from google/fonts at
+  `98931f43a8dc` (Grenze Gotisch) and `f4a8ff8c122a` (Texturina), named in
+  `FONTS-LICENSE-OFL.txt`; their sha256 equal section 3.1's. The check that
+  each subset shapes the full set exactly as its upstream file was a one-off
+  test (the upstream files are not committed), logged in `out/fonts/LOG.md`.
+- **Step 4, the game's v3 atlases.** Matched by glyph name, every old cell
+  present in the new atlas has identical texels; five old cells are Private
+  Use Area glyphs the subset drops (Grenze `ijacute`, `IJacute.ss01`;
+  Texturina `uniE0FF`, `uniEFFD`, `uniF000`), which the game's text never
+  reaches.
