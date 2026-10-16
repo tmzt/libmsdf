@@ -434,3 +434,15 @@ Small departures (Rule 1.7):
   Use Area glyphs the subset drops (Grenze `ijacute`, `IJacute.ss01`;
   Texturina `uniE0FF`, `uniEFFD`, `uniF000`), which the game's text never
   reaches.
+
+## 2026-10-16 14:50 EDT — AGENTS.md: bundled fonts and atlases
+
+Plan: [Bundled fonts as optional, licence-named features, baked at build time](docs/design/20261016_02_BUNDLED_FONT_FEATURES_PLAN.md),
+step 7. AGENTS.md gains the section `## Bundled fonts and atlases` (after
+Rule 5, not a numbered critical rule) in its fallback form, since step 6
+switched to the fallback: bundled atlases are produced only by
+`libmsdf-bake bundled --out fonts/atlases --hashes` and never edited,
+copied in or substituted; changing a face, the bundled table or the baker
+means re-baking, verifying (`--check fonts/atlases`, the `bundled_fonts`
+test) and committing `fonts/atlases/` with `fonts/bundled.sha256`, the
+latter only with the owner's agreement when the bytes change.
