@@ -15,6 +15,24 @@ msdfgen baseline, dynamic atlas management, cubic-Bézier arc strokes, and the
 `DrawList` render contract. Native + wasm32 (WebGPU) compile-clean; GPU tests run
 headless on Metal. See `Cargo.toml` for the `cpu-bake` / `gpu-tests` feature notes.
 
+## Drawing into a DrawList
+
+`libmsdf::Render` is the one shared name for something that draws itself
+into a `DrawList`: `render_into(&self, out)` appends its drawing (never
+clearing), and `render_mut(&mut self, out)` is the same for a renderer that
+settles state as it draws. There is no context and no clip: a renderer
+holds what it draws with, and a caller clips around the call. A kept
+`DrawList` is itself a `Render`, appended at top level.
+
+```rust
+struct Underline { from: [f32; 2], to: [f32; 2] }
+impl libmsdf::Render for Underline {
+    fn render_into(&self, out: &mut libmsdf::drawlist::DrawList) {
+        out.push_line(self.from, self.to, 2.0, [1.0; 4]);
+    }
+}
+```
+
 ## Licensing
 
 Licensed under either of
