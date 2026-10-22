@@ -1,6 +1,6 @@
 [package]
 name = "libmsdf-font"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 description = "libmsdf's font half: MSDF atlases, layout tables, shaping and baking, without wgpu"
 license = "MIT OR Apache-2.0"

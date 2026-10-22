@@ -160,3 +160,28 @@ commit is the one tagged `v0.4.1`. No dependency changed version.
   `render_mut(&mut self, out: &mut DrawList)` (by default `render_into`);
   the module `libmsdf::drawlist::render`; `impl Render for DrawList`
   (appending with `append_from`).
+
+## 0.4.2 — 2026-10-21 (tag `v0.4.2`)
+
+Several atlases in one draw list, cached in the renderer
+(`docs/design/20261021_03_ATLAS_SET_PLAN.md`). Strictly additive, so a
+patch release (Rule 5.4). `libmsdf` and `libmsdf-font` stay in lockstep:
+both are 0.4.2 and both are covered by this entry and this tag, though
+`libmsdf-font` itself is unchanged. The commit is the one tagged `v0.4.2`.
+No dependency changed version.
+
+- Added: the module `libmsdf::drawlist::atlas_set`, with `AtlasSet`
+  (`new`, `number`, `register`, `atlas`, `len`, `is_empty`, `extent`,
+  `layers`, `glyphs`, `table_bases`, `layer_bases`, `glyph_table_u32s`,
+  `to_rgba_bytes`; `Default`), `AtlasId` (`set`, `index`), `AtlasRef`
+  (`id`, `atlas`; `Deref<Target = FontAtlas>`; `shaper(style)`),
+  `AtlasSetError` (`TooManyLayers`, `TooManyGlyphs`, `Full`; `Display`,
+  `Error`) and `MAX_SET_GLYPHS`, re-exported from `libmsdf::drawlist`;
+  `AtlasId`, `AtlasRef`, `AtlasSet` and `AtlasSetError` also at the root.
+- Added: `DrawList::push_shaped_text_with`, `DrawList::push_icon_with`,
+  `DrawList::instance_atlas`, `DrawList::lower_with`.
+- Added: `GpuSdfRenderer::new_with_atlas_set`,
+  `GpuSdfRenderer::upload_atlas_set`, `GpuSdfRenderer::render_draw_list_in`.
+- Unchanged for existing callers: `DrawList::lower` lowers a list of plain
+  calls exactly as before. It now debug-asserts that no text was pushed
+  from a set's handle; lists that use no set never reach that assertion.
