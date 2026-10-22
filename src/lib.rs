@@ -92,8 +92,9 @@ pub use bundled::TEXTURINA_ATLAS;
 pub use bundled::TEXTURINA_TTF;
 pub use bundled::{BUNDLED_ATLAS_GLYPH_SIZE, BUNDLED_ATLAS_PX_RANGE};
 pub use drawlist::{
-    Contour, DrawEffects, DrawList, Elevation, PATH_CUBIC_TOLERANCE, PATH_MAX_SEGMENTS, Path,
-    PathBuilder, PathError, PathSegment, SdfFrame, SdfInstance, SdfKind, SdfRotate, rotate_rect,
+    AtlasId, AtlasRef, AtlasSet, AtlasSetError, Contour, DrawEffects, DrawList, Elevation,
+    PATH_CUBIC_TOLERANCE, PATH_MAX_SEGMENTS, Path, PathBuilder, PathError, PathSegment, SdfFrame,
+    SdfInstance, SdfKind, SdfRotate, rotate_rect,
 };
 pub use font::{
     ATLAS_COLS, ATLAS_FILE_MAJOR, ATLAS_FORMAT_VERSION, ATLAS_HEADER_SIZE, ATLAS_HEADER_SIZE_V5,

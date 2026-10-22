@@ -10,10 +10,12 @@
 //! author) away from the mtd1 container toward the Phase-7 node-graph:
 //! highbay_ui's layout pass emits a `DrawList` per frame.
 
+pub mod atlas_set;
 pub mod path;
 pub mod render;
 pub mod stream;
 
+pub use atlas_set::{AtlasId, AtlasRef, AtlasSet, AtlasSetError, MAX_SET_GLYPHS};
 pub use path::{
     Contour, GpuPathSegment, PATH_CUBIC_TOLERANCE, PATH_LINE_DEMOTE, PATH_MAX_QUADS_PER_CUBIC,
     PATH_MAX_SEGMENTS, Path, PathBuilder, PathError, PathSegment,

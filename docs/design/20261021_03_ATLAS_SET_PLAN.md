@@ -1,7 +1,7 @@
 ---
 title: Several atlases in one draw list, cached in the renderer
 date: 2026-10-21
-status: Draft
+status: In implementation
 covers: >
   An `AtlasSet` that holds several `FontAtlas`es under small ids and lays
   them out as one texture array and one glyph table; a scoped
@@ -464,3 +464,26 @@ per padded layer. Section 3's padding stands as written. Open question 2
 shader to save memory only in that mixed case.
 
 Open question 3 stands.
+
+## Amendment — 2026-10-21 23:29 EDT: approved, with the shaping helper; implementation started
+
+The owner approved this plan with its amendments ("approve the atlas set
+plan and push 0.4.2, add the helper"). Open question 3 is answered: add the
+helper. It goes on the handle, since a handle is what a caller holds:
+
+```rust
+impl AtlasRef<'_> {
+    /// `AtlasShaper::new(self.atlas, style)`: a shaper over this atlas's
+    /// layout tables, for runs to push with `push_shaped_text_with`.
+    pub fn shaper(&self, style: GlyphStyle) -> Result<AtlasShaper, NoLayout>;
+}
+```
+
+`AtlasShaper` owns a copy of its face's tables and borrows nothing, so the
+shaper outlives the handle. It is tested with the set: a shaper from a
+handle shapes a run exactly as `AtlasShaper::new` over the same atlas
+does. It is added in step 1 with the set.
+
+Implementation starts with step 1 in the commit that adds this amendment:
+the status is In implementation, and the document is now immutable. It
+changes only on the owner's explicit instruction.
