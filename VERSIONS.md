@@ -146,3 +146,17 @@ refuse every file this one writes.
   `bake_bundled`, `bake_bundled_report`, `bundled_options`; `BakeOptions`,
   `LicenceSpec`, `BakeError`, `BakeReport`, `FaceReport`, `GroupReport`,
   `sha256`), and the `libmsdf-bake` binary of `libmsdf-font`.
+
+## 0.4.1 — 2026-10-21 (tag `v0.4.1`)
+
+A minimal Render trait (`docs/design/20261021_02_RENDER_TRAIT_PLAN.md`).
+Strictly additive, so a patch release (Rule 5.4). `libmsdf` and
+`libmsdf-font` stay in lockstep: both are 0.4.1 and both are covered by
+this entry and this tag, though `libmsdf-font` itself is unchanged. The
+commit is the one tagged `v0.4.1`. No dependency changed version.
+
+- Added: `libmsdf::drawlist::Render` (re-exported as `libmsdf::Render`),
+  with `render_into(&self, out: &mut DrawList)` and
+  `render_mut(&mut self, out: &mut DrawList)` (by default `render_into`);
+  the module `libmsdf::drawlist::render`; `impl Render for DrawList`
+  (appending with `append_from`).
