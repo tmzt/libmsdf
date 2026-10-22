@@ -1,7 +1,7 @@
 ---
 title: A minimal Render trait
 date: 2026-10-21
-status: In implementation
+status: Implemented
 covers: >
   One small public trait, `Render`, for anything that draws itself into a
   `DrawList`: `render_into(&self, out)` appends its drawing, and
@@ -138,3 +138,14 @@ The owner approved this plan ("approve libmsdf plan and push 0.4.1").
 Implementation starts with step 1 in the commit that adds this amendment:
 the status is In implementation, and the document is now immutable. It
 changes only on the owner's explicit instruction.
+
+## Amendment — 2026-10-21 22:41 EDT: implemented
+
+Every step is done and its Done when holds; the status is Implemented.
+
+- Step 1, the trait: 4b11d81 (`src/drawlist/render.rs`, the re-exports,
+  `impl Render for DrawList`, tests/render.rs, all six passing; the full
+  suite and the doc example pass, and clippy adds no warnings) and 69622c0
+  (the README paragraph).
+- Step 2, the release: 876121e, `libmsdf` and `libmsdf-font` at 0.4.1 in
+  lockstep, the `VERSIONS.md` entry, and the tag `v0.4.1`.
