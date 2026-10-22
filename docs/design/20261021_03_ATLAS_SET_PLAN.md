@@ -415,3 +415,52 @@ existing changed), so 0.4.2.
 **Open questions:** question 1 (a 0.5.0 with an id on `FontAtlas`) is
 withdrawn, since handles tag glyphs without a breaking change. Questions 2
 and 3 stand.
+
+## Amendment — 2026-10-21 23:26 EDT: no panics in release; standard atlas sizes
+
+On the owner's agreement, after two questions: "does lower_with normally
+panic?" and "the atlas is based on sorting, what's the issue with the atlas
+size?". Where this amendment and the text above disagree, this amendment
+wins.
+
+**1. `lower_with` never panics in release.** Lowering in libmsdf does not
+panic in release builds. `lower` uses `debug_assert!` for programmer
+errors (unclosed scopes, vectors out of step), drops filled paths it cannot
+fit with a `log::warn!` count, and the shader skips a glyph whose layer is
+missing rather than draw the wrong one. `lower_with` follows the same
+pattern. This replaces section 4.2's "An id the set does not hold panics",
+the previous amendment's "`lower_with(&set)` checks the set, in release
+builds too … It panics on any `MsdfText` instance whose id is neither the
+default nor one of `set.number()`'s", and its "Panics on an id of another
+set" on `AtlasSet::atlas`:
+- **A text instance with a foreign id** (another set's number, or an index
+  this set did not hand out):
+  - debug builds: a `debug_assert!` naming the instance, its id and the
+    set's number;
+  - release builds: the instance is left out of the frame and draws
+    nothing. The count goes to one `log::warn!` per lowering, as
+    `paths_dropped` does. Every other instance lowers as it would have.
+- **`AtlasSet::atlas(id) -> Option<AtlasRef<'_>>`:** `None` for an id of
+  another set or one this set did not hand out.
+- **Tests,** replacing "`lower_with` panics on text from another set's
+  handle" and "`set.atlas(id)` of another set's id panics":
+  - debug builds: lowering text from another set's handle panics
+    (`#[should_panic]`, `#[cfg(debug_assertions)]`);
+  - release builds (`#[cfg(not(debug_assertions))]`): that instance is
+    missing from the frame, and every other draw, the chars of the other
+    instances and the params equal the frame without it;
+  - `set.atlas` of another set's id, or of an index past the set's end, is
+    `None`.
+
+**2. Atlas sizes: padding to the widest is the design.** The baker places
+uniform cells on a fixed grid, so atlases come in standard sizes. The
+bundled 48 px atlases are 400 x 2000 (8 columns: Roboto Regular, Bold,
+Italic, Roboto with Material Symbols, plain and styled) or 800 x 2000 (16
+columns: Grenze Gotisch, Texturina), and Bubble Pop's Fredoka SemiBold 48
+is 400 x 2000. A set of same-width atlases needs no padding. A set mixing 8-
+and 16-column atlases pads each 400-wide layer to 800, about 3.2 MB of RGBA8
+per padded layer. Section 3's padding stands as written. Open question 2
+(a per-layer size read by the shader) is closed: it would change the
+shader to save memory only in that mixed case.
+
+Open question 3 stands.
