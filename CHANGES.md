@@ -491,3 +491,17 @@ owner's instruction, from Bubble Pop's session.
 - **Why not libcontrols:** it is not used, so applications are not tied to
   its theme, router or modal stack.
 - **Release:** strictly additive, so it ships as 0.4.1.
+
+## 2026-10-21 22:24 EDT — Plan: a minimal Render trait; the components plan superseded
+
+New plan, docs/design/20261021_02_RENDER_TRAIT_PLAN.md (Draft, a1b9ca9), on the
+owner's decision, superseding docs/design/20261021_01_COMPONENTS_PLAN.md
+before any of it was built.
+- **The trait:** `Render`, with `render_into(&self, out)` to append a
+  drawing and `render_mut(&mut self, out)` for renderers that settle
+  state as they draw (by default `render_into`). It has no context and no
+  clip.
+- **For `DrawList`:** it is implemented by appending, at top level only.
+- **Release:** strictly additive, so 0.4.1.
+- **Not in libmsdf:** components, hit testing, bounds, overlays, gating
+  wrappers and atlases by role.
