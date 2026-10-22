@@ -184,3 +184,195 @@ fn a_handle_derefs_to_its_atlas_and_shapes_as_the_atlas_does() {
         .shape("Bubble Pop");
     assert_eq!(ours, direct);
 }
+
+// ── the list ────────────────────────────────────────────────────────────
+
+use libmsdf::{DrawList, SdfInstance, SdfKind};
+
+const WHITE: [f32; 4] = [1.0; 4];
+
+/// A set of the symbols atlas (index 0) and Roboto (index 1).
+fn two() -> (AtlasSet, AtlasId, AtlasId) {
+    let mut set = AtlasSet::new();
+    let sym = set.register(msymbols()).unwrap();
+    let text = set.register(roboto()).unwrap();
+    (set, sym, text)
+}
+
+/// A one-glyph run of the symbols atlas's last cell (an icon), addressed by
+/// glyph id: the layout tables map text only.
+fn icon_run(atlas: &FontAtlas) -> libmsdf::ShapedRun {
+    let glyph_id = atlas.glyphs.last().expect("the atlas has cells").glyph_id;
+    libmsdf::ShapedRun {
+        glyphs: vec![libmsdf::font::ShapedGlyph {
+            glyph_id,
+            x_advance: 2048,
+            x_offset: 0,
+            y_offset: 0,
+            cluster: 0,
+        }],
+        total_advance: 2048,
+        units_per_em: 2048,
+    }
+}
+
+/// Text from Roboto, a check icon from the symbols atlas, a panel, then more
+/// Roboto: all through handles.
+fn mixed(set: &AtlasSet, sym: AtlasId, text: AtlasId) -> DrawList {
+    let (sym, text) = (set.atlas(sym).unwrap(), set.atlas(text).unwrap());
+    let roboto = text.shaper(GlyphStyle::Regular).unwrap();
+    let mut list = DrawList::new();
+    list.push_shaped_text_with(&roboto.shape("Name"), text, [10.0, 10.0], 24.0, 4.0, WHITE);
+    let icon = list.push_icon_with(
+        &icon_run(&sym),
+        sym,
+        [100.0, 10.0],
+        [32.0, 32.0],
+        32.0,
+        4.0,
+        WHITE,
+    );
+    assert!(icon.is_some(), "the icon drew");
+    list.push(SdfInstance {
+        kind: SdfKind::Box,
+        position: [0.0, 0.0],
+        size: [5.0, 5.0],
+        color: WHITE,
+        anim: 0,
+    });
+    list.push_shaped_text_with(&roboto.shape("fish"), text, [10.0, 50.0], 24.0, 4.0, WHITE);
+    list
+}
+
+#[test]
+fn the_handle_calls_record_their_atlas_and_everything_else_the_default() {
+    let (set, sym, text) = two();
+    let list = mixed(&set, sym, text);
+    let ids: Vec<AtlasId> = (0..4).map(|i| list.instance_atlas(i)).collect();
+    assert_eq!(ids, [text, sym, AtlasId::default(), text]);
+    assert_eq!(list.instance_atlas(99), AtlasId::default(), "past the end");
+
+    // The plain calls record the default.
+    let mut plain = DrawList::new();
+    let atlas = roboto();
+    let run = libmsdf::AtlasShaper::new(&atlas, GlyphStyle::Regular)
+        .unwrap()
+        .shape("Name");
+    plain.push_shaped_text(&run, &atlas, [0.0, 0.0], 24.0, 4.0, WHITE);
+    assert_eq!(plain.instance_atlas(0), AtlasId::default());
+
+    // A handle call draws exactly what the plain call draws.
+    let mut with = DrawList::new();
+    with.push_shaped_text_with(&run, set.atlas(text).unwrap(), [0.0, 0.0], 24.0, 4.0, WHITE);
+    assert_eq!(with.instances, plain.instances);
+    assert_eq!(with.chars(), plain.chars());
+}
+
+#[test]
+fn append_from_keeps_the_sources_atlases() {
+    let (set, sym, text) = two();
+    let kept = mixed(&set, sym, text);
+    let mut list = DrawList::new();
+    list.push(SdfInstance {
+        kind: SdfKind::Box,
+        position: [0.0, 0.0],
+        size: [1.0, 1.0],
+        color: WHITE,
+        anim: 0,
+    });
+    list.append_from(&kept);
+    let ids: Vec<AtlasId> = (0..5).map(|i| list.instance_atlas(i)).collect();
+    assert_eq!(
+        ids,
+        [AtlasId::default(), text, sym, AtlasId::default(), text]
+    );
+    list.clear();
+    assert_eq!(list.instance_atlas(0), AtlasId::default());
+}
+
+#[test]
+fn lower_with_moves_each_atlases_glyphs_to_its_place_in_the_table() {
+    let (set, sym, text) = two();
+    let list = mixed(&set, sym, text);
+    let frame = list.lower_with(&set);
+    let base = set.table_bases()[1];
+    assert!(base > 0, "Roboto follows the symbols atlas");
+    // The first and last instances are Roboto's; the second is the icon,
+    // from the symbols atlas at base 0.
+    let ranges: Vec<(usize, usize, AtlasId)> = list
+        .instances
+        .iter()
+        .enumerate()
+        .filter_map(|(i, inst)| match inst.kind {
+            SdfKind::MsdfText {
+                char_start,
+                char_count,
+                ..
+            } => Some((
+                char_start as usize,
+                (char_start + char_count) as usize,
+                list.instance_atlas(i),
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ranges.len(), 3);
+    for (start, end, id) in ranges {
+        let add = if id == text { base } else { 0 };
+        for i in start..end {
+            let (was, now) = (list.chars()[i], frame.char_buffer[i]);
+            assert_eq!(now >> 16, (was >> 16) + add, "the glyph index");
+            assert_eq!(now & 0xFFFF, was & 0xFFFF, "the advance delta");
+        }
+    }
+    assert_eq!(frame.draws.len(), 4, "every instance is drawn");
+}
+
+#[test]
+fn a_list_of_plain_calls_lowers_with_a_set_exactly_as_with_lower() {
+    let atlas = roboto();
+    let run = libmsdf::AtlasShaper::new(&atlas, GlyphStyle::Regular)
+        .unwrap()
+        .shape("Bubble Pop");
+    let mut list = DrawList::new();
+    list.push_shaped_text(&run, &atlas, [3.0, 4.0], 20.0, 4.0, WHITE);
+    list.push_line([0.0, 0.0], [9.0, 9.0], 2.0, WHITE);
+    let mut set = AtlasSet::new();
+    set.register(roboto()).unwrap();
+    let (a, b) = (list.lower(), list.lower_with(&set));
+    assert_eq!(a.char_buffer, b.char_buffer);
+    assert_eq!(a.param_bank, b.param_bank);
+    assert_eq!(a.draws.len(), b.draws.len());
+    for (x, y) in a.draws.iter().zip(&b.draws) {
+        assert_eq!(format!("{x:?}"), format!("{y:?}"));
+    }
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "lower_with(&set)")]
+fn lower_refuses_text_from_a_handle_in_debug() {
+    let (set, sym, text) = two();
+    mixed(&set, sym, text).lower();
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "did not hand out")]
+fn lowering_against_another_set_panics_in_debug() {
+    let (set, sym, text) = two();
+    let (other, _, _) = two();
+    mixed(&set, sym, text).lower_with(&other);
+}
+
+#[cfg(not(debug_assertions))]
+#[test]
+fn lowering_against_another_set_drops_that_text_in_release() {
+    let (set, sym, text) = two();
+    let (other, _, _) = two();
+    let list = mixed(&set, sym, text);
+    let frame = list.lower_with(&other);
+    // Only the panel is this set's (default id); the three runs are not.
+    assert_eq!(frame.draws.len(), 1);
+    assert_eq!(frame.char_buffer, list.chars(), "nothing rewritten");
+}

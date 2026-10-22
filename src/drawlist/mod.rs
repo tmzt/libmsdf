@@ -483,6 +483,15 @@ pub struct DrawList {
     /// (and a side channel for the same reason — see `instance_transforms`).
     /// [`ClipRect::UNBOUNDED`] when nothing was clipping.
     instance_clips: Vec<ClipRect>,
+    /// The atlas each instance's glyphs come from, parallel to `instances`
+    /// like the other side channels: [`AtlasId::default()`] unless it was
+    /// pushed from a set's handle ([`DrawList::push_shaped_text_with`]).
+    /// Read by [`DrawList::lower_with`] for `MsdfText` instances only.
+    instance_atlas: Vec<AtlasId>,
+    /// The id [`DrawList::push`] records: set by the handle calls for the
+    /// length of one push, and the default otherwise. Not a scope - nothing
+    /// a caller opens or closes.
+    pending_atlas: AtlasId,
 }
 
 impl DrawList {
@@ -502,6 +511,8 @@ impl DrawList {
         self.instance_effects.clear();
         self.active_clips.clear();
         self.instance_clips.clear();
+        self.instance_atlas.clear();
+        self.pending_atlas = AtlasId::default();
     }
 
     pub fn is_empty(&self) -> bool {
@@ -536,7 +547,16 @@ impl DrawList {
         self.instance_effects
             .push(self.active_effects.last().copied().unwrap_or_default());
         self.instance_clips.push(self.active_clip());
+        self.instance_atlas.push(self.pending_atlas);
         self.instances.push(instance);
+    }
+
+    /// The atlas instance `index` was pushed from: the handle's id for text
+    /// pushed with [`DrawList::push_shaped_text_with`] or
+    /// [`DrawList::push_icon_with`], and [`AtlasId::default()`] for
+    /// everything else (or past the end).
+    pub fn instance_atlas(&self, index: usize) -> AtlasId {
+        self.instance_atlas.get(index).copied().unwrap_or_default()
     }
 
     /// The scissor in force right now — what an instance pushed at this moment
@@ -712,6 +732,7 @@ impl DrawList {
         self.instance_effects
             .extend_from_slice(&other.instance_effects);
         self.instance_clips.extend_from_slice(&other.instance_clips);
+        self.instance_atlas.extend_from_slice(&other.instance_atlas);
     }
 
     /// The third thing a translated instance's geometry lives in: the rotation
@@ -1146,6 +1167,24 @@ impl DrawList {
         total_advance
     }
 
+    /// [`DrawList::push_shaped_text`] from an atlas in an [`AtlasSet`]: the
+    /// same drawing, with the handle's id recorded on the instance, so
+    /// [`DrawList::lower_with`] draws it from that atlas's cells.
+    pub fn push_shaped_text_with(
+        &mut self,
+        run: &ShapedRun,
+        atlas: AtlasRef<'_>,
+        pos: [f32; 2],
+        font_size: f32,
+        px_range: f32,
+        color: [f32; 4],
+    ) -> f32 {
+        self.pending_atlas = atlas.id;
+        let width = self.push_shaped_text(run, atlas.atlas, pos, font_size, px_range, color);
+        self.pending_atlas = AtlasId::default();
+        width
+    }
+
     /// **Draw an edge marker — an arrowhead, a cardinality adornment — with
     /// its point pinned to `anchor` and its axis along `angle_rad`**, and
     /// return the axis-aligned bound of what was drawn.
@@ -1323,10 +1362,104 @@ impl DrawList {
         Some(pos)
     }
 
+    /// [`DrawList::push_icon`] from an atlas in an [`AtlasSet`], with the
+    /// handle's id recorded on the instance, as
+    /// [`DrawList::push_shaped_text_with`] does.
+    #[allow(clippy::too_many_arguments)]
+    pub fn push_icon_with(
+        &mut self,
+        run: &ShapedRun,
+        atlas: AtlasRef<'_>,
+        rect_pos: [f32; 2],
+        rect_size: [f32; 2],
+        em: f32,
+        px_range: f32,
+        color: [f32; 4],
+    ) -> Option<[f32; 2]> {
+        self.pending_atlas = atlas.id;
+        let pos = self.push_icon(run, atlas.atlas, rect_pos, rect_size, em, px_range, color);
+        self.pending_atlas = AtlasId::default();
+        pos
+    }
+
     /// Lower to the GPU wire format: one `SdfDrawCmd` per instance, plus
     /// the packed char buffer and the aux param bank (Bézier controls, and
     /// the `SdfRotate` transform bank — see below).
+    ///
+    /// A list with text pushed from a set's handle is lowered with
+    /// [`DrawList::lower_with`]: lowered here, that text would draw from the
+    /// wrong cells.
     pub fn lower(&self) -> SdfFrame {
+        debug_assert!(
+            self.instance_atlas
+                .iter()
+                .all(|&id| id == AtlasId::default()),
+            "DrawList::lower called on a list with text pushed from an AtlasSet's handle — \
+             lower it with lower_with(&set), or its glyphs index the wrong atlas",
+        );
+        self.lower_frame(self.chars.clone(), &[])
+    }
+
+    /// [`DrawList::lower`] against an [`AtlasSet`]: each `MsdfText`
+    /// instance's glyph indices are moved up by its atlas's first entry in
+    /// the set's merged glyph table. The draws, params and draw order are
+    /// what `lower` gives.
+    ///
+    /// **Text from another set is left out, never drawn from the wrong
+    /// cells.** An instance whose id is neither the default nor one this
+    /// set handed out is a `debug_assert!` in debug builds, and in release
+    /// is dropped from the frame and counted in one `log::warn!`, as filled
+    /// paths that do not fit are. Every other instance lowers as it would
+    /// have.
+    pub fn lower_with(&self, set: &AtlasSet) -> SdfFrame {
+        let mut chars = self.chars.clone();
+        let mut dropped = vec![false; self.instances.len()];
+        let mut foreign = 0usize;
+        for (index, (inst, &id)) in self.instances.iter().zip(&self.instance_atlas).enumerate() {
+            let SdfKind::MsdfText {
+                char_start,
+                char_count,
+                ..
+            } = inst.kind
+            else {
+                continue;
+            };
+            debug_assert!(
+                set.slot(id).is_some(),
+                "DrawList::lower_with: text instance {index} was pushed from atlas {id:?}, \
+                 which set {} (of {} atlases) did not hand out",
+                set.number(),
+                set.len(),
+            );
+            let Some(slot) = set.slot(id) else {
+                dropped[index] = true;
+                foreign += 1;
+                continue;
+            };
+            let base = set.table_bases()[slot];
+            if base == 0 {
+                continue;
+            }
+            let range = char_start as usize..(char_start + char_count) as usize;
+            for c in &mut chars[range] {
+                // `register` keeps every index under 16 bits.
+                *c = (((*c >> 16) + base) << 16) | (*c & 0xFFFF);
+            }
+        }
+        if foreign > 0 {
+            log::warn!(
+                "[sdf] lower_with: {foreign} text instance(s) from another atlas set dropped \
+                 (this set is {})",
+                set.number()
+            );
+        }
+        self.lower_frame(chars, &dropped)
+    }
+
+    /// The lowering both [`DrawList::lower`] and [`DrawList::lower_with`]
+    /// share, over a char buffer they prepared, leaving out the instances
+    /// `dropped` marks (none, when it is empty).
+    fn lower_frame(&self, char_buffer: Vec<u32>, dropped: &[bool]) -> SdfFrame {
         debug_assert!(
             self.active_transform.is_empty(),
             "DrawList::lower called with {} unclosed push_rotate scope(s) — every \
@@ -1378,14 +1511,18 @@ impl DrawList {
             "instances and instance_clips are always pushed together in DrawList::push"
         );
 
-        for ((((inst, &transform), &elevation), &effects), &clip) in self
+        for (index, ((((inst, &transform), &elevation), &effects), &clip)) in self
             .instances
             .iter()
             .zip(&self.instance_transforms)
             .zip(&self.instance_elevation)
             .zip(&self.instance_effects)
             .zip(&self.instance_clips)
+            .enumerate()
         {
+            if dropped.get(index).copied().unwrap_or(false) {
+                continue;
+            }
             let anim = inst.anim as f32;
             let (pos, size, params) = match inst.kind {
                 SdfKind::Box => (inst.position, inst.size, [DRAW_TYPE_BOX, 0.0, anim, 0.0]),
@@ -1522,7 +1659,7 @@ impl DrawList {
 
         SdfFrame {
             draws,
-            char_buffer: self.chars.clone(),
+            char_buffer,
             param_bank,
         }
     }
