@@ -228,3 +228,27 @@ so under Rule 5.4 it releases as **0.4.1**, tagged `v0.4.1`, with its
    out?
 3. Bubble Pop as the first consumer: port its name-entry keyboard and the
    store's cards to components as a follow-up in that repo?
+
+## Amendment — 2026-10-21 22:24 EDT: superseded by a minimal Render trait
+
+On the owner's decision ("just the minimal Render trait in libmsdf with
+render_into and render_mut"), after weighing whether a complete component
+trait belongs in libmsdf (it does not: hit testing, bounds, overlays,
+update ticks and atlases by role are UI hosting, not rendering), this plan
+is superseded by docs/design/20261021_02_RENDER_TRAIT_PLAN.md. Nothing in
+it was implemented. This amendment belongs with the status change made in
+a1b9ca9: it was left out of that commit by a scripting error and is
+appended in the next.
+
+Carried forward:
+- the pair `render_into(&self, out)` and `render_mut(&mut self, out)`.
+  Section 3 had `render_into(&mut self, …)` and a `render` returning a
+  list; the discussion moved to `&self`, with a separate `render_mut`;
+- appending without clearing;
+- the 0.4.1 release.
+
+Not carried forward, and not planned in libmsdf: `RenderCx`, `Component`
+and its `update` and `mark`, `Gated`, `render_at`, `Clipped`, a `Hit`
+trait, bounds, an overlay pass, and atlases by role. If they are built,
+they belong with a UI library (for example a theme-free core split out of
+libcontrols) or with the application.
