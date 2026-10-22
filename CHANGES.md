@@ -542,3 +542,14 @@ e63d7ca on the owner's agreement.
 - **Ids name their set,** and `lower_with` refuses another set's ids, in
   release builds too.
 - **Release:** still strictly additive, 0.4.2.
+
+## 2026-10-21 23:26 EDT — Atlas set plan: no panics in release, standard sizes
+
+Plan: docs/design/20261021_03_ATLAS_SET_PLAN.md (Draft), amended in a4d8bd0 on
+the owner's agreement.
+- **Foreign ids:** `lower_with` drops text with a foreign id and counts it
+  in a warning, with a `debug_assert!` in debug builds, like the rest of
+  lowering. `AtlasSet::atlas` returns `Option`.
+- **Sizes:** atlases come in standard sizes (400 x 2000, or 800 x 2000 for
+  16 columns), so padding to the widest stands. The per-layer-size question
+  is closed.
