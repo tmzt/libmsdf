@@ -530,3 +530,15 @@ owner's instruction.
   indices up by its atlas's first table entry. The shader and the instance
   format are unchanged.
 - **Release:** strictly additive, so 0.4.2.
+
+## 2026-10-21 23:16 EDT — Atlas set plan: handles replace the scope
+
+Plan: docs/design/20261021_03_ATLAS_SET_PLAN.md (Draft), amended in
+e63d7ca on the owner's agreement.
+- **Handles:** `AtlasSet::atlas(id)` returns an `AtlasRef` (the id and the
+  atlas). New `push_shaped_text_with` and `push_icon_with` take it and
+  tag the instance. The existing calls are unchanged and tag the default.
+- **Dropped:** the `push_atlas` scope and the debug-only address check.
+- **Ids name their set,** and `lower_with` refuses another set's ids, in
+  release builds too.
+- **Release:** still strictly additive, 0.4.2.
