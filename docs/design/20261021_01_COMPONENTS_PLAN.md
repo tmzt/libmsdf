@@ -1,7 +1,7 @@
 ---
 title: Stateful components that render into DrawLists
 date: 2026-10-21
-status: Draft
+status: Superseded (by docs/design/20261021_02_RENDER_TRAIT_PLAN.md)
 covers: >
   A small, design-neutral component trait in libmsdf: a stateful component
   that updates over time and renders into a `DrawList` of its own (a method
