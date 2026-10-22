@@ -1,7 +1,7 @@
 ---
 title: A minimal Render trait
 date: 2026-10-21
-status: Draft
+status: In implementation
 covers: >
   One small public trait, `Render`, for anything that draws itself into a
   `DrawList`: `render_into(&self, out)` appends its drawing, and
@@ -131,3 +131,10 @@ its `VERSIONS.md` entry.
 ## 6. Open questions
 
 None.
+
+## Amendment — 2026-10-21 22:40 EDT: approved; implementation started
+
+The owner approved this plan ("approve libmsdf plan and push 0.4.1").
+Implementation starts with step 1 in the commit that adds this amendment:
+the status is In implementation, and the document is now immutable. It
+changes only on the owner's explicit instruction.

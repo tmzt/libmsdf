@@ -26,6 +26,8 @@ pub use libmsdf_font::bake;
 pub mod bundled;
 pub mod core;
 pub mod drawlist;
+/// [`drawlist::Render`]: something that draws itself into a `DrawList`.
+pub use drawlist::Render;
 /// The font half of libmsdf: the `libmsdf-font` crate, with every path it
 /// had as `libmsdf::font` unchanged.
 pub mod font {

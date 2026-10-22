@@ -11,12 +11,14 @@
 //! highbay_ui's layout pass emits a `DrawList` per frame.
 
 pub mod path;
+pub mod render;
 pub mod stream;
 
 pub use path::{
     Contour, GpuPathSegment, PATH_CUBIC_TOLERANCE, PATH_LINE_DEMOTE, PATH_MAX_QUADS_PER_CUBIC,
     PATH_MAX_SEGMENTS, Path, PathBuilder, PathError, PathSegment,
 };
+pub use render::Render;
 
 use crate::core::sdf::{
     ClipRect, DRAW_TYPE_BEZIER, DRAW_TYPE_BOX, DRAW_TYPE_CIRCLE, DRAW_TYPE_LINE,
