@@ -514,3 +514,19 @@ approved by the owner and implemented.
   (4b11d81), and a README paragraph (69622c0).
 - **The release:** 0.4.1, tagged `v0.4.1` (876121e), with `libmsdf-font`
   following in lockstep. The plan is Implemented.
+
+## 2026-10-21 23:14 EDT — Plan: several atlases in one draw list
+
+New plan, docs/design/20261021_03_ATLAS_SET_PLAN.md (Draft, 2bfd3bc), on the
+owner's instruction.
+- **The set:** `AtlasSet` holds several `FontAtlas`es under small ids, as
+  one texture array (padded to the largest atlas) and one merged glyph
+  table. The renderer uploads it once and keeps it.
+- **The scope:** `push_atlas(id)` and `push_atlas_end()` work like
+  `push_clip`, tagging every instance. It is a scope because `FontAtlas`
+  has no id, and adding one would break the API. A debug check catches text
+  shaped against a different atlas than the scope's.
+- **Lowering:** `lower_with(&set)` moves each text instance's glyph
+  indices up by its atlas's first table entry. The shader and the instance
+  format are unchanged.
+- **Release:** strictly additive, so 0.4.2.
