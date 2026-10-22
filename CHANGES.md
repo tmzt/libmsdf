@@ -505,3 +505,12 @@ before any of it was built.
 - **Release:** strictly additive, so 0.4.1.
 - **Not in libmsdf:** components, hit testing, bounds, overlays, gating
   wrappers and atlases by role.
+
+## 2026-10-21 22:41 EDT — 0.4.1 released: the Render trait
+
+The Render trait plan (docs/design/20261021_02_RENDER_TRAIT_PLAN.md),
+approved by the owner and implemented.
+- **The trait:** `libmsdf::Render`, with `render_into` and `render_mut`
+  (4b11d81), and a README paragraph (69622c0).
+- **The release:** 0.4.1, tagged `v0.4.1` (876121e), with `libmsdf-font`
+  following in lockstep. The plan is Implemented.
