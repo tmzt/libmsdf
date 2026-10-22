@@ -33,6 +33,27 @@ impl libmsdf::Render for Underline {
 }
 ```
 
+### Several atlases in one list
+
+An `AtlasSet` holds several atlases as one texture array and one glyph
+table. Draw from an atlas in it through its handle; one renderer uploads
+the set once and draws any list in it, so text and icons from different
+atlases interleave in a single list.
+
+```rust
+let mut set = libmsdf::AtlasSet::new();
+let text = set.register(FontAtlas::from_bytes(ROBOTO)?)?;
+let icons = set.register(FontAtlas::from_bytes(SYMBOLS)?)?;
+let (text, icons) = (set.atlas(text).unwrap(), set.atlas(icons).unwrap());
+let run = text.shaper(GlyphStyle::Regular)?.shape("Done");
+list.push_shaped_text_with(&run, text, [10.0, 10.0], 24.0, px_range, white);
+list.push_icon_with(&check, icons, [80.0, 6.0], [32.0, 32.0], 32.0, px_range, white);
+
+let renderer = GpuSdfRenderer::new_with_atlas_set(&device, format, &set);
+renderer.upload_atlas_set(&queue, &set);
+renderer.render_draw_list_in(&device, &queue, &view, w, h, 1.0, &list, &set, 0.0);
+```
+
 ## Licensing
 
 Licensed under either of
