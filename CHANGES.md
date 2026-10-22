@@ -473,3 +473,21 @@ holds. Open, for the owner:
 When these are done, the `Implemented` amendments and README rows follow
 (Rule 4.3). The branch `impl/0.4.0` is fast-forwarded onto `main` (no
 squash, so every step commit and the tag stay on `main`).
+
+## 2026-10-21 22:12 EDT — Plan: stateful components that render into DrawLists
+
+New plan, docs/design/20261021_01_COMPONENTS_PLAN.md (Draft, 3377508), on the
+owner's instruction, from Bubble Pop's session.
+- **The trait:** a design-neutral `Component` in a new `component`
+  module.
+  - `update` reports whether the component wants another frame.
+  - `render` returns a `DrawList` of its own.
+  - `render_into` appends to a caller's list, without allocating.
+  - An optional `PaneMark` lets a `PaneGate`-backed `Gated` wrapper
+    skip an unchanged component.
+- **Placing children:** a `RenderCx` carries only libmsdf's own things
+  (rectangle, scale, time, atlas, shaper), and `render_at` places a
+  child's ink.
+- **Why not libcontrols:** it is not used, so applications are not tied to
+  its theme, router or modal stack.
+- **Release:** strictly additive, so it ships as 0.4.1.
