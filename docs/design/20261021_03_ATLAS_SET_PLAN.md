@@ -1,7 +1,7 @@
 ---
 title: Several atlases in one draw list, cached in the renderer
 date: 2026-10-21
-status: In implementation
+status: Implemented
 covers: >
   An `AtlasSet` that holds several `FontAtlas`es under small ids and lays
   them out as one texture array and one glyph table; a scoped
@@ -487,3 +487,24 @@ does. It is added in step 1 with the set.
 Implementation starts with step 1 in the commit that adds this amendment:
 the status is In implementation, and the document is now immutable. It
 changes only on the owner's explicit instruction.
+
+## Amendment — 2026-10-21 23:37 EDT: implemented
+
+Every step is done and its Done when holds; the status is Implemented.
+
+- Step 1, the set: 95fa12d (`AtlasSet`, `AtlasId`, `AtlasRef` with
+  `shaper`, `AtlasSetError`, the re-exports, six tests).
+- Step 2, the handle calls and lowering: 12951be (`push_shaped_text_with`,
+  `push_icon_with`, `instance_atlas`, `lower_with`, the assertion in
+  `lower`; twelve tests in debug, eleven in release with the release-only
+  drop test; the full suite passes).
+- Step 3, the renderer: 780d217 (`new_with_atlas_set`, `upload_atlas_set`,
+  `render_draw_list_in`; the GPU test passes on this machine's adapter,
+  one renderer drawing both atlases pixel for pixel as two renderers do)
+  and c66c812 (the README paragraph).
+- Step 4, the release: 345db37, `libmsdf` and `libmsdf-font` at 0.4.2 in
+  lockstep, the `VERSIONS.md` entry, and the tag `v0.4.2`.
+
+One departure from section 5 is recorded in CHANGES.md: `upload_atlas_set`
+logs a set too large for the renderer as an error and leaves it out, as
+`upload_msdf_atlas` does, rather than panicking.
