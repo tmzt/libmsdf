@@ -20,7 +20,7 @@ pub use blur::{BlurPass, blur_params};
 pub use compute::MsdfCompute;
 
 use crate::core::{RenderFrame, SdfDrawCmd};
-use crate::drawlist::DrawList;
+use crate::drawlist::{AtlasSet, DrawList};
 
 /// GPU anim struct (matches WGSL Anim).
 #[repr(C)]
@@ -184,6 +184,48 @@ impl GpuSdfRenderer {
         msdf_height: u32,
         msdf_layers: u32,
     ) -> Self {
+        Self::build(
+            device,
+            surface_format,
+            msdf_width,
+            msdf_height,
+            msdf_layers,
+            MAX_GLYPH_TABLE_ENTRIES,
+        )
+    }
+
+    /// A renderer sized for an [`AtlasSet`] (docs/design/20261021_03_ATLAS_SET_PLAN.md):
+    /// an MSDF texture array of the set's [`extent`](AtlasSet::extent) by
+    /// its [`layers`](AtlasSet::layers), and a glyph table of the larger of
+    /// the usual 4096 entries and the set's. Fill it with
+    /// [`GpuSdfRenderer::upload_atlas_set`] and draw with
+    /// [`GpuSdfRenderer::render_draw_list_in`].
+    pub fn new_with_atlas_set(
+        device: &wgpu::Device,
+        surface_format: wgpu::TextureFormat,
+        set: &AtlasSet,
+    ) -> Self {
+        let [width, height] = set.extent();
+        Self::build(
+            device,
+            surface_format,
+            width,
+            height,
+            set.layers(),
+            set.glyphs().max(MAX_GLYPH_TABLE_ENTRIES),
+        )
+    }
+
+    /// The constructors' shared body, with the glyph table's capacity in
+    /// entries.
+    fn build(
+        device: &wgpu::Device,
+        surface_format: wgpu::TextureFormat,
+        msdf_width: u32,
+        msdf_height: u32,
+        msdf_layers: u32,
+        glyph_table_entries: u32,
+    ) -> Self {
         let msdf_layers = msdf_layers.clamp(1, crate::MAX_ATLAS_LAYERS as u32);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sdf_render"),
@@ -219,7 +261,7 @@ impl GpuSdfRenderer {
         });
         let glyph_table_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("glyph_table"),
-            size: (MAX_GLYPH_TABLE_ENTRIES as u64) * 32,
+            size: (glyph_table_entries as u64) * 32,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -561,6 +603,105 @@ impl GpuSdfRenderer {
             &[],
             None,
         );
+    }
+
+    /// [`GpuSdfRenderer::render_draw_list`] for a list drawing from an
+    /// [`AtlasSet`]: lowered with [`DrawList::lower_with`] against the set
+    /// this renderer was filled from ([`GpuSdfRenderer::upload_atlas_set`]).
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_draw_list_in(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        target: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        scale: f32,
+        list: &DrawList,
+        set: &AtlasSet,
+        time_ms: f32,
+    ) {
+        let frame = list.lower_with(set);
+        self.upload_chars(queue, &frame.char_buffer);
+        self.upload_params(queue, &frame.param_bank);
+        self.render_full_scaled(
+            device,
+            queue,
+            target,
+            width,
+            height,
+            scale,
+            &frame.draws,
+            time_ms,
+            &[0; 16],
+            &[],
+            None,
+        );
+    }
+
+    /// Upload every atlas in `set` into this renderer's texture array, each
+    /// at its layers' top left, and the set's merged glyph table. Call once,
+    /// and again when the set changes; each frame then uploads only its chars
+    /// and params.
+    ///
+    /// **A set larger than the renderer is reported, not uploaded wrongly.**
+    /// Layers past the texture's, or an atlas wider or taller than its
+    /// layers, are logged as errors and left out (their glyphs draw nothing,
+    /// as the shader skips a missing layer), and a table past the buffer is
+    /// cut short with an error, as [`GpuSdfRenderer::upload_msdf_atlas`]
+    /// does. Build the renderer with [`GpuSdfRenderer::new_with_atlas_set`].
+    pub fn upload_atlas_set(&self, queue: &wgpu::Queue, set: &AtlasSet) {
+        let (layers, width, height) = (
+            self.msdf_atlas_layers(),
+            self.msdf_atlas_texture.width(),
+            self.msdf_atlas_texture.height(),
+        );
+        for (atlas, base) in set.iter() {
+            if atlas.width > width || atlas.height > height {
+                log::error!(
+                    "[sdf] upload_atlas_set: an atlas of {}x{} does not fit layers of \
+                     {width}x{height} - build the renderer with new_with_atlas_set",
+                    atlas.width,
+                    atlas.height
+                );
+                continue;
+            }
+            let rgba = atlas.to_rgba_bytes();
+            let per_layer = (atlas.width * atlas.height * 4) as usize;
+            for l in 0..atlas.layer_count() {
+                let (layer, start) = (base + l, l as usize * per_layer);
+                if layer >= layers || start + per_layer > rgba.len() {
+                    if layer >= layers {
+                        log::error!(
+                            "[sdf] upload_atlas_set: layer {layer} is past the texture's \
+                             {layers} - build the renderer with new_with_atlas_set"
+                        );
+                    }
+                    break;
+                }
+                self.upload_msdf_atlas_region_in_layer(
+                    queue,
+                    layer,
+                    0,
+                    0,
+                    atlas.width,
+                    atlas.height,
+                    &rgba[start..start + per_layer],
+                );
+            }
+        }
+        let mut table = set.glyph_table_u32s();
+        let capacity = (self.glyph_table_buffer.size() / 4) as usize;
+        if table.len() > capacity {
+            log::error!(
+                "[sdf] upload_atlas_set: the set's glyph table has {} entries and the buffer \
+                 holds {} - build the renderer with new_with_atlas_set",
+                table.len() / 8,
+                capacity / 8
+            );
+            table.truncate(capacity);
+        }
+        self.upload_glyph_table(queue, &table);
     }
 
     /// Upload font atlas data (call once or when font changes).

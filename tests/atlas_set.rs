@@ -376,3 +376,183 @@ fn lowering_against_another_set_drops_that_text_in_release() {
     assert_eq!(frame.draws.len(), 1);
     assert_eq!(frame.char_buffer, list.chars(), "nothing rewritten");
 }
+
+/// **One list, two atlases, one renderer** draws each piece exactly as a
+/// renderer holding only that piece's atlas does. Roboto is registered
+/// first and the symbols atlas second, so the icon's glyph index and its
+/// layer are both moved by the set.
+///
+/// ```text
+/// CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm cargo test --features gpu-tests --test atlas_set
+/// ```
+#[cfg(feature = "gpu-tests")]
+mod on_the_gpu {
+    use super::*;
+    use libmsdf::gpu::GpuSdfRenderer;
+
+    const W: u32 = 160;
+    const H: u32 = 96;
+    /// The icon's box, right of the text; everything left of it is text.
+    const ICON_X: u32 = 96;
+
+    fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None,
+            ..Default::default()
+        }))
+        .ok()?;
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+    }
+
+    /// Draw with `draw` into a fresh W x H target and read it back.
+    fn frame(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        draw: impl FnOnce(&wgpu::TextureView),
+    ) -> Vec<u8> {
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("offscreen"),
+            size: wgpu::Extent3d {
+                width: W,
+                height: H,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        draw(&target.create_view(&Default::default()));
+        let padded_row = (W * 4).next_multiple_of(256);
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rb"),
+            size: (padded_row * H) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut enc = device.create_command_encoder(&Default::default());
+        enc.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_row),
+                    rows_per_image: None,
+                },
+            },
+            wgpu::Extent3d {
+                width: W,
+                height: H,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(enc.finish()));
+        let slice = readback.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        rx.recv().unwrap().unwrap();
+        let data = slice.get_mapped_range().unwrap();
+        let mut img = Vec::with_capacity((W * H * 4) as usize);
+        for row in 0..H {
+            let start = (row * padded_row) as usize;
+            img.extend_from_slice(&data[start..start + (W * 4) as usize]);
+        }
+        drop(data);
+        readback.unmap();
+        img
+    }
+
+    /// A renderer holding only `atlas`, drawing `list` the usual way.
+    fn alone(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        atlas: &FontAtlas,
+        list: &DrawList,
+    ) -> Vec<u8> {
+        let r = GpuSdfRenderer::new_with_msdf_layers(
+            device,
+            wgpu::TextureFormat::Rgba8Unorm,
+            atlas.width,
+            atlas.height,
+            atlas.layer_count(),
+        );
+        r.upload_msdf_atlas(queue, atlas.width, atlas.height, &atlas.to_rgba_bytes());
+        r.upload_glyph_table(queue, &atlas.glyph_table_u32s());
+        frame(device, queue, |view| {
+            r.render_draw_list(device, queue, view, W, H, 1.0, list, 0.0)
+        })
+    }
+
+    #[test]
+    fn one_renderer_draws_both_atlases_as_two_renderers_do() {
+        let Some((device, queue)) = gpu() else {
+            eprintln!("SKIP: no GPU adapter");
+            return;
+        };
+        let (rob, sym) = (roboto(), msymbols());
+        let mut set = AtlasSet::new();
+        let text = set.register(roboto()).unwrap();
+        let icon = set.register(msymbols()).unwrap();
+        assert_eq!(set.layer_bases(), [0, 1]);
+        let shaper = set
+            .atlas(text)
+            .unwrap()
+            .shaper(GlyphStyle::Regular)
+            .unwrap();
+        let (name, fish, check) = (shaper.shape("Name"), shaper.shape("fish"), icon_run(&sym));
+        let icon_box = ([ICON_X as f32 + 8.0, 10.0], [32.0, 32.0]);
+
+        // One list, through the handles.
+        let mut both = DrawList::new();
+        let (t, i) = (set.atlas(text).unwrap(), set.atlas(icon).unwrap());
+        both.push_shaped_text_with(&name, t, [10.0, 10.0], 24.0, 4.0, WHITE);
+        both.push_icon_with(&check, i, icon_box.0, icon_box.1, 32.0, 4.0, WHITE)
+            .expect("the icon drew");
+        both.push_shaped_text_with(&fish, t, [10.0, 50.0], 24.0, 4.0, WHITE);
+        let r = GpuSdfRenderer::new_with_atlas_set(&device, wgpu::TextureFormat::Rgba8Unorm, &set);
+        r.upload_atlas_set(&queue, &set);
+        let together = frame(&device, &queue, |view| {
+            r.render_draw_list_in(&device, &queue, view, W, H, 1.0, &both, &set, 0.0)
+        });
+
+        // The same pieces, each by a renderer of its own atlas.
+        let mut words = DrawList::new();
+        words.push_shaped_text(&name, &rob, [10.0, 10.0], 24.0, 4.0, WHITE);
+        words.push_shaped_text(&fish, &rob, [10.0, 50.0], 24.0, 4.0, WHITE);
+        let mut mark = DrawList::new();
+        mark.push_icon(&check, &sym, icon_box.0, icon_box.1, 32.0, 4.0, WHITE)
+            .expect("the icon drew alone");
+        let (words, mark) = (
+            alone(&device, &queue, &rob, &words),
+            alone(&device, &queue, &sym, &mark),
+        );
+
+        let ink = |img: &[u8]| img.chunks(4).filter(|p| p[0] > 128).count();
+        assert!(ink(&words) > 50 && ink(&mark) > 50, "both pieces drew ink");
+        for y in 0..H {
+            for x in 0..W {
+                let i = ((y * W + x) * 4) as usize;
+                let want = if x >= ICON_X { &mark } else { &words };
+                assert_eq!(
+                    &together[i..i + 4],
+                    &want[i..i + 4],
+                    "pixel ({x}, {y}) differs from the {} drawn alone",
+                    if x >= ICON_X { "icon" } else { "text" }
+                );
+            }
+        }
+    }
+}

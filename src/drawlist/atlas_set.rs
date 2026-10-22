@@ -199,6 +199,12 @@ impl AtlasSet {
         self.atlases.iter().map(|a| a.glyphs.len() as u32).sum()
     }
 
+    /// Each atlas with its first layer in the merged texture array, in
+    /// registration order.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&FontAtlas, u32)> {
+        self.atlases.iter().zip(self.layer_base.iter().copied())
+    }
+
     /// Every atlas's first glyph-table entry, indexed by `AtlasId::index`.
     pub fn table_bases(&self) -> &[u32] {
         &self.table_base
