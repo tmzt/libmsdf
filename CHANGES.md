@@ -553,3 +553,21 @@ the owner's agreement.
 - **Sizes:** atlases come in standard sizes (400 x 2000, or 800 x 2000 for
   16 columns), so padding to the widest stands. The per-layer-size question
   is closed.
+
+## 2026-10-21 23:37 EDT — 0.4.2 released: several atlases in one draw list
+
+The atlas set plan (docs/design/20261021_03_ATLAS_SET_PLAN.md), approved by
+the owner with the shaping helper, and implemented.
+- **The set:** `AtlasSet`, `AtlasId`, `AtlasRef` with `shaper(style)`
+  (95fa12d).
+- **The list:** `push_shaped_text_with`, `push_icon_with` and `lower_with`
+  (12951be).
+- **The renderer:** `new_with_atlas_set`, `upload_atlas_set` and
+  `render_draw_list_in` (780d217), with a README paragraph (c66c812).
+- **The release:** 0.4.2, tagged `v0.4.2` (345db37), with `libmsdf-font`
+  following in lockstep. The plan is Implemented.
+- **Departure (step 3, section 5):** the plan said `upload_atlas_set`
+  panics, as `upload_msdf_atlas` does, when the texture is too small for
+  the set. `upload_msdf_atlas` does not panic: it logs an error and
+  uploads what fits. `upload_atlas_set` does the same, which keeps to the
+  plan's own rule of no panics in release.
