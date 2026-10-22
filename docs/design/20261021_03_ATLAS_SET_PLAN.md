@@ -307,3 +307,111 @@ under Rule 5.4 it releases as **0.4.2**, tagged `v0.4.2`, with its
 3. **`AtlasShaper` borrowing from the set:** an application that shapes
    with `AtlasShaper::new(&atlas, style)` would shape with
    `AtlasShaper::new(set.atlas(id), style)`. Is a helper on the set worth it?
+
+## Amendment — 2026-10-21 23:16 EDT: handles replace the scope
+
+On the owner's question ("couldnt it just return a handle/id?") and
+agreement, instances are tagged from a handle passed to the push calls, not
+from a scope. Where this amendment and the text above disagree, this
+amendment wins.
+
+**Replaced:** section 2 entirely; section 4.1 (`push_atlas`,
+`push_atlas_end`, the `active_atlas` stack and its open-scope
+assertions); section 4.3 (the debug-only address check); `AtlasId` and
+`AtlasSet::atlas` in section 3; the scope and agreement-check tests in
+section 6; open question 1. Everything else stands. That covers the
+per-instance id vector filled in `DrawList::push`, `lower_with(&set)`,
+`lower` asserting every id is the default, `append_from` copying ids,
+`translate_from`, and the renderer of section 5.
+
+**Ids name their set.**
+
+```rust
+/// An atlas's place in an [`AtlasSet`]: which set, and which atlas in it.
+/// `AtlasId::default()` (`set: 0, index: 0`) is what instances pushed
+/// with a plain `&FontAtlas` record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub struct AtlasId {
+    /// The set's number, from a global `AtomicU32` counter starting at 1
+    /// when the set is created (`AtlasSet::new`); 0 is no set.
+    pub set: u32,
+    /// The atlas's place in the set, in registration order.
+    pub index: u16,
+}
+
+/// A handle to an atlas in a set: its id and the atlas. It derefs to
+/// `FontAtlas`, so shaping (`AtlasShaper::new(&*handle, style)`) and
+/// metrics work through it.
+#[derive(Clone, Copy)]
+pub struct AtlasRef<'a> {
+    pub id: AtlasId,
+    pub atlas: &'a FontAtlas,
+}
+impl std::ops::Deref for AtlasRef<'_> { type Target = FontAtlas; /* self.atlas */ }
+
+impl AtlasSet {
+    /// As before: takes `atlas` into the set and returns its id.
+    pub fn register(&mut self, atlas: FontAtlas) -> Result<AtlasId, AtlasSetError>;
+    /// The handle for `id`. Panics on an id of another set, or one this
+    /// set did not hand out.
+    pub fn atlas(&self, id: AtlasId) -> AtlasRef<'_>;
+    /// This set's number, as its ids carry it.
+    pub fn number(&self) -> u32;
+}
+```
+
+**The push calls.**
+
+```rust
+impl DrawList {
+    /// `push_shaped_text` from an atlas in a set: the same drawing, with
+    /// the handle's id recorded on the instance.
+    pub fn push_shaped_text_with(&mut self, run: &ShapedRun, atlas: AtlasRef<'_>,
+        pos: [f32; 2], font_size: f32, px_range: f32, color: [f32; 4]) -> f32;
+    /// `push_icon` likewise.
+    pub fn push_icon_with(&mut self, run: &ShapedRun, atlas: AtlasRef<'_>,
+        rect_pos: [f32; 2], rect_size: [f32; 2], em: f32, px_range: f32,
+        color: [f32; 4]) -> Option<[f32; 2]>;
+    /// The atlas instance `index` was pushed from.
+    pub fn instance_atlas(&self, index: usize) -> AtlasId;
+}
+```
+
+- **The existing calls are unchanged.** `push_shaped_text` and `push_icon`
+  keep taking `&FontAtlas` and record `AtlasId::default()`. Every
+  non-text instance records the default too.
+- **The ids are recorded by the push calls.** The existing bodies move into
+  private functions that take the id, and the public calls pass the
+  default or the handle's id. `DrawList::push`, the one place instances
+  enter the list, takes the id from a private field set for the length of
+  that call, so no public signature changes.
+- **`lower_with(&set)` checks the set,** in release builds too, since it
+  is one compare per text instance. It panics on any `MsdfText` instance
+  whose id is neither the default nor one of `set.number()`'s, naming the
+  instance and both set numbers. Instances with the default id use the
+  set's atlas 0, as section 4.2 had for unscoped instances.
+- **A list that never uses a set** is lowered by `lower` exactly as today.
+
+**Tests** (replacing section 6's scope and agreement tests):
+- `push_shaped_text_with` and `push_icon_with` record the handle's id.
+  The plain calls and every non-text instance record the default.
+  `append_from` keeps the source's ids.
+- Each set gets its own number, and `set.atlas(id)` of another set's id
+  panics.
+- `lower_with` panics on text from another set's handle. A list of plain
+  calls lowered with a set holding the same atlas at index 0 gives exactly
+  `lower`'s frame.
+- The GPU test uses the two handles in place of scopes.
+
+**Steps:** step 2 becomes "the handle calls and lowering:
+`push_shaped_text_with`, `push_icon_with`, `instance_atlas`,
+`lower_with`, the assertion in `lower`, and the tests above". Its Done
+when is unchanged. Step 3's README example uses handles in place of a
+scope.
+
+**Release:** still strictly additive (new types and methods, nothing
+existing changed), so 0.4.2.
+
+**Open questions:** question 1 (a 0.5.0 with an id on `FontAtlas`) is
+withdrawn, since handles tag glyphs without a breaking change. Questions 2
+and 3 stand.
