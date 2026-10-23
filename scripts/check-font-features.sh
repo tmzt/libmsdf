@@ -24,8 +24,8 @@ QUICK=${1:-}
 FEATURES=(font-apache-roboto-regular font-apache-roboto-bold font-apache-roboto-italic
           font-apache-roboto-msymbols font-ofl-grenze-gotisch font-ofl-texturina
           font-ofl-noto-sans-mono font-ofl-noto-terminal-symbols
-          fonts-apache-roboto fonts-ofl-ledger)
-ALL=fonts-apache-roboto,fonts-ofl-ledger,font-ofl-noto-sans-mono,font-ofl-noto-terminal-symbols
+          fonts-apache-roboto fonts-ofl-ledger fonts-ofl-terminal)
+ALL=fonts-apache-roboto,fonts-ofl-ledger,fonts-ofl-terminal
 
 step() { printf '\n== %s\n' "$*"; }
 
@@ -50,8 +50,11 @@ fi
 
 probe() { # $1 = label; rest = cargo args
   local label=$1; shift
-  cargo build -q --release --lib "$@"
   local dir="${CARGO_TARGET_DIR:-target}/release/deps"
+  # A previous probe's libmsdf artifacts (another feature set, another file
+  # hash) would match the globs below, so remove them before building.
+  rm -f "$dir"/liblibmsdf-* "$dir"/liblibmsdf_font-*
+  cargo build -q --release --lib "$@"
   local files=("$dir"/liblibmsdf-*.rlib "$dir"/liblibmsdf-*.rmeta "$dir"/liblibmsdf_font-*.rlib "$dir"/liblibmsdf_font-*.rmeta)
   python3 - "$label" "${files[@]}" <<'PY'
 import glob, pathlib, sys
