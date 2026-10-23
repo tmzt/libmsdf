@@ -656,3 +656,22 @@ Corrections and findings:
 - The Bold subset's name ID 2 still reads "Regular", from the variable
   face's default instance. libmsdf reads the style from the bundled table,
   not the name.
+
+## 2026-10-23 12:57 EDT — Planned: a per-atlas cell box, and atlas format 5:0.2.0
+
+Plan: `docs/design/20261023_02_PER_ATLAS_CELL_BOX_PLAN.md` (Draft).
+
+The owner asked whether the clipping found in Texturina and Grenze Gotisch
+(docs/FONT_TEXTURINA.md, docs/FONT_GRENZE_GOTISCH.md) needs a larger glyph
+box for every atlas or a per-atlas setting with a format version bump. The
+plan proposes the per-atlas setting: a `CellBox` (how far cells reach above
+and below the 1.3 em line box) chosen at bake time, recorded in a `CELL`
+table written only when used, at format 5:0.2.0 so that libmsdf 0.5 and
+earlier refuse such an atlas; text drawn from the cell box; Texturina and
+Grenze Gotisch re-baked whole with their baselines unchanged. Breaking, so
+libmsdf 0.6.0 when implemented (libcontrols 0.7.0 after it, Rule 5.5).
+Nothing is implemented until the owner approves it.
+
+Also recorded: AGENTS.md gained Rule 3.6 (findings documents under `docs/`
+are append-only) and, in Rule 3.5, evidence directories named
+`YYYYMMDD_NN_name/`, on the owner's instruction.
