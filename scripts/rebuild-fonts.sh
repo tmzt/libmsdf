@@ -91,15 +91,19 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/rebuild-fonts.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
 # Rebuilt from upstream.
-# committed name | upstream file | upstream sha256 | output sha256
+# committed name | upstream file | upstream sha256 | output sha256 [| instance]
 OFL=(
     "GrenzeGotisch[wght]-subset.ttf|GrenzeGotisch[wght].ttf|701b299d8dc002a2b4bea2ff0f1272c0e4081a2835914354804565c410d0c637|17d705ef35289801832ff0f7563cb042b7818b329a06372b75ed8ad421d15001"
     "Texturina[opsz,wght]-subset.ttf|Texturina[opsz,wght].ttf|478a15d7145cf94565cfc1aeb33596aeb0118c7d86a84d061ddf46de3d7dfda3|f7ec0c7534a0f534964826cef6118475590061f9265c882c3c44e45ea2a0f108"
+    "NotoSansMono-Regular-subset.ttf|NotoSansMono[wdth,wght].ttf|2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081|7bbaa03bc1ee2695e2cad69b0d2d01fe5878b08b4e9acb4062ec91458f752d7e|wght=400,wdth=100"
+    "NotoSansMono-Bold-subset.ttf|NotoSansMono[wdth,wght].ttf|2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081|4b39f5aec21bbc121931af3619eb88cab62d620dce1bbd83a76e64c337bc2de2|wght=700,wdth=100"
 )
 for entry in "${OFL[@]}"; do
-    IFS='|' read -r name src src_sha want <<<"$entry"
+    IFS='|' read -r name src src_sha want instance <<<"$entry"
     # ofl_subset.py does not recalculate head.modified; no epoch is needed.
-    py - "$fonts/ofl_subset.py" "$up/$src" "$work/$name" "$src_sha" >/dev/null
+    # A fifth field makes a static instance first (the Noto Sans Mono subsets).
+    py - "$fonts/ofl_subset.py" "$up/$src" "$work/$name" "$src_sha" \
+        ${instance:+--instance "$instance"} >/dev/null
     compare "$work/$name" "$name" "$want"
 done
 

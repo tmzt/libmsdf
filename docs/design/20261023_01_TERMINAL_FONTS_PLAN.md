@@ -1,7 +1,7 @@
 ---
 title: A terminal face and a symbol page, from Noto
 date: 2026-10-23
-status: Draft
+status: In implementation
 covers: >
   A bundled monospace face for terminal-style text, Noto Sans Mono (SIL OFL
   1.1) Regular and Bold, baked as one two-layer atlas; a symbol page, one
@@ -709,3 +709,71 @@ own minor version.
 6. **The two extra faces.** Noto Sans Symbols and Noto Sans Math fill what
    Symbols 2 lacks (section 2). Are they acceptable, or should those
    symbols be dropped from the curated sets?
+
+## Amendment — 2026-10-23 02:32 EDT: approved with the owner's answers; implementation started
+
+The owner approved this plan, relayed by another session: "approve with
+those answers". Where this amendment and the text above disagree, this
+amendment wins.
+
+**Open question 1, the line pitch: answered as proposed.** Keep libmsdf's
+1.3 em line box, and remap the box and block glyphs onto it with the
+overhang of section 4.4. Terminal text reads better with the extra leading.
+
+**Open question 2, emoji width: two cells with U+FE0F.** A curated emoji
+that is narrow under `wcwidth` is drawn **two cells wide when U+FE0F follows
+it, and one cell otherwise**, as terminals do. In the curated set these are
+`⚠` U+26A0 and `➡` U+27A1. This replaces the plan's "a selector does not
+change the glyph" (section 4.5, "Variation selectors") and the decision
+quoted in section 2, item 3, for those two codepoints. The mechanism:
+
+- **Wide forms.** The symbol face gains one glyph per narrow curated emoji:
+  the same Noto Emoji outline, fitted to two cells by Rule 2 with n = 2. It
+  is mapped at a codepoint in a new block, `TERMINAL_WIDE_FORMS` = U+F0000 to
+  U+F00FF, in the Supplementary Private Use Area-A. That block is outside
+  libmsdf's own BMP private blocks (`PRIVATE_USE`, `OWNED_BLOCKS`), and
+  libmsdf assigns nothing else there.
+  - `⚠` takes U+F0000 and `➡` takes U+F0001.
+  - New wide forms are appended in curated-set order.
+- **The table.** In `libmsdf-font`'s `terminal` module:
+  `pub const TERMINAL_WIDE_FORMS: (char, char) = ('\u{F0000}', '\u{F00FF}')`
+  and `pub const TERMINAL_WIDE_FORM: &[(char, char)] = &[('\u{26A0}',
+  '\u{F0000}'), ('\u{27A1}', '\u{F0001}')]`, as (base, wide form) pairs.
+- **The group.** `COVERAGE_TERMINAL_EMOJI` gains the range U+F0000 to
+  U+F0001, so the page carries 23 emoji glyphs. Its total becomes 607
+  cells: 583, 23 and the placeholder. 33 cells are free.
+- **The shaper.** Before choosing sources, `TerminalShaper::line` replaces
+  each base in `TERMINAL_WIDE_FORM` that is followed by U+FE0F with its wide
+  form. The selector stays in the text and keeps zero width. A base with no
+  selector, or with U+FE0E, keeps its one-cell glyph.
+- **Unchanged:**
+  - The 19 emoji that are wide under `wcwidth` stay two cells with or
+    without either selector.
+  - The non-emoji symbols of `COVERAGE_TERMINAL` stay one cell whatever
+    selector follows.
+- **Tests,** in place of section 5's `"⚠\u{FE0F}x"` line:
+  - `"⚠x"` and `"⚠\u{FE0E}x"` put `x` at column 1;
+  - `"⚠\u{FE0F}x"` and `"➡\u{FE0F}x"` put `x` at column 2;
+  - `"✅\u{FE0E}x"` puts `x` at column 2;
+  - the merged face's U+F0000 and U+F0001 have 1200-unit advances.
+
+**Open question 6, the extra faces: answered as proposed.** Fill `↳`, `⎿`,
+`⎇` and the other gaps from Noto Sans Symbols and Noto Sans Math (OFL), in
+the order of section 3.6.
+
+**Open questions 3 to 5** were not raised. They are settled by what the
+plan already does:
+- **3, the rest of the blocks:** no second symbol page. The curated sets
+  stand, and can be extended into the 33 free cells.
+- **4, baking on demand:** not in this plan.
+- **5, italic:** no italic. A style the text atlas lacks falls back without
+  slanting:
+  - Italic is drawn as Regular;
+  - BoldItalic is drawn as Bold.
+
+  This makes precise section 4.7's "A style the text atlas lacks uses
+  Regular".
+
+**Implementation starts** with step 1 in the commit that adds this
+amendment. The status is now `In implementation`, and the document is
+immutable (Rule 1.5). Departures are recorded in `CHANGES.md`.

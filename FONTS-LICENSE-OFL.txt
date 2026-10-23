@@ -40,6 +40,24 @@ named with each one is enabled.
     sha256 478a15d7145cf94565cfc1aeb33596aeb0118c7d86a84d061ddf46de3d7dfda3
     This file: sha256 f7ec0c7534a0f534964826cef6118475590061f9265c882c3c44e45ea2a0f108
 
+  fonts/NotoSansMono-Regular-subset.ttf and fonts/NotoSansMono-Bold-subset.ttf,
+  and the atlas noto-sans-mono-48.atlas baked from them
+    Feature: font-ofl-noto-sans-mono (or fonts-ofl-terminal)
+    Noto Sans Mono
+    Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)
+    Source: https://github.com/google/fonts/tree/main/ofl/notosansmono
+    No Reserved Font Name.
+    Modified Version: static instances by libmsdf (fonts/ofl_subset.py
+    --instance) at wght=400,wdth=100 (Regular) and wght=700,wdth=100 (Bold),
+    each subset to the same codepoints as above; hinting, gasp and DSIG
+    removed; outlines, metrics and layout tables of the instance otherwise
+    unchanged.
+    Upstream: google/fonts e7db6ca603fd4862010383ff17ffd6cc4ffac1c0,
+    ofl/notosansmono/NotoSansMono[wdth,wght].ttf,
+    sha256 2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081
+    Regular: sha256 7bbaa03bc1ee2695e2cad69b0d2d01fe5878b08b4e9acb4062ec91458f752d7e
+    Bold: sha256 4b39f5aec21bbc121931af3619eb88cab62d620dce1bbd83a76e64c337bc2de2
+
 -----------------------------------------------------------------------------
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

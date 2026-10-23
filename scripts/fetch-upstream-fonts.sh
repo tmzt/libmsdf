@@ -14,6 +14,16 @@
 #       fonts/style.py makes Roboto-{Bold,Italic}-ascii.ttf from Bold and
 #       Italic, and fonts/style.py and fonts/widen.py check the shipped
 #       faces against Regular.
+#   NotoSansMono[wdth,wght].ttf
+#       google/fonts at NOTO_COMMIT; fonts/ofl_subset.py makes
+#       fonts/NotoSansMono-{Regular,Bold}-subset.ttf from static instances,
+#       and fonts/terminal_symbols.py takes the box drawing, block elements
+#       and geometric shapes from it.
+#   NotoSansSymbols2-Regular.ttf, NotoSansSymbols[wght].ttf,
+#   NotoSansMath-Regular.ttf, NotoEmoji[wght].ttf
+#       google/fonts at NOTO_COMMIT; fonts/terminal_symbols.py merges the
+#       terminal symbols and emoji from them into
+#       fonts/LibmsdfTerminalSymbols-Regular.ttf.
 #   MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].ttf
 #       google/material-design-icons at a pinned commit; fonts/msymbols.py
 #       checks the borrowed icons of Roboto-Regular-ascii-msymbols.ttf
@@ -27,12 +37,20 @@ GOOGLE_FONTS="https://raw.githubusercontent.com/google/fonts"
 ROBOTO_ZIP_URL="https://github.com/googlefonts/roboto/releases/download/v2.138/roboto-android.zip"
 ROBOTO_ZIP_SHA256="c825453253f590cfe62557733e7173f9a421fff103b00f57d33c4ad28ae53baf"
 MSYMBOLS_COMMIT="49d4db35df873165d6bd6ba09b063c7dafbac2f4"
+# The Noto faces of the terminal fonts plan
+# (docs/design/20261023_01_TERMINAL_FONTS_PLAN.md, section 3.1).
+NOTO_COMMIT="e7db6ca603fd4862010383ff17ffd6cc4ffac1c0"
 
 # file in fonts/upstream | URL | sha256
 DIRECT=(
     "GrenzeGotisch[wght].ttf|$GOOGLE_FONTS/98931f43a8dcf8ca908949780e0d03a6e4195227/ofl/grenzegotisch/GrenzeGotisch%5Bwght%5D.ttf|701b299d8dc002a2b4bea2ff0f1272c0e4081a2835914354804565c410d0c637"
     "Texturina[opsz,wght].ttf|$GOOGLE_FONTS/f4a8ff8c122abc147e5fd19fc46cb2396b67b2bb/ofl/texturina/Texturina%5Bopsz%2Cwght%5D.ttf|478a15d7145cf94565cfc1aeb33596aeb0118c7d86a84d061ddf46de3d7dfda3"
     "MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].ttf|https://raw.githubusercontent.com/google/material-design-icons/$MSYMBOLS_COMMIT/variablefont/MaterialSymbolsOutlined%5BFILL%2CGRAD%2Copsz%2Cwght%5D.ttf|77ff1c20896afc6f1abf7d57fc408234dfd021ab050b63e0442e71d6c9f0d6b8"
+    "NotoSansMono[wdth,wght].ttf|$GOOGLE_FONTS/$NOTO_COMMIT/ofl/notosansmono/NotoSansMono%5Bwdth%2Cwght%5D.ttf|2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081"
+    "NotoSansSymbols2-Regular.ttf|$GOOGLE_FONTS/$NOTO_COMMIT/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf|7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21"
+    "NotoSansSymbols[wght].ttf|$GOOGLE_FONTS/$NOTO_COMMIT/ofl/notosanssymbols/NotoSansSymbols%5Bwght%5D.ttf|f7e7e04b4a24b6c78893d50cbfd2b2f6cae49617ab047bfef668d252adb128f7"
+    "NotoSansMath-Regular.ttf|$GOOGLE_FONTS/$NOTO_COMMIT/ofl/notosansmath/NotoSansMath-Regular.ttf|3f495fe933c06786e4d5f6d86b8ee70b6753a68ee3b9d87528726de0f6e2c47d"
+    "NotoEmoji[wght].ttf|$GOOGLE_FONTS/$NOTO_COMMIT/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf|de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551"
 )
 # member of roboto-android.zip | sha256
 ROBOTO=(
