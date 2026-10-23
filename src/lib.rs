@@ -51,6 +51,8 @@ pub mod font {
     pub use crate::bundled::ROBOTO_MSYMBOLS_STYLED_ATLAS;
     #[cfg(feature = "font-apache-roboto-regular")]
     pub use crate::bundled::ROBOTO_REGULAR_ATLAS;
+    #[cfg(feature = "font-ofl-noto-terminal-symbols")]
+    pub use crate::bundled::TERMINAL_SYMBOLS_ATLAS;
     #[cfg(feature = "font-ofl-texturina")]
     pub use crate::bundled::TEXTURINA_ATLAS;
 }
@@ -90,6 +92,10 @@ pub use bundled::ROBOTO_MSYMBOLS_STYLED_ATLAS;
 pub use bundled::ROBOTO_REGULAR_ASCII;
 #[cfg(feature = "font-apache-roboto-regular")]
 pub use bundled::ROBOTO_REGULAR_ATLAS;
+#[cfg(feature = "font-ofl-noto-terminal-symbols")]
+pub use bundled::TERMINAL_SYMBOLS_ATLAS;
+#[cfg(all(feature = "font-ofl-noto-terminal-symbols", feature = "shaper"))]
+pub use bundled::TERMINAL_SYMBOLS_TTF;
 #[cfg(feature = "font-ofl-texturina")]
 pub use bundled::TEXTURINA_ATLAS;
 #[cfg(all(feature = "font-ofl-texturina", feature = "shaper"))]

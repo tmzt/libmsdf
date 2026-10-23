@@ -26,6 +26,13 @@ pub enum CoverageGroupId {
     Symbols = 1,
     /// Common mathematical signs.
     Math = 2,
+    /// The terminal symbol page: box drawing, block elements, geometric
+    /// shapes and Braille in full, and curated arrows, technical symbols and
+    /// dingbats (`docs/design/20261023_01_TERMINAL_FONTS_PLAN.md`).
+    TerminalSymbols = 3,
+    /// The terminal symbol page's curated monochrome emoji, with the wide
+    /// forms of the narrow ones.
+    TerminalEmoji = 4,
 }
 
 impl CoverageGroupId {
@@ -35,6 +42,8 @@ impl CoverageGroupId {
             0 => Some(Self::Text),
             1 => Some(Self::Symbols),
             2 => Some(Self::Math),
+            3 => Some(Self::TerminalSymbols),
+            4 => Some(Self::TerminalEmoji),
             _ => None,
         }
     }
@@ -146,6 +155,84 @@ pub const COVERAGE_MATH: CoverageGroup = CoverageGroup {
         ('\u{2260}', '\u{2260}'),
         ('\u{2264}', '\u{2265}'),
         ('\u{2282}', '\u{2283}'),
+    ],
+    missing: MissingPolicy::Skip,
+};
+
+/// **TERMINAL**: 583 codepoints, the terminal symbol page's symbols
+/// (terminal fonts plan, section 4.5): box drawing U+2500-257F, block
+/// elements U+2580-259F, geometric shapes U+25A0-25FF and Braille
+/// U+2800-28FF in full; 25 arrows, 15 technical symbols, 24 dingbats, and
+/// ★ ☆ ☐ ☑ ☒ ⚙ ⧉.
+pub const COVERAGE_TERMINAL: CoverageGroup = CoverageGroup {
+    id: CoverageGroupId::TerminalSymbols,
+    ranges: &[
+        ('\u{2190}', '\u{2199}'),
+        ('\u{21B0}', '\u{21B3}'),
+        ('\u{21B5}', '\u{21B5}'),
+        ('\u{21BA}', '\u{21BB}'),
+        ('\u{21D0}', '\u{21D5}'),
+        ('\u{21E5}', '\u{21E5}'),
+        ('\u{21E7}', '\u{21E7}'),
+        ('\u{2303}', '\u{2303}'),
+        ('\u{2318}', '\u{2318}'),
+        ('\u{2325}', '\u{2325}'),
+        ('\u{2328}', '\u{2328}'),
+        ('\u{232B}', '\u{232B}'),
+        ('\u{2387}', '\u{2387}'),
+        ('\u{238B}', '\u{238B}'),
+        ('\u{23BF}', '\u{23BF}'),
+        ('\u{23CE}', '\u{23CE}'),
+        ('\u{23F5}', '\u{23FA}'),
+        ('\u{2500}', '\u{257F}'),
+        ('\u{2580}', '\u{259F}'),
+        ('\u{25A0}', '\u{25FF}'),
+        ('\u{2605}', '\u{2606}'),
+        ('\u{2610}', '\u{2612}'),
+        ('\u{2699}', '\u{2699}'),
+        ('\u{2713}', '\u{2718}'),
+        ('\u{2722}', '\u{2727}'),
+        ('\u{2731}', '\u{2733}'),
+        ('\u{2736}', '\u{2736}'),
+        ('\u{273B}', '\u{273D}'),
+        ('\u{2756}', '\u{2756}'),
+        ('\u{276E}', '\u{276F}'),
+        ('\u{279C}', '\u{279C}'),
+        ('\u{27A4}', '\u{27A4}'),
+        ('\u{2800}', '\u{28FF}'),
+        ('\u{29C9}', '\u{29C9}'),
+    ],
+    missing: MissingPolicy::Skip,
+};
+
+/// **TERMINAL_EMOJI**: 23 codepoints, the curated monochrome emoji (21) and
+/// the wide forms of the two that are narrow under `wcwidth`, ⚠ and ➡, at
+/// U+F0000 and U+F0001 (terminal fonts plan, 02:32 EDT amendment).
+/// Extendable by appending.
+pub const COVERAGE_TERMINAL_EMOJI: CoverageGroup = CoverageGroup {
+    id: CoverageGroupId::TerminalEmoji,
+    ranges: &[
+        ('\u{231B}', '\u{231B}'),
+        ('\u{23F3}', '\u{23F3}'),
+        ('\u{26A0}', '\u{26A0}'),
+        ('\u{2705}', '\u{2705}'),
+        ('\u{274C}', '\u{274C}'),
+        ('\u{27A1}', '\u{27A1}'),
+        ('\u{2B50}', '\u{2B50}'),
+        ('\u{1F389}', '\u{1F389}'),
+        ('\u{1F41B}', '\u{1F41B}'),
+        ('\u{1F44D}', '\u{1F44E}'),
+        ('\u{1F4A1}', '\u{1F4A1}'),
+        ('\u{1F4C1}', '\u{1F4C1}'),
+        ('\u{1F4C4}', '\u{1F4C4}'),
+        ('\u{1F4DD}', '\u{1F4DD}'),
+        ('\u{1F50D}', '\u{1F50D}'),
+        ('\u{1F512}', '\u{1F512}'),
+        ('\u{1F527}', '\u{1F527}'),
+        ('\u{1F680}', '\u{1F680}'),
+        ('\u{1F916}', '\u{1F916}'),
+        ('\u{1F9EA}', '\u{1F9EA}'),
+        ('\u{F0000}', '\u{F0001}'),
     ],
     missing: MissingPolicy::Skip,
 };
@@ -440,6 +527,8 @@ mod tests {
             ("TEXT", COVERAGE_TEXT),
             ("SYMBOLS", COVERAGE_SYMBOLS),
             ("MATH", COVERAGE_MATH),
+            ("TERMINAL", COVERAGE_TERMINAL),
+            ("TERMINAL_EMOJI", COVERAGE_TERMINAL_EMOJI),
         ] {
             let p = match g.missing {
                 MissingPolicy::Fail => "fail",
@@ -453,6 +542,8 @@ mod tests {
         assert_eq!(COVERAGE_TEXT.codepoints().len(), 287);
         assert_eq!(COVERAGE_SYMBOLS.codepoints().len(), 63);
         assert_eq!(COVERAGE_MATH.codepoints().len(), 77);
+        assert_eq!(COVERAGE_TERMINAL.codepoints().len(), 583);
+        assert_eq!(COVERAGE_TERMINAL_EMOJI.codepoints().len(), 23);
         let all = Coverage::Groups(vec![COVERAGE_TEXT, COVERAGE_SYMBOLS, COVERAGE_MATH]);
         let n: u32 = all
             .ranges()

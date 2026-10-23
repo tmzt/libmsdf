@@ -58,6 +58,37 @@ named with each one is enabled.
     Regular: sha256 7bbaa03bc1ee2695e2cad69b0d2d01fe5878b08b4e9acb4062ec91458f752d7e
     Bold: sha256 4b39f5aec21bbc121931af3619eb88cab62d620dce1bbd83a76e64c337bc2de2
 
+  fonts/LibmsdfTerminalSymbols-Regular.ttf ("Libmsdf Terminal Symbols"), and
+  the atlas terminal-symbols-48.atlas baked from it
+    Feature: font-ofl-noto-terminal-symbols (or fonts-ofl-terminal)
+    A Modified Version merged by libmsdf (fonts/terminal_symbols.py) from
+    five Noto faces, each under the SIL Open Font License 1.1 with no
+    Reserved Font Name:
+      Noto Sans Mono: Copyright 2022 The Noto Project Authors
+        (https://github.com/notofonts/latin-greek-cyrillic);
+        ofl/notosansmono/NotoSansMono[wdth,wght].ttf,
+        sha256 2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081
+      Noto Sans Symbols 2: Copyright 2022 The Noto Project Authors
+        (https://github.com/notofonts/symbols);
+        ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf,
+        sha256 7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21
+      Noto Sans Symbols: Copyright 2022 The Noto Project Authors
+        (https://github.com/notofonts/symbols);
+        ofl/notosanssymbols/NotoSansSymbols[wght].ttf,
+        sha256 f7e7e04b4a24b6c78893d50cbfd2b2f6cae49617ab047bfef668d252adb128f7
+      Noto Sans Math: Copyright 2022 Google LLC;
+        ofl/notosansmath/NotoSansMath-Regular.ttf,
+        sha256 3f495fe933c06786e4d5f6d86b8ee70b6753a68ee3b9d87528726de0f6e2c47d
+      Noto Emoji: Copyright 2013 Google LLC;
+        ofl/notoemoji/NotoEmoji[wght].ttf,
+        sha256 de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551
+    All from google/fonts e7db6ca603fd4862010383ff17ffd6cc4ffac1c0. The
+    variable faces are instanced at wght 400 (and wdth 100); the glyphs of
+    the terminal symbol groups in fonts/coverage-groups.txt are taken from
+    them, scaled to 1000 units per em, remapped and fitted onto Noto Sans
+    Mono's 600-unit cell, and renamed; no layout tables or hinting are kept.
+    This file: sha256 ecd8c840da5ab1c15975f76a0fd23322730a79c760a70fa8a636b7436781bcf8
+
 -----------------------------------------------------------------------------
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

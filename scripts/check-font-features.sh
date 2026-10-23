@@ -23,8 +23,9 @@ export CARGO_INCREMENTAL=0
 QUICK=${1:-}
 FEATURES=(font-apache-roboto-regular font-apache-roboto-bold font-apache-roboto-italic
           font-apache-roboto-msymbols font-ofl-grenze-gotisch font-ofl-texturina
-          font-ofl-noto-sans-mono fonts-apache-roboto fonts-ofl-ledger)
-ALL=fonts-apache-roboto,fonts-ofl-ledger,font-ofl-noto-sans-mono
+          font-ofl-noto-sans-mono font-ofl-noto-terminal-symbols
+          fonts-apache-roboto fonts-ofl-ledger)
+ALL=fonts-apache-roboto,fonts-ofl-ledger,font-ofl-noto-sans-mono,font-ofl-noto-terminal-symbols
 
 step() { printf '\n== %s\n' "$*"; }
 

@@ -5,7 +5,10 @@
 //! libmsdf's build script and tests can name the files and features without
 //! the baker.
 
-use crate::coverage::{COVERAGE_MATH, COVERAGE_SYMBOLS, COVERAGE_TEXT, Coverage};
+use crate::coverage::{
+    COVERAGE_MATH, COVERAGE_SYMBOLS, COVERAGE_TERMINAL, COVERAGE_TERMINAL_EMOJI, COVERAGE_TEXT,
+    Coverage,
+};
 use crate::{ATLAS_COLS, CapPlacement, GlyphStyle};
 
 /// The cell size every bundled atlas is baked at.
@@ -48,6 +51,9 @@ pub enum BundledAtlas {
     /// Noto Sans Mono Regular with Bold as a style layer, two 16-column
     /// layers, at the terminal cap placement.
     NotoSansMono,
+    /// The terminal symbol page, one 16-column layer, sharing Noto Sans
+    /// Mono's baseline.
+    TerminalSymbols,
 }
 
 const fn hex(s: &str) -> [u8; 32] {
@@ -135,6 +141,20 @@ const NOTO_SANS_MONO_BOLD: BundledFace = BundledFace {
     style: GlyphStyle::Bold,
 };
 
+const TERMINAL_SYMBOLS: BundledFace = BundledFace {
+    file: "LibmsdfTerminalSymbols-Regular.ttf",
+    sha256: hex("ecd8c840da5ab1c15975f76a0fd23322730a79c760a70fa8a636b7436781bcf8"),
+    upstream_sha256: None,
+    style: GlyphStyle::Regular,
+};
+
+/// The symbol page's placement: Noto Sans Mono's, with its cap height (717
+/// of 1000) given, since the merged face has no `A`.
+const TERMINAL_SYMBOLS_CAP: CapPlacement = CapPlacement {
+    top_frac: CapPlacement::TERMINAL_TOP_FRAC,
+    height_em: Some(0.717),
+};
+
 /// The terminal faces' cap placement
 /// (`docs/design/20261023_01_TERMINAL_FONTS_PLAN.md`, section 4.2).
 const TERMINAL_CAP: CapPlacement = CapPlacement {
@@ -144,7 +164,7 @@ const TERMINAL_CAP: CapPlacement = CapPlacement {
 
 impl BundledAtlas {
     /// Every bundled atlas.
-    pub const ALL: [BundledAtlas; 8] = [
+    pub const ALL: [BundledAtlas; 9] = [
         BundledAtlas::RobotoRegular,
         BundledAtlas::RobotoBold,
         BundledAtlas::RobotoItalic,
@@ -153,6 +173,7 @@ impl BundledAtlas {
         BundledAtlas::GrenzeGotisch,
         BundledAtlas::Texturina,
         BundledAtlas::NotoSansMono,
+        BundledAtlas::TerminalSymbols,
     ];
 
     /// The atlas file's name (in `OUT_DIR/bundled/`, `out/bundled/`).
@@ -166,6 +187,7 @@ impl BundledAtlas {
             BundledAtlas::GrenzeGotisch => "grenze-gotisch-48.atlas",
             BundledAtlas::Texturina => "texturina-48.atlas",
             BundledAtlas::NotoSansMono => "noto-sans-mono-48.atlas",
+            BundledAtlas::TerminalSymbols => "terminal-symbols-48.atlas",
         }
     }
 
@@ -184,6 +206,7 @@ impl BundledAtlas {
             BundledAtlas::GrenzeGotisch => &["font-ofl-grenze-gotisch"],
             BundledAtlas::Texturina => &["font-ofl-texturina"],
             BundledAtlas::NotoSansMono => &["font-ofl-noto-sans-mono"],
+            BundledAtlas::TerminalSymbols => &["font-ofl-noto-terminal-symbols"],
         }
     }
 
@@ -198,6 +221,7 @@ impl BundledAtlas {
             BundledAtlas::GrenzeGotisch => &[GRENZE_GOTISCH],
             BundledAtlas::Texturina => &[TEXTURINA],
             BundledAtlas::NotoSansMono => &[NOTO_SANS_MONO_REGULAR, NOTO_SANS_MONO_BOLD],
+            BundledAtlas::TerminalSymbols => &[TERMINAL_SYMBOLS],
         }
     }
 
@@ -206,14 +230,20 @@ impl BundledAtlas {
     pub const fn is_ofl(self) -> bool {
         matches!(
             self,
-            BundledAtlas::GrenzeGotisch | BundledAtlas::Texturina | BundledAtlas::NotoSansMono
+            BundledAtlas::GrenzeGotisch
+                | BundledAtlas::Texturina
+                | BundledAtlas::NotoSansMono
+                | BundledAtlas::TerminalSymbols
         )
     }
 
     /// What this atlas covers: the shipped coverage for the Roboto faces,
-    /// the text groups for the OFL faces.
+    /// the terminal groups for the symbol page, the text groups for the
+    /// other OFL faces.
     pub fn coverage(self) -> Coverage {
-        if self.is_ofl() {
+        if self == BundledAtlas::TerminalSymbols {
+            Coverage::Groups(vec![COVERAGE_TERMINAL, COVERAGE_TERMINAL_EMOJI])
+        } else if self.is_ofl() {
             Coverage::Groups(vec![COVERAGE_TEXT, COVERAGE_SYMBOLS, COVERAGE_MATH])
         } else {
             Coverage::Shipped
@@ -231,6 +261,7 @@ impl BundledAtlas {
     pub const fn cap(self) -> CapPlacement {
         match self {
             BundledAtlas::NotoSansMono => TERMINAL_CAP,
+            BundledAtlas::TerminalSymbols => TERMINAL_SYMBOLS_CAP,
             _ => CapPlacement::DEFAULT,
         }
     }
@@ -257,6 +288,11 @@ impl BundledAtlas {
                 "OFL-1.1",
                 "Noto Sans Mono",
                 &[GlyphStyle::Regular, GlyphStyle::Bold],
+            )],
+            BundledAtlas::TerminalSymbols => &[(
+                "OFL-1.1",
+                "Noto Sans Mono, Noto Sans Symbols 2, Noto Sans Symbols, Noto Sans Math, Noto Emoji",
+                R,
             )],
         }
     }

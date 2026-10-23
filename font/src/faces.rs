@@ -11,6 +11,7 @@
 //! | `font-ofl-grenze-gotisch` | [`GRENZE_GOTISCH_TTF`] | OFL-1.1 |
 //! | `font-ofl-texturina` | [`TEXTURINA_TTF`] | OFL-1.1 |
 //! | `font-ofl-noto-sans-mono` | [`NOTO_SANS_MONO_REGULAR_TTF`], [`NOTO_SANS_MONO_BOLD_TTF`] | OFL-1.1 |
+//! | `font-ofl-noto-terminal-symbols` | [`TERMINAL_SYMBOLS_TTF`] | OFL-1.1 |
 //!
 //! A TTF constant also needs the `shaper` feature (on by default), since
 //! nothing else in libmsdf reads a TTF. With no font feature enabled the
@@ -187,3 +188,14 @@ pub const NOTO_SANS_MONO_REGULAR_TTF: &[u8] =
 #[cfg(all(feature = "font-ofl-noto-sans-mono", feature = "shaper"))]
 pub const NOTO_SANS_MONO_BOLD_TTF: &[u8] =
     include_bytes!("../../fonts/NotoSansMono-Bold-subset.ttf");
+
+/// **The terminal symbol page's face**, "Libmsdf Terminal Symbols" (SIL OFL
+/// 1.1, a Modified Version of five Noto faces with no Reserved Font Name):
+/// merged by `fonts/terminal_symbols.py` from Noto Sans Mono, Noto Sans
+/// Symbols 2, Noto Sans Symbols, Noto Sans Math and Noto Emoji, and set on
+/// Noto Sans Mono's 600-unit cell. Every advance is one cell or two, so the
+/// advance is the width (`docs/design/20261023_01_TERMINAL_FONTS_PLAN.md`,
+/// section 4.4). Provenance and licence: `FONTS-LICENSE-OFL.txt`.
+#[cfg(all(feature = "font-ofl-noto-terminal-symbols", feature = "shaper"))]
+pub const TERMINAL_SYMBOLS_TTF: &[u8] =
+    include_bytes!("../../fonts/LibmsdfTerminalSymbols-Regular.ttf");

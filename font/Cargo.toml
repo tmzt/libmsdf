@@ -38,6 +38,7 @@ font-apache-roboto-msymbols = []
 font-ofl-grenze-gotisch = []
 font-ofl-texturina = []
 font-ofl-noto-sans-mono = []
+font-ofl-noto-terminal-symbols = []
 
 [[bin]]
 name = "libmsdf-bake"

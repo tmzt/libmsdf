@@ -50,8 +50,8 @@ pub use atlas::{
 pub use atlas_shaper::{AtlasShaper, NoLayout, RunShaper, is_default_ignorable};
 pub use bundled::{BUNDLED_ATLAS_GLYPH_SIZE, BUNDLED_ATLAS_PX_RANGE, BundledAtlas, BundledFace};
 pub use coverage::{
-    COVERAGE_MATH, COVERAGE_SYMBOLS, COVERAGE_TEXT, Coverage, CoverageGroup, CoverageGroupId,
-    FaceCoverage, GroupCoverage, MissingPolicy,
+    COVERAGE_MATH, COVERAGE_SYMBOLS, COVERAGE_TERMINAL, COVERAGE_TERMINAL_EMOJI, COVERAGE_TEXT,
+    Coverage, CoverageGroup, CoverageGroupId, FaceCoverage, GroupCoverage, MissingPolicy,
 };
 pub use glyph_table::GlyphEntry;
 pub use layout::{

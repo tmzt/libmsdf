@@ -140,8 +140,20 @@ for entry in "${FIXED[@]}"; do
     compare "$last" "$name" "$want"
 done
 
+# Merged from several upstream faces (the terminal symbol page).
+# committed name | script | output sha256
+MERGED=(
+    "LibmsdfTerminalSymbols-Regular.ttf|terminal_symbols.py|ecd8c840da5ab1c15975f76a0fd23322730a79c760a70fa8a636b7436781bcf8"
+)
+for entry in "${MERGED[@]}"; do
+    IFS='|' read -r name script want <<<"$entry"
+    # terminal_symbols.py sets head.created and head.modified itself.
+    py - "$fonts/$script" "$up" "$work/$name" >/dev/null
+    compare "$work/$name" "$name" "$want"
+done
+
 if [ "$write" = 1 ] && [ "$status" != 0 ]; then
-    for entry in "${OFL[@]}" "${STYLE[@]}"; do
+    for entry in "${OFL[@]}" "${STYLE[@]}" "${MERGED[@]}"; do
         IFS='|' read -r name _ <<<"$entry"
         cp "$work/$name" "$fonts/$name"
         echo "wrote fonts/$name (update its sha256 in font/src/bundled.rs and FONTS-LICENSE-*.txt)"

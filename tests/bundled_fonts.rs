@@ -222,6 +222,8 @@ fn bundled_atlases_match_the_reference() {
     atlases.push(("texturina-48.atlas", libmsdf::TEXTURINA_ATLAS));
     #[cfg(feature = "font-ofl-noto-sans-mono")]
     atlases.push(("noto-sans-mono-48.atlas", libmsdf::NOTO_SANS_MONO_ATLAS));
+    #[cfg(feature = "font-ofl-noto-terminal-symbols")]
+    atlases.push(("terminal-symbols-48.atlas", libmsdf::TERMINAL_SYMBOLS_ATLAS));
 
     let recorded = include_str!("../fonts/bundled.sha256");
     for (name, bytes) in atlases {
@@ -378,6 +380,165 @@ mod noto_sans_mono {
             .collect();
         eprintln!("noto-sans-mono-48.atlas cells per layer: {cells:?}");
         assert!(cells.iter().all(|&n| n > 320 && n <= 640), "{cells:?}");
+    }
+}
+
+/// **The terminal symbol page** (terminal fonts plan, step 4): the merged
+/// face's coverage and cell geometry (section 4.4's rules, read back from the
+/// committed face), and the atlas baked from it.
+#[cfg(feature = "font-ofl-noto-terminal-symbols")]
+mod terminal_symbols {
+    use libmsdf::font::coverage::{
+        COVERAGE_TERMINAL, COVERAGE_TERMINAL_EMOJI, CoverageGroupId, MissingPolicy,
+    };
+    use libmsdf::{FontAtlas, GlyphStyle};
+
+    const CELL: i16 = 600;
+    const WINDOW: (i16, i16) = (-271, 1029);
+    const MARGIN: i16 = 30;
+    const OVERHANG: i16 = 100;
+
+    fn declared() -> Vec<char> {
+        let mut v = COVERAGE_TERMINAL.codepoints();
+        v.extend(COVERAGE_TERMINAL_EMOJI.codepoints());
+        v
+    }
+
+    /// The emoji drawn two cells wide: all but the two narrow ones, and the
+    /// wide forms.
+    fn wide(ch: char) -> bool {
+        COVERAGE_TERMINAL_EMOJI.codepoints().contains(&ch) && !matches!(ch, '\u{26A0}' | '\u{27A1}')
+    }
+
+    #[cfg(feature = "shaper")]
+    #[test]
+    fn the_face_maps_exactly_the_terminal_groups() {
+        let face = ttf_parser::Face::parse(libmsdf::TERMINAL_SYMBOLS_TTF, 0).unwrap();
+        assert_eq!(face.units_per_em(), 1000);
+        let mut mapped = Vec::new();
+        for sub in face.tables().cmap.unwrap().subtables {
+            if sub.is_unicode() {
+                sub.codepoints(|cp| mapped.push(cp));
+            }
+        }
+        mapped.sort_unstable();
+        mapped.dedup();
+        let want: Vec<u32> = declared().iter().map(|&c| c as u32).collect();
+        assert_eq!(mapped.len(), 606);
+        assert_eq!(mapped, {
+            let mut w = want.clone();
+            w.sort_unstable();
+            w
+        });
+    }
+
+    #[cfg(feature = "shaper")]
+    #[test]
+    fn every_glyph_sits_on_its_cells() {
+        let face = ttf_parser::Face::parse(libmsdf::TERMINAL_SYMBOLS_TTF, 0).unwrap();
+        for ch in declared() {
+            let g = face.glyph_index(ch).expect("mapped");
+            let cells = if wide(ch) { 2 } else { 1 };
+            let adv = face.glyph_hor_advance(g).unwrap() as i16;
+            assert_eq!(adv, cells * CELL, "U+{:04X}", ch as u32);
+            let Some(bb) = face.glyph_bounding_box(g) else {
+                continue;
+            };
+            let cp = ch as u32;
+            if (0x2500..=0x259F).contains(&cp) {
+                // Box drawing and blocks: inside the overhang, and every edge
+                // that reaches the cell's edge reaches past it.
+                assert!(bb.x_min >= -40 && bb.x_max <= 640, "U+{cp:04X} {bb:?}");
+                assert!(
+                    bb.y_min >= WINDOW.0 - OVERHANG && bb.y_max <= WINDOW.1 + OVERHANG,
+                    "U+{cp:04X} {bb:?}"
+                );
+                if (0x2591..=0x2593).contains(&cp) {
+                    assert!(
+                        bb.y_min >= WINDOW.0 && bb.y_max <= WINDOW.1,
+                        "shade U+{cp:04X}"
+                    );
+                } else {
+                    for (edge, past) in [
+                        (bb.x_min <= 0, bb.x_min == -40),
+                        (bb.x_max >= CELL, bb.x_max == 640),
+                        (bb.y_max >= WINDOW.1, bb.y_max == WINDOW.1 + OVERHANG),
+                        (bb.y_min <= WINDOW.0, bb.y_min == WINDOW.0 - OVERHANG),
+                    ] {
+                        assert!(
+                            !edge || past,
+                            "U+{cp:04X} touches an edge short of the overhang: {bb:?}"
+                        );
+                    }
+                }
+            } else {
+                // Everything else: fitted inside its cells and the window, less
+                // the margin (one unit of rounding).
+                assert!(
+                    bb.x_min >= MARGIN - 1 && bb.x_max <= cells * CELL - MARGIN + 1,
+                    "U+{cp:04X} {bb:?}"
+                );
+                assert!(
+                    bb.y_min >= WINDOW.0 + MARGIN - 1 && bb.y_max <= WINDOW.1 - MARGIN + 1,
+                    "U+{cp:04X} {bb:?}"
+                );
+            }
+        }
+        // ▀ and ▄ meet at the line box's middle.
+        let half = |c| {
+            face.glyph_bounding_box(face.glyph_index(c).unwrap())
+                .unwrap()
+        };
+        assert_eq!(half('\u{2580}').y_min, half('\u{2584}').y_max);
+    }
+
+    /// The page shares Noto Sans Mono's cap height (717 of 1000), so it shares
+    /// its baseline.
+    #[cfg(all(feature = "font-ofl-noto-sans-mono", feature = "shaper"))]
+    #[test]
+    fn the_page_and_the_text_share_a_baseline() {
+        let mono = ttf_parser::Face::parse(libmsdf::NOTO_SANS_MONO_REGULAR_TTF, 0).unwrap();
+        let cap = mono
+            .glyph_bounding_box(mono.glyph_index('A').unwrap())
+            .unwrap()
+            .y_max;
+        assert_eq!(cap as f64 / mono.units_per_em() as f64, 0.717);
+        let text = FontAtlas::from_bytes(libmsdf::NOTO_SANS_MONO_ATLAS).unwrap();
+        let page = FontAtlas::from_bytes(libmsdf::TERMINAL_SYMBOLS_ATLAS).unwrap();
+        assert_eq!(
+            page.text_baseline_frac().unwrap(),
+            text.text_baseline_frac().unwrap()
+        );
+    }
+
+    #[test]
+    fn the_atlas_is_one_full_page() {
+        let atlas = FontAtlas::from_bytes(libmsdf::TERMINAL_SYMBOLS_ATLAS).unwrap();
+        assert_eq!((atlas.width, atlas.height), (800, 2000));
+        assert_eq!(atlas.layer_count(), 1);
+        assert_eq!(
+            atlas.glyphs.len(),
+            607,
+            "583 symbols, 23 emoji and the placeholder"
+        );
+        let cov = atlas.coverage(GlyphStyle::Regular).unwrap();
+        let ids: Vec<u8> = cov.groups.iter().map(|g| g.id).collect();
+        assert_eq!(
+            ids,
+            [
+                CoverageGroupId::TerminalSymbols as u8,
+                CoverageGroupId::TerminalEmoji as u8
+            ]
+        );
+        for g in &cov.groups {
+            assert_eq!(g.policy, MissingPolicy::Skip);
+            assert!(g.skipped.is_empty() && g.waived.is_empty());
+        }
+        let shaper = libmsdf::AtlasShaper::new(&atlas, GlyphStyle::Regular).unwrap();
+        let run = shaper.shape("\u{256D}\u{2500}\u{280B}\u{1F916}\u{2714}");
+        assert_eq!(run.notdef_count(), 0);
+        let adv: Vec<i32> = run.glyphs.iter().map(|g| g.x_advance).collect();
+        assert_eq!(adv, [600, 600, 600, 1200, 600]);
     }
 }
 

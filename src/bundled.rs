@@ -17,6 +17,8 @@ pub use crate::font::faces::ROBOTO_BOLD_ASCII;
 pub use crate::font::faces::ROBOTO_ITALIC_ASCII;
 #[cfg(all(feature = "font-apache-roboto-regular", feature = "shaper"))]
 pub use crate::font::faces::ROBOTO_REGULAR_ASCII;
+#[cfg(all(feature = "font-ofl-noto-terminal-symbols", feature = "shaper"))]
+pub use crate::font::faces::TERMINAL_SYMBOLS_TTF;
 #[cfg(all(feature = "font-ofl-texturina", feature = "shaper"))]
 pub use crate::font::faces::TEXTURINA_TTF;
 #[cfg(all(feature = "font-ofl-noto-sans-mono", feature = "shaper"))]
@@ -70,5 +72,12 @@ pub const TEXTURINA_ATLAS: &[u8] = include_bytes!("../fonts/atlases/texturina-48
 /// Bold is `GlyphStyle::Bold`: `AtlasShaper::new(&atlas, GlyphStyle::Bold)`.
 #[cfg(feature = "font-ofl-noto-sans-mono")]
 pub const NOTO_SANS_MONO_ATLAS: &[u8] = include_bytes!("../fonts/atlases/noto-sans-mono-48.atlas");
+/// The terminal symbol page: one 16-column layer (800 x 2000 texels) of box
+/// drawing, block elements, Braille, geometric shapes, curated symbols and
+/// monochrome emoji, on Noto Sans Mono's cell and baseline
+/// (`docs/design/20261023_01_TERMINAL_FONTS_PLAN.md`, section 4.5).
+#[cfg(feature = "font-ofl-noto-terminal-symbols")]
+pub const TERMINAL_SYMBOLS_ATLAS: &[u8] =
+    include_bytes!("../fonts/atlases/terminal-symbols-48.atlas");
 
 pub use crate::font::{BUNDLED_ATLAS_GLYPH_SIZE, BUNDLED_ATLAS_PX_RANGE};
