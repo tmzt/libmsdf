@@ -1,7 +1,7 @@
 ---
 title: A terminal face and a symbol page, from Noto
 date: 2026-10-23
-status: In implementation
+status: Implemented
 covers: >
   A bundled monospace face for terminal-style text, Noto Sans Mono (SIL OFL
   1.1) Regular and Bold, baked as one two-layer atlas; a symbol page, one
@@ -777,3 +777,29 @@ plan already does:
 **Implementation starts** with step 1 in the commit that adds this
 amendment. The status is now `In implementation`, and the document is
 immutable (Rule 1.5). Departures are recorded in `CHANGES.md`.
+
+## Amendment — 2026-10-23 03:28 EDT: implemented
+
+Every step is done and its Done when holds; the status is Implemented.
+
+- Step 1, the faces: 2a38b6f (the Noto sources in
+  `fetch-upstream-fonts.sh`, `ofl_subset.py --instance`, the two Noto Sans
+  Mono subsets, reproduced by `rebuild-fonts.sh` and shaping as the
+  upstream instances do).
+- Step 2, cap placement: 2c90aed (`CapPlacement`, the `_with` functions,
+  `BakeOptions::cap`, the report's ink line; every earlier atlas
+  byte-identical).
+- Step 3, the text atlas: c721474 (`font-ofl-noto-sans-mono`,
+  `BundledAtlas::NotoSansMono`, `noto-sans-mono-48.atlas`).
+- Step 4, the symbol face and page: 54d945f (`terminal_symbols.py`, the
+  merged face, the two coverage groups, `font-ofl-noto-terminal-symbols`,
+  `terminal-symbols-48.atlas`), with 40a7e9f (Rule 2 centres the advance
+  box).
+- Step 5, the shaper and the draw call: 8212c19.
+- Step 6, the preset and the render checks: c351b91, with f75671b (the two
+  shader changes) and 7348020 (`check-font-features.sh`).
+- Step 7, the release: c3cf511, `libmsdf` and `libmsdf-font` at 0.5.0,
+  the `VERSIONS.md` entry, and the tag `v0.5.0`.
+
+The departures and the corrected figure of section 3.3 are recorded in
+CHANGES.md (2d399fb).
