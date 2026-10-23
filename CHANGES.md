@@ -571,3 +571,19 @@ the owner with the shaping helper, and implemented.
   the set. `upload_msdf_atlas` does not panic: it logs an error and
   uploads what fits. `upload_atlas_set` does the same, which keeps to the
   plan's own rule of no panics in release.
+
+## 2026-10-23 02:29 EDT — Plan: a terminal face and a symbol page, from Noto
+
+New plan, docs/design/20261023_01_TERMINAL_FONTS_PLAN.md (Draft), on the
+owner's instruction relayed by another session; not yet reviewed by the
+owner, and nothing is implemented.
+- **The faces:** Noto Sans Mono Regular and Bold, one two-layer 16-column
+  atlas. A symbol page merged from Noto Sans Mono, Noto Sans Symbols 2,
+  Noto Sans Symbols, Noto Sans Math and Noto Emoji onto the 0.6 em cell.
+- **Measured:** the seven requested blocks come to 1,057 codepoints, more
+  than one 640-cell page. The page holds four of them in full plus curated
+  sets: 605 cells. 166 accented capitals of Noto Sans Mono pass the cell
+  window at the default cap placement, so the placement becomes a bake
+  option. Box drawing is remapped onto the 1.3 em line box to join.
+- **Release:** breaking, so 0.5.0 (`BundledAtlas` gains variants;
+  `BakeOptions` gains `cap`).
