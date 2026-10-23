@@ -98,6 +98,11 @@ Before writing, modifying or deleting code for a new planned work item:
    area keeps its own log file. Entries are appended under dated headings, with
    `./`-relative links and descriptions that stand on their own without the
    images. Earlier entries are never edited.
+6. Other documents under `docs/` that record findings, such as
+   `docs/FONT_<NAME>.md`, are append-only. Each addition is a section headed
+   `## YYYY-MM-DD HH:MM TZ — <subject>`, timestamped from the system clock.
+   Earlier sections are never edited; a correction is a later dated section
+   that says what it corrects.
 
 ## CRITICAL RULE 4: DECISION STATUS IN THE README
 
