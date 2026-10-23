@@ -97,7 +97,10 @@ Before writing, modifying or deleting code for a new planned work item:
 5. Renders and other generated evidence go under the gitignored `out/`. Each
    area keeps its own log file. Entries are appended under dated headings, with
    `./`-relative links and descriptions that stand on their own without the
-   images. Earlier entries are never edited.
+   images. Earlier entries are never edited. Each run of evidence gets its
+   own directory in its area, named like the plans: `YYYYMMDD_NN_name/`, with
+   `NN` the sequence within the day (for example
+   `out/fonts/20261023_01_cap_clipping/`).
 6. Other documents under `docs/` that record findings, such as
    `docs/FONT_<NAME>.md`, are append-only. Each addition is a section headed
    `## YYYY-MM-DD HH:MM TZ — <subject>`, timestamped from the system clock.
