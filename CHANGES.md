@@ -587,3 +587,72 @@ owner, and nothing is implemented.
   option. Box drawing is remapped onto the 1.3 em line box to join.
 - **Release:** breaking, so 0.5.0 (`BundledAtlas` gains variants;
   `BakeOptions` gains `cap`).
+
+## 2026-10-23 03:28 EDT — 0.5.0 released: a terminal face and a symbol page, from Noto
+
+The terminal fonts plan (docs/design/20261023_01_TERMINAL_FONTS_PLAN.md),
+approved by the owner with the answers in its 02:32 EDT amendment, and
+implemented: steps 1 to 7 in 2a38b6f, 2c90aed, c721474, 54d945f, 8212c19,
+c351b91 and c3cf511 (tag `v0.5.0`), with the departures below in 40a7e9f,
+f75671b and 7348020.
+
+Departures (Rule 1.7), each needed to make the plan work:
+- **Rule 2 centres the advance box (section 4.4; 40a7e9f).** Centring each
+  glyph's ink moved every Braille pattern differently: a one-column
+  pattern such as ⠸ drew 3 px off the column ⠿ puts the same dots in.
+  `terminal_symbols.py` centres the source's advance box instead and
+  nudges the ink inside the margins only where it would cross one.
+- **Two shader changes (section 4.2 said none; f75671b).** The render
+  checks of step 6 found that box drawing did not join:
+  - the glyph sample is clamped to the cell's last texel centre, since the
+    last half texel blended in the zeroed padding and cut a black row
+    under box drawing at some line positions;
+  - a text run's glyphs are composited as one shape (the largest coverage
+    per pixel), since glyph-over-glyph compositing beaded every cell join
+    (1.48 of the stroke's ink at 12 px x1; 1.09 now).
+
+  The golden scene differs in 4 of 320,000 pixels, by at most 25 levels,
+  and passes its tolerance. VERSIONS.md marks the compositing change
+  Breaking (rendering).
+- **Face hashes (section 4.1).** The plan said `fonts/bundled.sha256` gains
+  the three faces. That file records atlases. The faces' sha256s are in
+  `BundledFace` (font/src/bundled.rs), `rebuild-fonts.sh` and
+  `FONTS-LICENSE-OFL.txt`, as for every other face. The two new atlases
+  have their lines in `bundled.sha256`.
+- **`ofl_subset.py --instance` round-trips the instance** through the file
+  format. Otherwise its provenance check compared the subset's stored
+  integer coordinates with the instance's floats and failed on Bold.
+- **The render checks' details (section 5).**
+  - Coverage is read from the frame's alpha where a glyph drew.
+  - Stroke continuity is the ink summed across the stroke's width, along
+    stretches between crossings that span the cell and line boundaries.
+  - The rounded corners are sampled from where their arcs end.
+  - The Braille check runs at 24 physical px and up, since below that the
+    dots of a column touch.
+  - The A-ring check places the ring's top within 1 px.
+- **`check-font-features.sh` (7348020).** Its byte probe failed at 73ea080
+  already: the probes share a target directory, and the all-features
+  build's rlibs matched the no-default-features probe's globs. It now
+  removes libmsdf's artifacts before each probe. The whole script passes.
+
+Corrections and findings:
+- **Section 3.3's 166 glyphs is 65.** The measurement also swept the
+  upstream face's box, block and geometric glyphs, which the text atlas
+  does not carry. 65 TEXT glyphs, the accented capitals and ĥ ĺ, pass the
+  default window, by up to 83 units; none pass at the terminal placement.
+- **For the owner: the existing OFL atlases clip too.** The new report line
+  shows that at the default placement Texturina has 54 glyphs, by up to 53
+  units, and Grenze Gotisch 2, by 47, whose ink passes the cell top. Their
+  bytes are unchanged here. A `CapPlacement` for them would fix it with a
+  re-bake, which changes committed atlases and needs the owner's
+  agreement. The Roboto atlases use the shipped coverage, which the report
+  does not cover.
+- **Measured.**
+  - Noto Sans Mono: 407 and 406 cells (Regular, Bold), 9,637,288 bytes.
+  - The symbol page: 607 cells, 4,827,764 bytes.
+  - Box-drawing joins at most 1.09 of mid-cell, no seam at 12 to 24 px and
+    scale 1 to 3.
+  - Evidence: out/terminal/LOG.md.
+- The Bold subset's name ID 2 still reads "Regular", from the variable
+  face's default instance. libmsdf reads the style from the bundled table,
+  not the name.
