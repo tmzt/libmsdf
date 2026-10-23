@@ -13,10 +13,7 @@ use sha2::{Digest, Sha256};
 
 use crate::atlas::{BuildError, FontAtlasBuilder};
 use crate::bundled::{BUNDLED_ATLAS_GLYPH_SIZE, BUNDLED_ATLAS_PX_RANGE, BundledAtlas, hex_of};
-use crate::coverage::{
-    COVERAGE_MATH, COVERAGE_SYMBOLS, COVERAGE_TEXT, Coverage, CoverageGroupId, FaceCoverage,
-    GroupCoverage, MissingPolicy,
-};
+use crate::coverage::{Coverage, CoverageGroupId, FaceCoverage, GroupCoverage, MissingPolicy};
 use crate::{ATLAS_COLS, CapPlacement, GlyphSet, GlyphStyle, LayoutError, LayoutOptions};
 
 /// One face to bake, and how. Every field is an input to the bytes.
@@ -476,10 +473,9 @@ impl Baker {
             .iter()
             .map(|f| (fonts_dir.join(f.file), f.sha256))
             .collect();
-        if atlas.is_ofl() {
-            opts.coverage = Coverage::Groups(vec![COVERAGE_TEXT, COVERAGE_SYMBOLS, COVERAGE_MATH]);
-            opts.columns = 16;
-        }
+        opts.coverage = atlas.coverage();
+        opts.columns = atlas.columns();
+        opts.cap = atlas.cap();
         opts.waive = atlas.waivers().to_vec();
         (fonts_dir.join(faces[0].file), opts)
     }

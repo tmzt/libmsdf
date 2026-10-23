@@ -61,6 +61,9 @@ font-apache-roboto-italic = ["libmsdf-font/font-apache-roboto-italic"]
 font-apache-roboto-msymbols = ["libmsdf-font/font-apache-roboto-msymbols"]
 font-ofl-grenze-gotisch = ["libmsdf-font/font-ofl-grenze-gotisch"]
 font-ofl-texturina = ["libmsdf-font/font-ofl-texturina"]
+# The terminal face: Noto Sans Mono Regular and Bold, one two-layer atlas
+# (docs/design/20261023_01_TERMINAL_FONTS_PLAN.md).
+font-ofl-noto-sans-mono = ["libmsdf-font/font-ofl-noto-sans-mono"]
 fonts-apache-roboto = [
     "font-apache-roboto-regular",
     "font-apache-roboto-bold",

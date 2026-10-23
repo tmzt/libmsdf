@@ -19,6 +19,8 @@ pub use crate::font::faces::ROBOTO_ITALIC_ASCII;
 pub use crate::font::faces::ROBOTO_REGULAR_ASCII;
 #[cfg(all(feature = "font-ofl-texturina", feature = "shaper"))]
 pub use crate::font::faces::TEXTURINA_TTF;
+#[cfg(all(feature = "font-ofl-noto-sans-mono", feature = "shaper"))]
+pub use crate::font::faces::{NOTO_SANS_MONO_BOLD_TTF, NOTO_SANS_MONO_REGULAR_TTF};
 
 // ── The bundled atlases ─────────────────────────────────────────────────
 //
@@ -62,5 +64,11 @@ pub const GRENZE_GOTISCH_ATLAS: &[u8] = include_bytes!("../fonts/atlases/grenze-
 /// (800 x 2000 texels).
 #[cfg(feature = "font-ofl-texturina")]
 pub const TEXTURINA_ATLAS: &[u8] = include_bytes!("../fonts/atlases/texturina-48.atlas");
+/// The terminal face: Noto Sans Mono Regular, with Bold as a style layer
+/// (two 16-column layers, 800 x 2000 texels each), at the terminal cap
+/// placement (`docs/design/20261023_01_TERMINAL_FONTS_PLAN.md`, section 4.3).
+/// Bold is `GlyphStyle::Bold`: `AtlasShaper::new(&atlas, GlyphStyle::Bold)`.
+#[cfg(feature = "font-ofl-noto-sans-mono")]
+pub const NOTO_SANS_MONO_ATLAS: &[u8] = include_bytes!("../fonts/atlases/noto-sans-mono-48.atlas");
 
 pub use crate::font::{BUNDLED_ATLAS_GLYPH_SIZE, BUNDLED_ATLAS_PX_RANGE};

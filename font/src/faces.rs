@@ -10,6 +10,7 @@
 //! | `font-apache-roboto-msymbols` | [`ROBOTO_ASCII_MSYMBOLS`] | Apache-2.0 |
 //! | `font-ofl-grenze-gotisch` | [`GRENZE_GOTISCH_TTF`] | OFL-1.1 |
 //! | `font-ofl-texturina` | [`TEXTURINA_TTF`] | OFL-1.1 |
+//! | `font-ofl-noto-sans-mono` | [`NOTO_SANS_MONO_REGULAR_TTF`], [`NOTO_SANS_MONO_BOLD_TTF`] | OFL-1.1 |
 //!
 //! A TTF constant also needs the `shaper` feature (on by default), since
 //! nothing else in libmsdf reads a TTF. With no font feature enabled the
@@ -171,3 +172,18 @@ pub const GRENZE_GOTISCH_TTF: &[u8] = include_bytes!("../../fonts/GrenzeGotisch[
 /// `FONTS-LICENSE-OFL.txt`.
 #[cfg(all(feature = "font-ofl-texturina", feature = "shaper"))]
 pub const TEXTURINA_TTF: &[u8] = include_bytes!("../../fonts/Texturina[opsz,wght]-subset.ttf");
+
+/// **Noto Sans Mono Regular**, the terminal face (SIL OFL 1.1, no Reserved
+/// Font Name): a static instance at `wght` 400, `wdth` 100, subset by
+/// `fonts/ofl_subset.py --instance` to the TEXT, SYMBOLS and MATH groups,
+/// hinting removed. Every glyph advances 600 of 1000 units, so the cell is
+/// 0.6 em (`docs/design/20261023_01_TERMINAL_FONTS_PLAN.md`). Provenance and
+/// licence: `FONTS-LICENSE-OFL.txt`.
+#[cfg(all(feature = "font-ofl-noto-sans-mono", feature = "shaper"))]
+pub const NOTO_SANS_MONO_REGULAR_TTF: &[u8] =
+    include_bytes!("../../fonts/NotoSansMono-Regular-subset.ttf");
+
+/// **Noto Sans Mono Bold**: as [`NOTO_SANS_MONO_REGULAR_TTF`], at `wght` 700.
+#[cfg(all(feature = "font-ofl-noto-sans-mono", feature = "shaper"))]
+pub const NOTO_SANS_MONO_BOLD_TTF: &[u8] =
+    include_bytes!("../../fonts/NotoSansMono-Bold-subset.ttf");

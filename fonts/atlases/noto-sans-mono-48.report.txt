@@ -1,0 +1,10 @@
+Regular Text: 286 of 287 carried, 0 skipped, 1 waived
+  waived: U+00AD (soft hyphen (U+00AD): Noto Sans Mono has no glyph; default-ignorable, drawn as nothing)
+Regular Symbols: 63 of 63 carried, 0 skipped, 0 waived
+Regular Math: 73 of 77 carried, 4 skipped, 0 waived
+  skipped: U+220F U+2211 U+2213 U+222B
+Bold Text: 286 of 287 carried, 0 skipped, 1 waived
+  waived: U+00AD (soft hyphen (U+00AD): Noto Sans Mono has no glyph; default-ignorable, drawn as nothing)
+Bold Symbols: 63 of 63 carried, 0 skipped, 0 waived
+Bold Math: 73 of 77 carried, 4 skipped, 0 waived
+  skipped: U+220F U+2211 U+2213 U+222B

@@ -5,7 +5,8 @@
 //! libmsdf's build script and tests can name the files and features without
 //! the baker.
 
-use crate::GlyphStyle;
+use crate::coverage::{COVERAGE_MATH, COVERAGE_SYMBOLS, COVERAGE_TEXT, Coverage};
+use crate::{ATLAS_COLS, CapPlacement, GlyphStyle};
 
 /// The cell size every bundled atlas is baked at.
 pub const BUNDLED_ATLAS_GLYPH_SIZE: u32 = 48;
@@ -28,6 +29,7 @@ pub struct BundledFace {
 
 /// **Every atlas libmsdf bundles.**
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum BundledAtlas {
     /// Roboto Regular, one layer.
     RobotoRegular,
@@ -43,6 +45,9 @@ pub enum BundledAtlas {
     GrenzeGotisch,
     /// Texturina (subset), one 16-column layer.
     Texturina,
+    /// Noto Sans Mono Regular with Bold as a style layer, two 16-column
+    /// layers, at the terminal cap placement.
+    NotoSansMono,
 }
 
 const fn hex(s: &str) -> [u8; 32] {
@@ -113,9 +118,33 @@ const TEXTURINA: BundledFace = BundledFace {
     style: GlyphStyle::Regular,
 };
 
+const NOTO_SANS_MONO_REGULAR: BundledFace = BundledFace {
+    file: "NotoSansMono-Regular-subset.ttf",
+    sha256: hex("7bbaa03bc1ee2695e2cad69b0d2d01fe5878b08b4e9acb4062ec91458f752d7e"),
+    upstream_sha256: Some(hex(
+        "2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081",
+    )),
+    style: GlyphStyle::Regular,
+};
+const NOTO_SANS_MONO_BOLD: BundledFace = BundledFace {
+    file: "NotoSansMono-Bold-subset.ttf",
+    sha256: hex("4b39f5aec21bbc121931af3619eb88cab62d620dce1bbd83a76e64c337bc2de2"),
+    upstream_sha256: Some(hex(
+        "2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081",
+    )),
+    style: GlyphStyle::Bold,
+};
+
+/// The terminal faces' cap placement
+/// (`docs/design/20261023_01_TERMINAL_FONTS_PLAN.md`, section 4.2).
+const TERMINAL_CAP: CapPlacement = CapPlacement {
+    top_frac: CapPlacement::TERMINAL_TOP_FRAC,
+    height_em: None,
+};
+
 impl BundledAtlas {
     /// Every bundled atlas.
-    pub const ALL: [BundledAtlas; 7] = [
+    pub const ALL: [BundledAtlas; 8] = [
         BundledAtlas::RobotoRegular,
         BundledAtlas::RobotoBold,
         BundledAtlas::RobotoItalic,
@@ -123,6 +152,7 @@ impl BundledAtlas {
         BundledAtlas::RobotoMsymbolsStyled,
         BundledAtlas::GrenzeGotisch,
         BundledAtlas::Texturina,
+        BundledAtlas::NotoSansMono,
     ];
 
     /// The atlas file's name (in `OUT_DIR/bundled/`, `out/bundled/`).
@@ -135,6 +165,7 @@ impl BundledAtlas {
             BundledAtlas::RobotoMsymbolsStyled => "roboto-msymbols-styled-48.atlas",
             BundledAtlas::GrenzeGotisch => "grenze-gotisch-48.atlas",
             BundledAtlas::Texturina => "texturina-48.atlas",
+            BundledAtlas::NotoSansMono => "noto-sans-mono-48.atlas",
         }
     }
 
@@ -152,6 +183,7 @@ impl BundledAtlas {
             ],
             BundledAtlas::GrenzeGotisch => &["font-ofl-grenze-gotisch"],
             BundledAtlas::Texturina => &["font-ofl-texturina"],
+            BundledAtlas::NotoSansMono => &["font-ofl-noto-sans-mono"],
         }
     }
 
@@ -165,13 +197,42 @@ impl BundledAtlas {
             BundledAtlas::RobotoMsymbolsStyled => &[ROBOTO_MSYMBOLS, ROBOTO_BOLD, ROBOTO_ITALIC],
             BundledAtlas::GrenzeGotisch => &[GRENZE_GOTISCH],
             BundledAtlas::Texturina => &[TEXTURINA],
+            BundledAtlas::NotoSansMono => &[NOTO_SANS_MONO_REGULAR, NOTO_SANS_MONO_BOLD],
         }
     }
 
-    /// Whether this atlas is one of the two OFL faces (coverage groups, 16
+    /// Whether this atlas is one of the OFL faces (coverage groups, 16
     /// columns) rather than a Roboto one (shipped coverage, 8 columns).
     pub const fn is_ofl(self) -> bool {
-        matches!(self, BundledAtlas::GrenzeGotisch | BundledAtlas::Texturina)
+        matches!(
+            self,
+            BundledAtlas::GrenzeGotisch | BundledAtlas::Texturina | BundledAtlas::NotoSansMono
+        )
+    }
+
+    /// What this atlas covers: the shipped coverage for the Roboto faces,
+    /// the text groups for the OFL faces.
+    pub fn coverage(self) -> Coverage {
+        if self.is_ofl() {
+            Coverage::Groups(vec![COVERAGE_TEXT, COVERAGE_SYMBOLS, COVERAGE_MATH])
+        } else {
+            Coverage::Shipped
+        }
+    }
+
+    /// Cell columns per layer: 16 for the OFL faces, [`ATLAS_COLS`] (8)
+    /// for the Roboto ones.
+    pub const fn columns(self) -> u32 {
+        if self.is_ofl() { 16 } else { ATLAS_COLS }
+    }
+
+    /// Where its cells put the cap height: the terminal placement for the
+    /// terminal faces, the default for every other.
+    pub const fn cap(self) -> CapPlacement {
+        match self {
+            BundledAtlas::NotoSansMono => TERMINAL_CAP,
+            _ => CapPlacement::DEFAULT,
+        }
     }
 
     /// The licences each bundled atlas records: `(SPDX, source, styles)`.
@@ -192,6 +253,11 @@ impl BundledAtlas {
             ],
             BundledAtlas::GrenzeGotisch => &[("OFL-1.1", "Grenze Gotisch", R)],
             BundledAtlas::Texturina => &[("OFL-1.1", "Texturina", R)],
+            BundledAtlas::NotoSansMono => &[(
+                "OFL-1.1",
+                "Noto Sans Mono",
+                &[GlyphStyle::Regular, GlyphStyle::Bold],
+            )],
         }
     }
 
@@ -203,6 +269,20 @@ impl BundledAtlas {
                 '\u{17F}',
                 "long s (U+017F): Texturina has no glyph; archaic",
             )],
+            BundledAtlas::NotoSansMono => &[
+                (
+                    GlyphStyle::Regular,
+                    '\u{AD}',
+                    "soft hyphen (U+00AD): Noto Sans Mono has no glyph; default-ignorable, drawn \
+                     as nothing",
+                ),
+                (
+                    GlyphStyle::Bold,
+                    '\u{AD}',
+                    "soft hyphen (U+00AD): Noto Sans Mono has no glyph; default-ignorable, drawn \
+                     as nothing",
+                ),
+            ],
             _ => &[],
         }
     }

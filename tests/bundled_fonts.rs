@@ -220,6 +220,8 @@ fn bundled_atlases_match_the_reference() {
     atlases.push(("grenze-gotisch-48.atlas", libmsdf::GRENZE_GOTISCH_ATLAS));
     #[cfg(feature = "font-ofl-texturina")]
     atlases.push(("texturina-48.atlas", libmsdf::TEXTURINA_ATLAS));
+    #[cfg(feature = "font-ofl-noto-sans-mono")]
+    atlases.push(("noto-sans-mono-48.atlas", libmsdf::NOTO_SANS_MONO_ATLAS));
 
     let recorded = include_str!("../fonts/bundled.sha256");
     for (name, bytes) in atlases {
@@ -269,6 +271,113 @@ fn the_ofl_atlases_shape_from_their_tables() {
         let run = shaper.shape("Treasury 50G \u{141}\u{f3}d\u{17a}");
         assert_eq!(run.notdef_count(), 0);
         assert!(atlas.coverage(GlyphStyle::Regular).is_some());
+    }
+}
+
+/// **The terminal face** (terminal fonts plan, step 3): the committed
+/// instances with their provenance, and a two-layer atlas that shapes
+/// European text in both weights at the terminal cap placement.
+#[cfg(feature = "font-ofl-noto-sans-mono")]
+mod noto_sans_mono {
+    use libmsdf::font::coverage::CoverageGroupId;
+    use libmsdf::{AtlasShaper, FontAtlas, GlyphStyle};
+
+    const TEXT: [&str; 6] = [
+        "Treasury 50G",
+        "\u{141}\u{f3}d\u{17a} \u{c5}l \u{125}",
+        "\u{2039} 25 \u{2030} \u{203a}",
+        "x\u{b2} H\u{2082}O \u{bd}",
+        "2\u{2212}5 \u{2264} 7",
+        "\u{2116} 5 \u{20ac} \u{20bd}",
+    ];
+
+    #[cfg(feature = "shaper")]
+    #[test]
+    fn the_instances_carry_their_provenance() {
+        for (data, weight) in [
+            (libmsdf::NOTO_SANS_MONO_REGULAR_TTF, "wght=400,wdth=100"),
+            (libmsdf::NOTO_SANS_MONO_BOLD_TTF, "wght=700,wdth=100"),
+        ] {
+            let face = ttf_parser::Face::parse(data, 0).unwrap();
+            let name = |id| {
+                face.names()
+                    .into_iter()
+                    .filter(|n| n.name_id == id)
+                    .find_map(|n| n.to_string())
+            };
+            assert_eq!(
+                name(0).as_deref(),
+                Some(
+                    "Copyright 2022 The Noto Project Authors \
+                     (https://github.com/notofonts/latin-greek-cyrillic)"
+                )
+            );
+            assert!(
+                name(5).unwrap().ends_with(&format!(
+                    "; libmsdf subset (U+0020-017F, punctuation); instance {weight}"
+                )),
+                "{weight}"
+            );
+            assert!(
+                face.tables().fvar.is_none(),
+                "{weight} is a static instance"
+            );
+            for ch in TEXT.concat().chars().filter(|c| *c != ' ') {
+                let g = face.glyph_index(ch).expect("mapped");
+                assert_eq!(face.glyph_hor_advance(g), Some(600), "{ch:?} is one cell");
+            }
+        }
+    }
+
+    #[test]
+    fn the_atlas_shapes_both_weights_from_its_tables() {
+        let atlas = FontAtlas::from_bytes(libmsdf::NOTO_SANS_MONO_ATLAS).unwrap();
+        assert_eq!((atlas.width, atlas.height), (800, 2000));
+        assert_eq!(atlas.layer_count(), 2);
+        let mut baselines = Vec::new();
+        for style in [GlyphStyle::Regular, GlyphStyle::Bold] {
+            let shaper = AtlasShaper::new(&atlas, style).unwrap();
+            for s in TEXT {
+                let run = shaper.shape(s);
+                assert_eq!(run.notdef_count(), 0, "{style:?} {s:?}");
+                assert!(
+                    run.glyphs.iter().all(|g| g.x_advance == 600),
+                    "{style:?} {s:?}"
+                );
+            }
+            let cov = atlas.coverage(style).expect("a CVRG per face");
+            let ids: Vec<u8> = cov.groups.iter().map(|g| g.id).collect();
+            assert_eq!(
+                ids,
+                [
+                    CoverageGroupId::Text as u8,
+                    CoverageGroupId::Symbols as u8,
+                    CoverageGroupId::Math as u8
+                ]
+            );
+            assert_eq!(cov.groups[0].waived, vec!['\u{ad}']);
+            assert_eq!(
+                cov.groups[2].skipped,
+                vec!['\u{220f}', '\u{2211}', '\u{2213}', '\u{222b}']
+            );
+            baselines.push(
+                atlas
+                    .set_metrics(style.text_set())
+                    .expect("a text set")
+                    .baseline_frac,
+            );
+        }
+        // Both faces' cap heights are 717 units, at 0.24 of the 1.3 em cell:
+        // the baseline is at (0.24 * 1.3 + 0.717) / 1.3 of the cell.
+        let want = ((0.24 * 1.3 + 0.717) / 1.3) as f32;
+        for b in baselines {
+            assert!((b - want).abs() < 1.0 / 48.0, "baseline {b}, want {want}");
+        }
+        let cells: Vec<usize> = (0..2)
+            .map(|l| atlas.glyphs.iter().filter(|g| g.layer == l).count())
+            .collect();
+        eprintln!("noto-sans-mono-48.atlas cells per layer: {cells:?}");
+        assert!(cells.iter().all(|&n| n > 320 && n <= 640), "{cells:?}");
     }
 }
 

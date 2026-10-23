@@ -35,6 +35,8 @@ pub mod font {
 
     #[cfg(feature = "font-ofl-grenze-gotisch")]
     pub use crate::bundled::GRENZE_GOTISCH_ATLAS;
+    #[cfg(feature = "font-ofl-noto-sans-mono")]
+    pub use crate::bundled::NOTO_SANS_MONO_ATLAS;
     #[cfg(feature = "font-apache-roboto-bold")]
     pub use crate::bundled::ROBOTO_BOLD_ATLAS;
     #[cfg(feature = "font-apache-roboto-italic")]
@@ -64,6 +66,8 @@ pub use crate::core::{
 pub use bundled::GRENZE_GOTISCH_ATLAS;
 #[cfg(all(feature = "font-ofl-grenze-gotisch", feature = "shaper"))]
 pub use bundled::GRENZE_GOTISCH_TTF;
+#[cfg(feature = "font-ofl-noto-sans-mono")]
+pub use bundled::NOTO_SANS_MONO_ATLAS;
 #[cfg(all(feature = "font-apache-roboto-msymbols", feature = "shaper"))]
 pub use bundled::ROBOTO_ASCII_MSYMBOLS;
 #[cfg(all(feature = "font-apache-roboto-bold", feature = "shaper"))]
@@ -91,6 +95,8 @@ pub use bundled::TEXTURINA_ATLAS;
 #[cfg(all(feature = "font-ofl-texturina", feature = "shaper"))]
 pub use bundled::TEXTURINA_TTF;
 pub use bundled::{BUNDLED_ATLAS_GLYPH_SIZE, BUNDLED_ATLAS_PX_RANGE};
+#[cfg(all(feature = "font-ofl-noto-sans-mono", feature = "shaper"))]
+pub use bundled::{NOTO_SANS_MONO_BOLD_TTF, NOTO_SANS_MONO_REGULAR_TTF};
 pub use drawlist::{
     AtlasId, AtlasRef, AtlasSet, AtlasSetError, Contour, DrawEffects, DrawList, Elevation,
     PATH_CUBIC_TOLERANCE, PATH_MAX_SEGMENTS, Path, PathBuilder, PathError, PathSegment, SdfFrame,
