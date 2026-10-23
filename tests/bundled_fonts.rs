@@ -424,7 +424,7 @@ mod terminal_symbols {
         mapped.sort_unstable();
         mapped.dedup();
         let want: Vec<u32> = declared().iter().map(|&c| c as u32).collect();
-        assert_eq!(mapped.len(), 606);
+        assert_eq!(mapped.len(), 615);
         assert_eq!(mapped, {
             let mut w = want.clone();
             w.sort_unstable();
@@ -518,8 +518,8 @@ mod terminal_symbols {
         assert_eq!(atlas.layer_count(), 1);
         assert_eq!(
             atlas.glyphs.len(),
-            607,
-            "583 symbols, 23 emoji and the placeholder"
+            616,
+            "591 symbols, 24 emoji and the placeholder"
         );
         let cov = atlas.coverage(GlyphStyle::Regular).unwrap();
         let ids: Vec<u8> = cov.groups.iter().map(|g| g.id).collect();
@@ -628,5 +628,26 @@ fn every_committed_atlas_round_trips_byte_for_byte() {
             loaded.to_bytes() == bytes,
             "{atlas:?} re-serialises differently"
         );
+    }
+}
+
+/// **Each committed atlas carries its bundled cell box, at the version it
+/// needs** (per-atlas cell box plan, step 4): 5:0.2.0 with a `CELL` table
+/// for Texturina and Grenze Gotisch, 5:0.1.0 and the line box for the rest.
+#[test]
+fn every_committed_atlas_carries_its_cell_box() {
+    use libmsdf::font::{BundledAtlas, CellBox};
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts/atlases");
+    for atlas in BundledAtlas::ALL {
+        let bytes = std::fs::read(dir.join(atlas.file_name())).unwrap();
+        let got = libmsdf::FontAtlas::from_bytes(&bytes).unwrap().cell_box();
+        let want = atlas.cell();
+        assert!(
+            (got.above_em - want.above_em).abs() < 1e-6
+                && (got.below_em - want.below_em).abs() < 1e-6,
+            "{atlas:?}: {got:?}, want {want:?}"
+        );
+        let minor = if want == CellBox::LINE_BOX { 1 } else { 2 };
+        assert_eq!(&bytes[4..8], &[5, 0, minor, 0], "{atlas:?}");
     }
 }

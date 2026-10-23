@@ -69,11 +69,18 @@ fn texturina_without_its_waiver_fails_on_the_long_s() {
     }
 }
 
+/// A bundled atlas baked with `cell` instead of its own box.
+fn bake_with(atlas: BundledAtlas, cell: libmsdf::font::CellBox) -> FontAtlas {
+    let (ttf, mut opts) = Baker::bundled_options(atlas, &fonts());
+    opts.cell = cell;
+    FontAtlas::from_bytes(&Baker::bake_face(&ttf, &opts).unwrap()).unwrap()
+}
+
 /// **A cell box bakes a face whole without moving its baseline** (per-atlas
 /// cell box plan, step 2): Texturina and Grenze Gotisch with section 4.5's
-/// boxes report no ink past the cell, carry the box through the file, and
-/// put the baseline at the same place in the line box as the committed
-/// line-box atlases.
+/// boxes (`BundledAtlas::cell`) report no ink past the cell, carry the box
+/// through the file, and put the baseline at the same place in the line box
+/// as a line-box bake of the same face.
 #[test]
 fn a_cell_box_bakes_texturina_and_grenze_whole_on_the_same_baseline() {
     use libmsdf::font::CellBox;
@@ -93,8 +100,9 @@ fn a_cell_box_bakes_texturina_and_grenze_whole_on_the_same_baseline() {
             },
         ),
     ] {
-        let (ttf, mut opts) = Baker::bundled_options(atlas, &fonts());
-        opts.cell = cell;
+        assert_eq!(atlas.cell(), cell, "{atlas:?}");
+        let (ttf, opts) = Baker::bundled_options(atlas, &fonts());
+        assert_eq!(opts.cell, cell, "{atlas:?}");
         let (bytes, report) = Baker::bake_face_report(&ttf, &opts).unwrap();
         for face in &report.faces {
             assert!(
@@ -109,8 +117,7 @@ fn a_cell_box_bakes_texturina_and_grenze_whole_on_the_same_baseline() {
         assert!((c.above_em - cell.above_em).abs() < 1e-6, "{atlas:?}");
         assert!((c.below_em - cell.below_em).abs() < 1e-6, "{atlas:?}");
 
-        let committed = std::fs::read(fonts().join("atlases").join(atlas.file_name())).unwrap();
-        let line = FontAtlas::from_bytes(&committed).unwrap();
+        let line = bake_with(atlas, CellBox::LINE_BOX);
         let line_box_baseline = line.text_baseline_frac().unwrap() as f64;
         let in_line_box = (boxed.text_baseline_frac().unwrap() as f64 * c.cell_em() - c.above_em)
             / libmsdf::font::CELL_EM_RATIO;
@@ -124,19 +131,15 @@ fn a_cell_box_bakes_texturina_and_grenze_whole_on_the_same_baseline() {
 /// **A run from a cell-box atlas overhangs the line box, on the same
 /// baseline** (per-atlas cell box plan, step 3): its instance box is the
 /// 1.406 em cell with its top 0.179 em above the line box, and its baseline
-/// lands where the committed line-box atlas puts it, to 1e-3 px.
+/// lands where a line-box bake of the same face puts it, to 1e-3 px.
 #[test]
 fn a_cell_box_run_overhangs_the_line_box_on_the_same_baseline() {
     use libmsdf::font::CellBox;
-    let (ttf, mut opts) = Baker::bundled_options(BundledAtlas::Texturina, &fonts());
-    opts.cell = CellBox {
-        above_em: 0.179,
-        below_em: -0.073,
-    };
-    let boxed = FontAtlas::from_bytes(&Baker::bake_face(&ttf, &opts).unwrap()).unwrap();
-    let line =
+    let boxed =
         FontAtlas::from_bytes(&std::fs::read(fonts().join("atlases/texturina-48.atlas")).unwrap())
             .unwrap();
+    assert!((boxed.cell_box().cell_em() - 1.406).abs() < 1e-6);
+    let line = bake_with(BundledAtlas::Texturina, CellBox::LINE_BOX);
     let (pos, size) = ([10.0, 20.0], 32.0);
     let draw = |atlas: &FontAtlas| {
         let shaper = libmsdf::AtlasShaper::new(atlas, GlyphStyle::Regular).unwrap();
