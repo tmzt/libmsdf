@@ -68,3 +68,55 @@ fn texturina_without_its_waiver_fails_on_the_long_s() {
         other => panic!("expected MissingText, got {:?}", other.map(|b| b.len())),
     }
 }
+
+/// **A cell box bakes a face whole without moving its baseline** (per-atlas
+/// cell box plan, step 2): Texturina and Grenze Gotisch with section 4.5's
+/// boxes report no ink past the cell, carry the box through the file, and
+/// put the baseline at the same place in the line box as the committed
+/// line-box atlases.
+#[test]
+fn a_cell_box_bakes_texturina_and_grenze_whole_on_the_same_baseline() {
+    use libmsdf::font::CellBox;
+    for (atlas, cell) in [
+        (
+            BundledAtlas::Texturina,
+            CellBox {
+                above_em: 0.179,
+                below_em: -0.073,
+            },
+        ),
+        (
+            BundledAtlas::GrenzeGotisch,
+            CellBox {
+                above_em: 0.075,
+                below_em: -0.075,
+            },
+        ),
+    ] {
+        let (ttf, mut opts) = Baker::bundled_options(atlas, &fonts());
+        opts.cell = cell;
+        let (bytes, report) = Baker::bake_face_report(&ttf, &opts).unwrap();
+        for face in &report.faces {
+            assert!(
+                face.ink_outside.is_empty(),
+                "{atlas:?}: {:?}",
+                face.ink_outside
+            );
+        }
+        let boxed = FontAtlas::from_bytes(&bytes).unwrap();
+        assert_eq!(&bytes[4..8], &[5, 0, 2, 0]);
+        let c = boxed.cell_box();
+        assert!((c.above_em - cell.above_em).abs() < 1e-6, "{atlas:?}");
+        assert!((c.below_em - cell.below_em).abs() < 1e-6, "{atlas:?}");
+
+        let committed = std::fs::read(fonts().join("atlases").join(atlas.file_name())).unwrap();
+        let line = FontAtlas::from_bytes(&committed).unwrap();
+        let line_box_baseline = line.text_baseline_frac().unwrap() as f64;
+        let in_line_box = (boxed.text_baseline_frac().unwrap() as f64 * c.cell_em() - c.above_em)
+            / libmsdf::font::CELL_EM_RATIO;
+        assert!(
+            (in_line_box - line_box_baseline).abs() < 1e-5,
+            "{atlas:?}: baseline {in_line_box} in the line box, was {line_box_baseline}"
+        );
+    }
+}

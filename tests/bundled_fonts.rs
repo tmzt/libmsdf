@@ -624,6 +624,9 @@ fn every_committed_atlas_round_trips_byte_for_byte() {
         let bytes = std::fs::read(dir.join(atlas.file_name())).unwrap();
         let loaded = libmsdf::FontAtlas::from_bytes(&bytes)
             .unwrap_or_else(|e| panic!("{atlas:?} does not load: {e}"));
-        assert!(loaded.to_bytes() == bytes, "{atlas:?} re-serialises differently");
+        assert!(
+            loaded.to_bytes() == bytes,
+            "{atlas:?} re-serialises differently"
+        );
     }
 }
