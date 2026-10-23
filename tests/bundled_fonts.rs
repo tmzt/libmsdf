@@ -613,3 +613,17 @@ fn sha256(data: &[u8]) -> [u8; 32] {
     }
     out
 }
+
+/// **Every committed atlas loads and re-serialises byte for byte**
+/// (per-atlas cell box plan, step 1): the 5:0.2.0 writer still writes an
+/// atlas whose cells are the line box exactly as it was committed.
+#[test]
+fn every_committed_atlas_round_trips_byte_for_byte() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts/atlases");
+    for atlas in libmsdf::font::BundledAtlas::ALL {
+        let bytes = std::fs::read(dir.join(atlas.file_name())).unwrap();
+        let loaded = libmsdf::FontAtlas::from_bytes(&bytes)
+            .unwrap_or_else(|e| panic!("{atlas:?} does not load: {e}"));
+        assert!(loaded.to_bytes() == bytes, "{atlas:?} re-serialises differently");
+    }
+}
