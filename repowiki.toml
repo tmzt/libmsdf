@@ -1,0 +1,17 @@
+# repowiki.toml
+# Read by repowiki's collector from the repository root.
+
+# Landing page of the registered site.
+default_route = "/README"
+
+# Symlinked as static files, not listed in navigation. out/ is gitignored
+# render output; its images resolve as ./out/... and its files stay unlisted.
+# target/ is never scanned (the collector skips it).
+static_dirs = ["out"]
+
+[crate_resolution]
+# Only these folders become navigation groups. docs/design/*.md is grouped
+# under the "docs" group as a "design" package, one entry per plan;
+# docs/FONT_*.md sit in the "docs" group itself. font/ is the libmsdf-font
+# crate.
+prefixes = ["docs", "font"]
