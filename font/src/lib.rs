@@ -37,13 +37,16 @@ pub mod shaper;
 pub use atlas::{
     ATLAS_COLS, ATLAS_FILE_MAJOR, ATLAS_FORMAT_VERSION, ATLAS_HEADER_SIZE, ATLAS_HEADER_SIZE_V5,
     ATLAS_MAGIC, ATLAS_ROWS, ATLAS_TABLE_FACE_ALL, ATLAS_VERSION, ATLAS_VERSION_LAYERED,
-    AtlasFileVersion, AtlasFormatVersion, AtlasLayer, CAP_TOP_FRAC, CELL_EM_RATIO,
+    AtlasFileVersion, AtlasFormatVersion, AtlasLayer, CAP_TOP_FRAC, CELL_EM_RATIO, CapPlacement,
     FALLBACK_BASELINE_FRAC, FALLBACK_CAP_HEIGHT_EM, FALLBACK_MAX_INK_DESCENT_EM, FontAtlas,
     GlyphProjection, LayerNotBaked, MAX_ATLAS_LAYERS, MAX_ATLAS_TABLE_BYTES, MAX_ATLAS_TABLES,
     SetMetrics, StyledGlyphError, atlas_capacity,
 };
 #[cfg(feature = "shaper")]
-pub use atlas::{FontAtlasBuilder, cap_height, glyph_projection};
+pub use atlas::{
+    FontAtlasBuilder, cap_height, default_cell_metrics_with, glyph_projection,
+    glyph_projection_with,
+};
 pub use atlas_shaper::{AtlasShaper, NoLayout, RunShaper, is_default_ignorable};
 pub use bundled::{BUNDLED_ATLAS_GLYPH_SIZE, BUNDLED_ATLAS_PX_RANGE, BundledAtlas, BundledFace};
 pub use coverage::{

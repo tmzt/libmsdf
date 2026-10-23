@@ -17,7 +17,7 @@ use crate::coverage::{
     COVERAGE_MATH, COVERAGE_SYMBOLS, COVERAGE_TEXT, Coverage, CoverageGroupId, FaceCoverage,
     GroupCoverage, MissingPolicy,
 };
-use crate::{ATLAS_COLS, GlyphSet, GlyphStyle, LayoutError, LayoutOptions};
+use crate::{ATLAS_COLS, CapPlacement, GlyphSet, GlyphStyle, LayoutError, LayoutOptions};
 
 /// One face to bake, and how. Every field is an input to the bytes.
 #[derive(Debug, Clone, PartialEq)]
@@ -43,6 +43,9 @@ pub struct BakeOptions {
     pub columns: u32,
     /// TEXT codepoints a face lacks, each waived with its reason.
     pub waive: Vec<(GlyphStyle, char, &'static str)>,
+    /// Where each cell puts its face's cap height
+    /// ([`CapPlacement::DEFAULT`] unless a face's ink needs another).
+    pub cap: CapPlacement,
 }
 
 impl BakeOptions {
@@ -59,6 +62,7 @@ impl BakeOptions {
             coverage: Coverage::Shipped,
             columns: ATLAS_COLS,
             waive: Vec::new(),
+            cap: CapPlacement::DEFAULT,
         }
     }
 }
@@ -157,6 +161,23 @@ pub struct FaceReport {
     pub style: GlyphStyle,
     /// Its groups.
     pub groups: Vec<GroupReport>,
+    /// The baked glyphs whose ink passes the cell window, which the cell
+    /// clips, in raw glyph-id order.
+    pub ink_outside: Vec<InkOutside>,
+}
+
+/// A baked glyph whose ink the cell clips: by how much it passes the cell
+/// window, in the face's font units (0 for a side it keeps inside).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InkOutside {
+    /// The glyph's id in its face.
+    pub glyph_id: u16,
+    /// Above the window's top.
+    pub above: i32,
+    /// Below the window's bottom.
+    pub below: i32,
+    /// Wider than the cell, both sides together (the ink is centred).
+    pub wider: i32,
 }
 
 /// One group of a [`FaceReport`].
@@ -203,9 +224,56 @@ impl core::fmt::Display for BakeReport {
                     writeln!(f, "  waived: U+{:04X} ({why})", *c as u32)?;
                 }
             }
+            if !face.ink_outside.is_empty() {
+                writeln!(
+                    f,
+                    "{:?} ink past the cell window: {} glyphs",
+                    face.style,
+                    face.ink_outside.len()
+                )?;
+                for o in &face.ink_outside {
+                    writeln!(
+                        f,
+                        "  glyph {}: above {}, below {}, wider {}",
+                        o.glyph_id, o.above, o.below, o.wider
+                    )?;
+                }
+            }
         }
         Ok(())
     }
+}
+
+/// The glyphs of `style` in `atlas` whose ink, laid out with `cap`, passes
+/// the cell window of `face`.
+fn ink_outside(
+    atlas: &crate::FontAtlas,
+    face: &ttf_parser::Face,
+    style: GlyphStyle,
+    cap: CapPlacement,
+) -> Vec<InkOutside> {
+    let (bottom, top) = cap.window(face);
+    let cell = face.units_per_em() as f64 * crate::CELL_EM_RATIO;
+    let mut out: Vec<InkOutside> = atlas
+        .glyphs
+        .iter()
+        .filter_map(|e| {
+            let (s, raw) = GlyphStyle::split_glyph_id(e.glyph_id);
+            if s != style {
+                return None;
+            }
+            let bb = face.glyph_bounding_box(ttf_parser::GlyphId(raw))?;
+            let o = InkOutside {
+                glyph_id: raw,
+                above: (bb.y_max as f64 - top).ceil().max(0.0) as i32,
+                below: (bottom - bb.y_min as f64).ceil().max(0.0) as i32,
+                wider: ((bb.x_max as f64 - bb.x_min as f64) - cell).ceil().max(0.0) as i32,
+            };
+            (o.above > 0 || o.below > 0 || o.wider > 0).then_some(o)
+        })
+        .collect();
+    out.sort_by_key(|o| o.glyph_id);
+    out
 }
 
 /// The sha256 of `bytes`.
@@ -254,6 +322,7 @@ impl Baker {
 
         let mut builder = FontAtlasBuilder::new(regular, opts.glyph_size, opts.px_range);
         builder.with_columns(opts.columns);
+        builder.with_cap_placement(opts.cap);
         let mut report = BakeReport::default();
         let mut coverage: Vec<FaceCoverage> = Vec::new();
         match &opts.coverage {
@@ -283,6 +352,7 @@ impl Baker {
                     let mut face_report = FaceReport {
                         style: *style,
                         groups: Vec::new(),
+                        ink_outside: Vec::new(),
                     };
                     let mut missing_text = Vec::new();
                     for g in &groups {
@@ -362,6 +432,16 @@ impl Baker {
             BuildError::Other(e) => BakeError::Build(e),
         })?;
         atlas.coverage = coverage;
+        for face_report in &mut report.faces {
+            let data = &faces
+                .iter()
+                .find(|(s, _)| *s == face_report.style)
+                .expect("a report per baked face")
+                .1;
+            let face = ttf_parser::Face::parse(data, 0)
+                .map_err(|e| BakeError::Build(format!("{:?} face: {e}", face_report.style)))?;
+            face_report.ink_outside = ink_outside(&atlas, &face, face_report.style, opts.cap);
+        }
         let bytes = atlas
             .try_to_bytes()
             .map_err(|e| BakeError::Build(e.to_string()))?;

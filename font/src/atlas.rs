@@ -1558,6 +1558,75 @@ pub fn glyph_projection(
     glyph_id: u16,
     glyph_size: u32,
 ) -> Option<GlyphProjection> {
+    glyph_projection_with(face, glyph_id, glyph_size, CapPlacement::DEFAULT)
+}
+
+/// **Where a bake puts a face's cap height in the cell**
+/// (`docs/design/20261023_01_TERMINAL_FONTS_PLAN.md`, section 4.2).
+///
+/// [`CapPlacement::DEFAULT`] is what every bake did before the placement
+/// was an option, and gives the same bytes. A face whose accents rise higher
+/// than the default window allows moves its cap height down the cell
+/// instead: the shader reads each glyph's `baseline_row` from the glyph table
+/// and [`SetMetrics::baseline_frac`] records each set's, so a placement
+/// changes no format and no shader.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CapPlacement {
+    /// The cap height's distance from the cell top, as a fraction of the
+    /// cell. [`CAP_TOP_FRAC`] by default.
+    pub top_frac: f64,
+    /// The cap height in em, or `None` to measure the face's own `A`
+    /// ([`cap_height`]). Given explicitly for a face with no `A` that must
+    /// share another face's baseline, such as the terminal symbol page.
+    pub height_em: Option<f64>,
+}
+
+impl CapPlacement {
+    /// The placement of every bake before this option: the cap height at
+    /// [`CAP_TOP_FRAC`], measured from the face's `A`.
+    pub const DEFAULT: Self = Self {
+        top_frac: CAP_TOP_FRAC,
+        height_em: None,
+    };
+
+    /// The terminal faces' placement: the cap height at 0.24 of the cell,
+    /// which fits Noto Sans Mono's accented capitals and descenders in the
+    /// 1.3 em window (terminal fonts plan, section 4.2).
+    pub const TERMINAL_TOP_FRAC: f64 = 0.24;
+
+    /// This placement's cap height for `face`, in font units.
+    #[cfg(feature = "shaper")]
+    pub fn cap_units(&self, face: &ttf_parser::Face) -> f64 {
+        match self.height_em {
+            Some(em) => em * face.units_per_em() as f64,
+            None => cap_height(face),
+        }
+    }
+
+    /// The cell window for `face` in font units, `(bottom, top)`: the y
+    /// range a cell holds. Ink outside it is clipped by the cell.
+    #[cfg(feature = "shaper")]
+    pub fn window(&self, face: &ttf_parser::Face) -> (f64, f64) {
+        let cell = face.units_per_em() as f64 * CELL_EM_RATIO;
+        let top = self.cap_units(face) + self.top_frac * cell;
+        (top - cell, top)
+    }
+}
+
+impl Default for CapPlacement {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// [`glyph_projection`] with a [`CapPlacement`].
+#[cfg(feature = "shaper")]
+pub fn glyph_projection_with(
+    face: &ttf_parser::Face,
+    glyph_id: u16,
+    glyph_size: u32,
+    cap: CapPlacement,
+) -> Option<GlyphProjection> {
     let gs = glyph_size as f64;
     let upem = face.units_per_em() as f64;
     let em_scale = gs / (upem * CELL_EM_RATIO);
@@ -1565,7 +1634,7 @@ pub fn glyph_projection(
     let gid = ttf_parser::GlyphId(glyph_id);
     let advance_x = face.glyph_hor_advance(gid).unwrap_or(0) as f32 / upem as f32;
 
-    let cap_y_max = cap_height(face);
+    let cap_y_max = cap.cap_units(face);
 
     let bbox = face.glyph_bounding_box(gid)?;
 
@@ -1576,7 +1645,7 @@ pub fn glyph_projection(
 
     // Vertical: align the font's cap height to 15% from the cell top so all
     // digits and caps share a level top boundary.
-    let target_top_px = gs * CAP_TOP_FRAC;
+    let target_top_px = gs * cap.top_frac;
     let g_ty = (gs - target_top_px) / em_scale - cap_y_max;
 
     Some(GlyphProjection {
@@ -1660,11 +1729,21 @@ pub const FALLBACK_MAX_INK_DESCENT_EM: f32 = 0.25;
 /// [`FontAtlas::set_metrics`] answers it properly on top of that.
 #[cfg(feature = "shaper")]
 pub fn default_cell_metrics(face: &ttf_parser::Face, glyph_size: u32) -> (f32, f32, f32) {
+    default_cell_metrics_with(face, glyph_size, CapPlacement::DEFAULT)
+}
+
+/// [`default_cell_metrics`] with a [`CapPlacement`].
+#[cfg(feature = "shaper")]
+pub fn default_cell_metrics_with(
+    face: &ttf_parser::Face,
+    glyph_size: u32,
+    cap: CapPlacement,
+) -> (f32, f32, f32) {
     let gs = glyph_size as f64;
     let upem = face.units_per_em() as f64;
     let em_scale = gs / (upem * CELL_EM_RATIO);
     (
-        (gs * CAP_TOP_FRAC + em_scale * cap_height(face)) as f32,
+        (gs * cap.top_frac + em_scale * cap.cap_units(face)) as f32,
         // The same 0.15 as [`crate::drawlist::X_MARGIN_FRAC`], written out
         // because that constant is an `f32` and `0.15f32 as f64` is
         // 0.1500000059604645 - enough to land on a different `f32` here.
@@ -1836,6 +1915,9 @@ pub struct FontAtlasBuilder {
     /// Cell columns per layer ([`ATLAS_COLS`] unless
     /// [`FontAtlasBuilder::with_columns`] says otherwise).
     columns: u32,
+    /// Where every cell puts its face's cap height
+    /// ([`FontAtlasBuilder::with_cap_placement`]).
+    cap: CapPlacement,
 }
 
 #[cfg(feature = "shaper")]
@@ -1854,7 +1936,20 @@ impl FontAtlasBuilder {
             layout: None,
             licences: Vec::new(),
             columns: ATLAS_COLS,
+            cap: CapPlacement::DEFAULT,
         }
+    }
+
+    /// **Place every cell's cap height** with `cap` instead of
+    /// [`CapPlacement::DEFAULT`], for a face whose ink the default window
+    /// clips (terminal fonts plan, section 4.2).
+    pub fn with_cap_placement(&mut self, cap: CapPlacement) {
+        self.cap = cap;
+    }
+
+    /// The cap placement every cell is baked with.
+    pub fn cap_placement(&self) -> CapPlacement {
+        self.cap
     }
 
     /// **Bake `columns` cell columns per layer** instead of [`ATLAS_COLS`]:
@@ -2375,10 +2470,11 @@ impl FontAtlasBuilder {
 
         let gs = self.glyph_size;
         let channels = 3u32;
-        let (baseline_def, x_margin_def, px_per_em) = default_cell_metrics(&face25, gs);
+        let (baseline_def, x_margin_def, px_per_em) =
+            default_cell_metrics_with(&face25, gs, self.cap);
 
         let gid18 = ttf_parser_018::GlyphId(glyph_id);
-        let projection = glyph_projection(&face25, glyph_id, gs);
+        let projection = glyph_projection_with(&face25, glyph_id, gs, self.cap);
         let has_outline = face18.glyph_shape(gid18).is_some() && projection.is_some();
 
         // Default to fully OUTSIDE the field (0 → median < 0.5 → renders
