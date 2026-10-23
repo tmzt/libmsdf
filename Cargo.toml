@@ -74,6 +74,9 @@ fonts-apache-roboto = [
     "font-apache-roboto-msymbols",
 ]
 fonts-ofl-ledger = ["font-ofl-grenze-gotisch", "font-ofl-texturina"]
+# The terminal preset: Noto Sans Mono text and the symbol page
+# (docs/design/20261023_01_TERMINAL_FONTS_PLAN.md).
+fonts-ofl-terminal = ["font-ofl-noto-sans-mono", "font-ofl-noto-terminal-symbols"]
 
 [[example]]
 name = "bake_atlas"

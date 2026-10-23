@@ -79,9 +79,12 @@ feature's name says which licence it brings:
 | `font-apache-roboto-msymbols` | Roboto Regular with Material Symbols | Apache-2.0 | [FONTS-LICENSE-APACHE.txt](FONTS-LICENSE-APACHE.txt) |
 | `font-ofl-grenze-gotisch` | Grenze Gotisch (subset) | OFL-1.1 | [FONTS-LICENSE-OFL.txt](FONTS-LICENSE-OFL.txt) |
 | `font-ofl-texturina` | Texturina (subset) | OFL-1.1 | [FONTS-LICENSE-OFL.txt](FONTS-LICENSE-OFL.txt) |
+| `font-ofl-noto-sans-mono` | Noto Sans Mono Regular and Bold (instances, subset) | OFL-1.1 | [FONTS-LICENSE-OFL.txt](FONTS-LICENSE-OFL.txt) |
+| `font-ofl-noto-terminal-symbols` | The terminal symbol page, merged from five Noto faces | OFL-1.1 | [FONTS-LICENSE-OFL.txt](FONTS-LICENSE-OFL.txt) |
 
-`fonts-apache-roboto` enables the four Roboto features and
-`fonts-ofl-ledger` the two OFL ones.
+`fonts-apache-roboto` enables the four Roboto features,
+`fonts-ofl-ledger` Grenze Gotisch and Texturina, and `fonts-ofl-terminal`
+the two terminal features.
 
 A font's licence applies to a build only when its feature is enabled.
 With no font feature enabled, the compiled crate contains no font data and
@@ -162,16 +165,43 @@ codegen-backend = "llvm"
 `[profile.dev.build-override] opt-level = 2` makes such a bake several
 times faster.
 
+**Terminal text.** `fonts-ofl-terminal` brings Noto Sans Mono (Regular, and
+Bold as a style layer) and a symbol page on the same 0.6 em cell and
+baseline: box drawing, block elements, Braille and geometric shapes in
+full, and curated arrows, technical symbols, dingbats and monochrome emoji
+(`COVERAGE_TERMINAL`, `COVERAGE_TERMINAL_EMOJI`). A `TerminalShaper` lays a
+line out on the cell grid, taking each character from the text atlas or the
+page, and `push_terminal_line` draws it:
+
+```rust
+let mut set = libmsdf::AtlasSet::new();
+let text = FontAtlas::from_bytes(libmsdf::NOTO_SANS_MONO_ATLAS)?;
+let page = FontAtlas::from_bytes(libmsdf::TERMINAL_SYMBOLS_ATLAS)?;
+let shaper = libmsdf::TerminalShaper::new(&text, &page)?;
+let (text, page) = (set.register(text)?, set.register(page)?);
+let pitch = shaper.line_pitch_em() * font_size;
+for (i, s) in ["╭─ ⠋ Working… ─╮", "│ ✔ done  🤖  │", "╰──────────────╯"].iter().enumerate() {
+    let line = shaper.line(s, GlyphStyle::Regular);
+    let pos = [x, y + i as f32 * pitch];
+    list.push_terminal_line(&line, set.atlas(text).unwrap(), set.atlas(page).unwrap(), pos, font_size, px_range, white);
+}
+```
+
+Box drawing joins only when lines are `line_pitch_em()` (1.3 em, the line
+box) apart. Emoji are two cells, except `⚠` and `➡`, which are one cell and
+become two when U+FE0F follows them, as in terminals. Italic draws upright.
+
 **Verifying the bundled atlases:**
 `cargo run -p libmsdf-font --features bake --bin libmsdf-bake -- bundled --check fonts/atlases`
 re-bakes them in memory and compares, and
-`cargo test --features fonts-apache-roboto,fonts-ofl-ledger --test bundled_fonts`
+`cargo test --features fonts-apache-roboto,fonts-ofl-ledger,fonts-ofl-terminal --test bundled_fonts`
 checks them against `fonts/bundled.sha256`.
 
 **Rebuilding the bundled faces:** `scripts/fetch-upstream-fonts.sh` fetches
-the upstream faces (google/fonts, Roboto v2.138, Material Symbols) at pinned
-sources with SHA-256 checks, and `scripts/rebuild-fonts.sh` rebuilds the
-OFL subsets and the Roboto Bold and Italic faces from them and compares them
+the upstream faces (google/fonts, Roboto v2.138, Material Symbols, Noto) at
+pinned sources with SHA-256 checks, and `scripts/rebuild-fonts.sh` rebuilds
+the OFL subsets, the terminal symbol face and the Roboto Bold and Italic
+faces from them and compares them
 with the committed bytes, checks that the scripts behind the two Regular
 faces return them unchanged, and with `--atlases` also runs the atlas check
 above. It needs `uv`.
