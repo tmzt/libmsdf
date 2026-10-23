@@ -720,3 +720,12 @@ Findings: all nine atlas pages stay 400 or 800 by 2000 texels, within a
 2048 limit; the symbol page grows from 607 to 616 of its 640 cells. Claude
 Code's starburst spinner is Dingbats (`· ✢ ✳ ✶ ✻ ✽`), not Braille, and was
 already covered.
+
+## 2026-10-23 14:51 EDT — 0.6.0 released: the per-atlas cell box plan
+
+Plan: `docs/design/20261023_02_PER_ATLAS_CELL_BOX_PLAN.md`, now
+Implemented. Released on the owner's approval ("the release looks good,
+let's release it") as 0.6.0, `4de319c`, tag `v0.6.0`. The departures are
+the addendum above (37e0e7e); nothing else departed. For
+libcontrols, this is a semver-incompatible move: its next release is 0.7.0
+(Rule 5.5).
