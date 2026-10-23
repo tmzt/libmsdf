@@ -583,6 +583,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 let atlas_dim = vec2<f32>(textureDimensions(msdf_atlas));
 
                 var cursor_x: f32 = 0.0;
+                // **A run's glyphs are one shape**: the pixel's coverage is the
+                // largest any glyph gives it, composited once after the loop.
+                // Compositing glyph over glyph instead compounds two
+                // antialiased edges where neighbours overlap, which beaded
+                // every cell join of terminal box drawing (terminal fonts
+                // plan; CHANGES.md). Glyphs that do not overlap draw exactly
+                // as before.
+                var text_alpha: f32 = 0.0;
 
                 let char_buf_len = arrayLength(&char_buffer);
                 let glyph_tbl_len = arrayLength(&glyph_table);
@@ -662,9 +670,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                     if acx >= 0.0 && acx < atlas_gw &&
                        acy >= 0.0 && acy < atlas_gh &&
                        atlas_layer < textureNumLayers(msdf_atlas) {
-                        // Offset by 0.5 to sample from pixel centers and avoid edge bleed
-                        let u = (atlas_gx + acx + 0.5) / atlas_dim.x;
-                        let v = (atlas_gy + acy + 0.5) / atlas_dim.y;
+                        // Offset by 0.5 to sample from pixel centers and avoid edge bleed.
+                        // Clamped to the cell's last texel centre: in a cell's last half
+                        // texel the bilinear filter would otherwise blend in the zeroed
+                        // padding, which is "outside", and cut a dark row under a glyph
+                        // whose ink reaches the cell edge (box drawing on the terminal
+                        // symbol page, terminal fonts plan; CHANGES.md). Ink that stops
+                        // short of the edge samples the same texels as before.
+                        let u = (atlas_gx + min(acx + 0.5, atlas_gw - 0.5)) / atlas_dim.x;
+                        let v = (atlas_gy + min(acy + 0.5, atlas_gh - 0.5)) / atlas_dim.y;
 
                         // textureSampleLevel (explicit LOD 0), NOT
                         // textureSample: this call sits inside a
@@ -685,13 +699,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                             * smoothstep(0.0, 1.0, ombre_y);
                         let alpha = clamp(softened_range * (sd - 0.5) + 0.5, 0.0, 1.0) * ombre_alpha;
 
-                        if alpha > 0.01 {
-                            let glyph_color = vec4<f32>(cmd.color.rgb, cmd.color.a * alpha);
-                            result = blend_over(result, glyph_color);
-                        }
+                        text_alpha = max(text_alpha, alpha);
                     }
 
                     cursor_x += advance_px;
+                }
+                if text_alpha > 0.01 {
+                    let glyph_color = vec4<f32>(cmd.color.rgb, cmd.color.a * text_alpha);
+                    result = blend_over(result, glyph_color);
                 }
             }
             case 9u: { // Outline — rounded rect stroke, no fill
