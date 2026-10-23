@@ -60,3 +60,16 @@ row 16 today), and the baseline is exactly where today's atlas puts it
 text does not move, and the texel density is unchanged.
 
 ![Outlines, today's atlas and the cell box: the line box in red, the cell box dashed in green, the baseline in blue](./out/fonts/20261023_02_cell_box_prototype/grenze-gotisch_cell_box.png)
+
+## 2026-10-23 14:12 EDT — The committed cell-box atlas (`out/fonts/20261023_04_cell_box_release/`)
+
+`fonts/atlases/grenze-gotisch-48.atlas` is now baked with
+`BundledAtlas::cell`'s box, the 1.3 em cell moved up 0.075 em (format
+5:0.2.0), at libmsdf `9c47e68`, and carries `Ș ș Ț ț`. The bake report
+lists **no ink past the cell**; the rings of `Å Ů` are whole and the
+baseline is where libmsdf 0.5's was (0.62692 of the line box). The texel
+density is unchanged.
+
+![Outlines, libmsdf 0.5's atlas and the committed cell-box atlas](./out/fonts/20261023_04_cell_box_release/grenze-gotisch_0.5_vs_0.6.png)
+
+This supersedes the 12:37 entry's 0.20 cap placement, which was dropped.

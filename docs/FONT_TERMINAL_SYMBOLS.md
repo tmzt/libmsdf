@@ -63,3 +63,21 @@ coverage change, not proposed here.
 The spec, the renderer (a scratch crate against libmsdf) and the sheet
 script are in
 [out/fonts/20261023_03_terminal_samples/tool/](./out/fonts/20261023_03_terminal_samples/tool/).
+
+## 2026-10-23 14:12 EDT — Claude Code's glyphs, and ✨ (`out/fonts/20261023_04_cell_box_release/`)
+
+Correcting the 13:17 entry's finding: `✨` U+2728 is on the page now, two
+cells wide, from Noto Emoji. The page also gains the eight glyphs of Claude
+Code 2.1.309's interface that no terminal atlas carried: `※ ↯ ∙ ∴ ∵ ∷ ⌕ ⑂`
+(the thinking animation is `∴ ∷ ∵ ∷`). `fonts/atlases/terminal-symbols-48.atlas`
+(libmsdf `9c47e68`) has 616 cells, 591 symbols and 24 emoji; the bake report's
+135 overhanging box and block glyphs are as before.
+
+Claude Code's "starburst" spinner is not Braille: its frames are `· ✢ ✳ ✶ ✻ ✽`
+and back, with `*` for `✳` on some terminals, Dingbats asterisks that were
+already on the page. Its other spinner is Braille, `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`.
+`tests/terminal_glyphs.rs` holds all 70 interface glyphs to drawing from
+the two terminal atlases with no placeholder, and `tests/cell_box_render.rs`
+draws both spinners' frames and checks the text after them never moves.
+
+![Claude Code's 70 interface glyphs, then the starburst, Braille and thinking spinners and the sparkle, at 24 px, scale 2](./out/fonts/20261023_04_cell_box_release/claude-code_glyphs.png)

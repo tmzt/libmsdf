@@ -51,3 +51,17 @@ here.
 The spec, the renderer (a scratch crate against libmsdf) and the sheet
 script are in
 [out/fonts/20261023_03_terminal_samples/tool/](./out/fonts/20261023_03_terminal_samples/tool/).
+
+## 2026-10-23 14:12 EDT — Ș ș Ț ț, and Claude Code's interface (`out/fonts/20261023_04_cell_box_release/`)
+
+Correcting the 13:17 entry's finding: the TEXT coverage group now includes
+`U+0218-021B`, and `fonts/atlases/noto-sans-mono-48.atlas` (libmsdf
+`9c47e68`) carries `Ș ș Ț ț` in Regular and Bold
+(`tests/terminal_glyphs.rs`). The atlas keeps the line box and format
+5:0.1.0. With the symbol page, it draws every glyph of Claude Code
+2.1.309's interface, shown in a session mock-up at 16 px, scale 2, and at
+24 px:
+
+![A Claude Code session at 16 px, scale 2](./out/fonts/20261023_04_cell_box_release/claude-code_session_16px.png)
+
+![The same at 24 px](./out/fonts/20261023_04_cell_box_release/claude-code_session_24px.png)

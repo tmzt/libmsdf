@@ -108,3 +108,19 @@ is not visibly softer than today:
 This corrects the 12:37 entry's conclusion that only a format change and its
 own plan could save `ĥ` and `ĺ`: the plan is written, and the prototype
 shows it fixes every glyph without moving the text.
+
+## 2026-10-23 14:12 EDT — The committed cell-box atlas (`out/fonts/20261023_04_cell_box_release/`)
+
+`fonts/atlases/texturina-48.atlas` is now baked with
+`BundledAtlas::cell`'s box, 0.179 em above the line box and 0.073 em less
+below (a 1.406 em cell, format 5:0.2.0), at libmsdf `9c47e68`, and carries
+`Ș ș Ț ț`. Its bake report lists **no ink past the cell**, `‰` included,
+and its baseline sits where libmsdf 0.5's did (0.70385 of the line box).
+`tests/cell_box_render.rs` checks every tall glyph's top and bottom against
+its outline at 12 to 56 px, scale 1 and 2; libmsdf 0.5's atlas fails that at
+every size, `ĥ ĺ` by up to 8.8 px at 56 px.
+
+![Outlines, libmsdf 0.5's atlas and the committed cell-box atlas: the line box in red, the cell box dashed in green, the baseline in blue](./out/fonts/20261023_04_cell_box_release/texturina_0.5_vs_0.6.png)
+
+This supersedes the 12:37 entry's proposed cap placements, which were
+dropped; the 13:04 prototype is what shipped.
