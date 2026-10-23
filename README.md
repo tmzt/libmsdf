@@ -15,6 +15,27 @@ msdfgen baseline, dynamic atlas management, cubic-Bézier arc strokes, and the
 `DrawList` render contract. Native + wasm32 (WebGPU) compile-clean; GPU tests run
 headless on Metal. See `Cargo.toml` for the `cpu-bake` / `gpu-tests` feature notes.
 
+## Critical rules
+
+Work on this repository follows the critical rules in
+[AGENTS.md](AGENTS.md). In short:
+
+- Planned work is announced in [CHANGES.md](CHANGES.md) before code
+  changes; entries are dated and never edited.
+- Specs and plans live in `docs/design/`. They change only by dated
+  amendments agreed with the owner, and are frozen once implementation
+  starts.
+- One crate or subproject per commit, with paths named explicitly; the
+  formatter, linter and tests pass before each commit.
+- Generated evidence goes under the gitignored `out/`, in dated
+  `YYYYMMDD_NN_name/` directories; findings documents under `docs/` are
+  append-only.
+- Each version is tagged and recorded in [VERSIONS.md](VERSIONS.md); while
+  0.x, a public API change that is not strictly additive bumps the minor
+  version.
+- The table of architectural decisions at the end of this README lists
+  every spec and plan with its status.
+
 ## Drawing into a DrawList
 
 `libmsdf::Render` is the one shared name for something that draws itself
