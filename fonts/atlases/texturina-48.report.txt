@@ -1,61 +1,6 @@
-Regular Text: 286 of 287 carried, 0 skipped, 1 waived
+Regular Text: 290 of 291 carried, 0 skipped, 1 waived
   waived: U+017F (long s (U+017F): Texturina has no glyph; archaic)
 Regular Symbols: 55 of 63 carried, 8 skipped, 0 waived
   skipped: U+2011 U+2012 U+2015 U+201B U+201F U+20B4 U+20BE U+212E
 Regular Math: 49 of 77 carried, 28 skipped, 0 waived
   skipped: U+207A U+207B U+207C U+207D U+207E U+207F U+208A U+208B U+208C U+208D U+208E U+2153 U+2154 U+2155 U+2156 U+2157 U+2158 U+2159 U+215A U+2205 U+2207 U+2208 U+2209 U+2213 U+2229 U+222A U+2282 U+2283
-Regular ink past the cell window: 54 glyphs
-  glyph 2: above 53, below 0, wider 0
-  glyph 4: above 53, below 0, wider 0
-  glyph 6: above 53, below 0, wider 0
-  glyph 9: above 44, below 0, wider 0
-  glyph 10: above 1, below 0, wider 0
-  glyph 14: above 53, below 0, wider 0
-  glyph 15: above 53, below 0, wider 0
-  glyph 17: above 53, below 0, wider 0
-  glyph 18: above 29, below 0, wider 0
-  glyph 21: above 53, below 0, wider 0
-  glyph 24: above 53, below 0, wider 0
-  glyph 26: above 53, below 0, wider 0
-  glyph 27: above 53, below 0, wider 0
-  glyph 29: above 29, below 0, wider 0
-  glyph 30: above 53, below 0, wider 0
-  glyph 36: above 53, below 0, wider 0
-  glyph 38: above 29, below 0, wider 0
-  glyph 41: above 53, below 0, wider 0
-  glyph 44: above 53, below 0, wider 0
-  glyph 46: above 53, below 0, wider 0
-  glyph 48: above 29, below 0, wider 0
-  glyph 49: above 53, below 0, wider 0
-  glyph 52: above 1, below 0, wider 0
-  glyph 55: above 53, below 0, wider 0
-  glyph 59: above 53, below 0, wider 0
-  glyph 66: above 53, below 0, wider 0
-  glyph 67: above 53, below 0, wider 0
-  glyph 70: above 1, below 0, wider 0
-  glyph 72: above 53, below 0, wider 0
-  glyph 74: above 53, below 0, wider 0
-  glyph 76: above 53, below 0, wider 0
-  glyph 77: above 53, below 0, wider 0
-  glyph 80: above 1, below 0, wider 0
-  glyph 86: above 53, below 0, wider 0
-  glyph 87: above 53, below 0, wider 0
-  glyph 90: above 53, below 0, wider 0
-  glyph 91: above 53, below 0, wider 0
-  glyph 93: above 53, below 0, wider 0
-  glyph 97: above 53, below 0, wider 0
-  glyph 101: above 53, below 0, wider 0
-  glyph 103: above 53, below 0, wider 0
-  glyph 105: above 53, below 0, wider 0
-  glyph 106: above 53, below 0, wider 0
-  glyph 109: above 44, below 0, wider 0
-  glyph 110: above 1, below 0, wider 0
-  glyph 113: above 53, below 0, wider 0
-  glyph 116: above 53, below 0, wider 0
-  glyph 117: above 53, below 0, wider 0
-  glyph 120: above 53, below 0, wider 0
-  glyph 121: above 53, below 0, wider 0
-  glyph 122: above 29, below 0, wider 0
-  glyph 163: above 149, below 0, wider 0
-  glyph 184: above 149, below 0, wider 0
-  glyph 411: above 0, below 0, wider 28
