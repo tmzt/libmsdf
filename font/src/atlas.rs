@@ -208,9 +208,25 @@ pub const ATLAS_FILE_MAJOR: u8 = 5;
 pub const ATLAS_FORMAT_VERSION: AtlasFormatVersion = AtlasFormatVersion {
     file_major: ATLAS_FILE_MAJOR,
     major: 0,
+    minor: 2,
+    patch: 0,
+};
+
+/// **The version an atlas without a `CELL` table is written at**: 5:0.1.0,
+/// so that every atlas whose cells are the line box stays byte-identical to
+/// what libmsdf 0.5 wrote, and stays readable by it. Only an atlas with a
+/// [`CellBox`] other than [`CellBox::LINE_BOX`] is written at
+/// [`ATLAS_FORMAT_VERSION`], which a 0.1 reader refuses rather than drawing
+/// its cells onto a 1.3 em box (per-atlas cell box plan, section 4.2).
+pub const ATLAS_FORMAT_VERSION_LINE_BOX: AtlasFormatVersion = AtlasFormatVersion {
+    file_major: ATLAS_FILE_MAJOR,
+    major: 0,
     minor: 1,
     patch: 0,
 };
+
+/// The tag of the table that records an atlas's [`CellBox`].
+pub const CELL_TABLE_TAG: [u8; 4] = *b"CELL";
 
 /// Fixed part of a file-major 5 header: the legacy 28 bytes plus the layer
 /// count and the table count.
@@ -691,9 +707,21 @@ pub struct FontAtlas {
     /// empty for `Coverage::Shipped` bakes, runtime atlases and legacy
     /// files). Read it through [`FontAtlas::coverage`].
     pub coverage: Vec<crate::FaceCoverage>,
+    /// Where the cells sit relative to the line box (`CELL`;
+    /// [`CellBox::LINE_BOX`] for an atlas without the table). Read it
+    /// through [`FontAtlas::cell_box`].
+    pub cell_box: CellBox,
 }
 
 impl FontAtlas {
+    /// **Where this atlas's cells sit relative to the line box**: the box it
+    /// was baked with, or [`CellBox::LINE_BOX`] for an atlas that carries no
+    /// `CELL` table (every atlas before format 5:0.2.0). Drawing reads it to
+    /// size a run's box from the cell rather than the line box.
+    pub fn cell_box(&self) -> CellBox {
+        self.cell_box
+    }
+
     /// The version this atlas was read at ([`ATLAS_FORMAT_VERSION`] for one
     /// built in memory).
     pub fn file_version(&self) -> AtlasFileVersion {
@@ -989,7 +1017,7 @@ impl FontAtlas {
     /// ```text
     /// offset  size
     /// 0       4    magic "hbfa"
-    /// 4       4    version [5, 0, 1, 0]
+    /// 4       4    version [5, 0, 1, 0], or [5, 0, 2, 0] with a CELL table
     /// 8       4    width          12  4  height
     /// 16      4    num_glyphs     20  4  channels
     /// 24      4    set_count      28  4  layer_count (1..=256)
@@ -1035,6 +1063,13 @@ impl FontAtlas {
         tables.extend(crate::layout::encode_tables(self.layout.as_ref())?);
         tables.extend(crate::licence::encode_tables(&self.licences)?);
         tables.extend(crate::coverage::encode_tables(&self.coverage)?);
+        if !self.cell_box.is_line_box() {
+            tables.push(TableBody {
+                tag: CELL_TABLE_TAG,
+                face: ATLAS_TABLE_FACE_ALL,
+                body: self.cell_box.to_body(),
+            });
+        }
         tables.sort_by(|a, b| (a.face, a.tag).cmp(&(b.face, b.tag)));
         if tables.len() > MAX_ATLAS_TABLES {
             return Err("atlas would carry more than 64 tables");
@@ -1049,7 +1084,11 @@ impl FontAtlas {
         } else {
             self.layers.clone()
         };
-        let v = ATLAS_FORMAT_VERSION;
+        let v = if self.cell_box.is_line_box() {
+            ATLAS_FORMAT_VERSION_LINE_BOX
+        } else {
+            ATLAS_FORMAT_VERSION
+        };
         let mut buf = Vec::new();
         buf.extend_from_slice(ATLAS_MAGIC);
         buf.extend_from_slice(&[v.file_major, v.major, v.minor, v.patch]);
@@ -1256,6 +1295,7 @@ impl FontAtlas {
             (entries_end, Vec::new())
         };
         let (layout, licences, coverage) = Self::read_tables(data, &records)?;
+        let cell_box = Self::read_cell_box(data, &records, version, &sets)?;
 
         let expected_pixels =
             (width as usize) * (height as usize) * (channels as usize) * layer_count;
@@ -1277,7 +1317,37 @@ impl FontAtlas {
             licences,
             read_version: version,
             coverage,
+            cell_box,
         })
+    }
+
+    /// The `CELL` table's box, or [`CellBox::LINE_BOX`] without one. Refused:
+    /// the table in a file older than 5:0.2.0 (which no libmsdf writes), a
+    /// malformed body, and a set whose `px_per_em_frac` is not `1 /
+    /// cell_em`, which would draw its cells at the wrong size.
+    fn read_cell_box(
+        data: &[u8],
+        records: &[TableRecord],
+        version: AtlasFileVersion,
+        sets: &[SetMetrics],
+    ) -> Result<CellBox, &'static str> {
+        let Some(rec) = records
+            .iter()
+            .find(|r| r.tag == CELL_TABLE_TAG && r.face == ATLAS_TABLE_FACE_ALL)
+        else {
+            return Ok(CellBox::LINE_BOX);
+        };
+        match version {
+            AtlasFileVersion::Split(v) if (v.major, v.minor) >= (0, 2) => {}
+            _ => return Err("atlas carries a CELL table at a version before 5:0.2.0"),
+        }
+        let start = rec.offset as usize;
+        let cell = CellBox::from_body(&data[start..start + rec.length as usize])?;
+        let frac = (1.0 / cell.cell_em()) as f32;
+        if sets.iter().any(|m| (m.px_per_em_frac - frac).abs() > 1e-5) {
+            return Err("atlas set's px_per_em_frac disagrees with its CELL table");
+        }
+        Ok(cell)
     }
 
     /// Read and check a file-major 5 table directory that starts at
@@ -1435,6 +1505,7 @@ impl FontAtlas {
             licences: Vec::new(),
             read_version: AtlasFileVersion::Split(ATLAS_FORMAT_VERSION),
             coverage: Vec::new(),
+            cell_box: CellBox::LINE_BOX,
         }
     }
 
@@ -1616,6 +1687,80 @@ impl CapPlacement {
 impl Default for CapPlacement {
     fn default() -> Self {
         Self::DEFAULT
+    }
+}
+
+/// **Where an atlas's cells sit relative to the line box**, in em
+/// (`docs/design/20261023_02_PER_ATLAS_CELL_BOX_PLAN.md`, section 4.1).
+///
+/// A cell is the 1.3 em line box ([`CellBox::LINE_BOX`]) unless a face's ink
+/// does not fit it; then the cell reaches past the line box's top by
+/// `above_em` and past its bottom by `below_em` (either may be negative,
+/// which moves that edge inside the line box). The line box, the line pitch
+/// and where the baseline sits in the line box do not change: ink outside
+/// the line box overhangs it. Cells stay square, so a taller cell is wider
+/// by the same amount.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CellBox {
+    /// How far the cell's top is above the line box's top, in em (negative:
+    /// below it).
+    pub above_em: f64,
+    /// How far the cell's bottom is below the line box's bottom, in em
+    /// (negative: above it).
+    pub below_em: f64,
+}
+
+impl CellBox {
+    /// The cell is the line box: every atlas before this option.
+    pub const LINE_BOX: Self = Self {
+        above_em: 0.0,
+        below_em: 0.0,
+    };
+
+    /// The cell's height (and width) in em: [`CELL_EM_RATIO`] `+ above_em +
+    /// below_em`.
+    pub fn cell_em(&self) -> f64 {
+        CELL_EM_RATIO + self.above_em + self.below_em
+    }
+
+    /// Whether this is [`CellBox::LINE_BOX`], which no `CELL` table records.
+    pub fn is_line_box(&self) -> bool {
+        self.above_em == 0.0 && self.below_em == 0.0
+    }
+
+    /// The `CELL` table body: `above_em` then `below_em`, `f32`
+    /// little-endian.
+    fn to_body(self) -> Vec<u8> {
+        let mut body = Vec::with_capacity(8);
+        body.extend_from_slice(&(self.above_em as f32).to_le_bytes());
+        body.extend_from_slice(&(self.below_em as f32).to_le_bytes());
+        body
+    }
+
+    /// Read and check a `CELL` table body.
+    fn from_body(body: &[u8]) -> Result<Self, &'static str> {
+        if body.len() != 8 {
+            return Err("atlas CELL table is not 8 bytes");
+        }
+        let f = |o: usize| f32::from_le_bytes(body[o..o + 4].try_into().unwrap());
+        let (above, below) = (f(0), f(4));
+        if !above.is_finite() || !below.is_finite() {
+            return Err("atlas CELL table holds a value that is not finite");
+        }
+        let cell = Self {
+            above_em: above as f64,
+            below_em: below as f64,
+        };
+        if !(0.5..=4.0).contains(&cell.cell_em()) {
+            return Err("atlas CELL table gives a cell outside 0.5 to 4.0 em");
+        }
+        Ok(cell)
+    }
+}
+
+impl Default for CellBox {
+    fn default() -> Self {
+        Self::LINE_BOX
     }
 }
 
@@ -2911,6 +3056,7 @@ impl FontAtlasBuilder {
             licences: Vec::new(),
             read_version: AtlasFileVersion::Split(ATLAS_FORMAT_VERSION),
             coverage: Vec::new(),
+            cell_box: CellBox::LINE_BOX,
         })
     }
 
@@ -3546,7 +3692,7 @@ mod format_v5 {
         let ok = FontAtlas::from_bytes(&v5_with_version([5, 0, 1, 0], &[])).expect("5:0.1.0");
         assert_eq!(
             ok.read_version,
-            AtlasFileVersion::Split(ATLAS_FORMAT_VERSION)
+            AtlasFileVersion::Split(ATLAS_FORMAT_VERSION_LINE_BOX)
         );
         assert_eq!(ok.layers, vec![AtlasLayer::new(0, GlyphStyle::Regular)]);
         assert_eq!(ok.pixel_data, vec![0, 0, 0]);
@@ -3561,6 +3707,9 @@ mod format_v5 {
         assert!(a.licences.is_empty());
         assert_eq!(a.pixel_data, vec![0, 0, 0]);
 
+        // 0.2.0, the cell box's version, reads without a CELL table too.
+        assert!(FontAtlas::from_bytes(&v5_with_version([5, 0, 2, 0], &[])).is_ok());
+
         // 0.1.7 parses as 0.1.0 does.
         let p7 = FontAtlas::from_bytes(&v5_with_version([5, 0, 1, 7], &[])).expect("5:0.1.7");
         assert_eq!(p7.layers, ok.layers);
@@ -3568,7 +3717,7 @@ mod format_v5 {
 
         for (v, why) in [
             ([5, 0, 0, 3], "0.0.x"),
-            ([5, 0, 2, 0], "newer"),
+            ([5, 0, 3, 0], "newer"),
             ([5, 1, 0, 0], "newer major"),
             ([6, 0, 0, 0], "file-major"),
         ] {
@@ -3710,7 +3859,100 @@ mod format_v5 {
             FontAtlas::empty(1, 1, 3).file_version(),
             AtlasFileVersion::Split(ATLAS_FORMAT_VERSION)
         );
-        assert_eq!(ATLAS_FORMAT_VERSION.to_string(), "5:0.1.0");
+        assert_eq!(ATLAS_FORMAT_VERSION.to_string(), "5:0.2.0");
+        assert_eq!(ATLAS_FORMAT_VERSION_LINE_BOX.to_string(), "5:0.1.0");
+    }
+
+    /// One set whose `px_per_em_frac` fits `cell`, in a 1x1 atlas with that box.
+    fn boxed(cell: CellBox) -> FontAtlas {
+        let mut a = FontAtlas::empty(1, 1, 3);
+        a.sets = vec![SetMetrics {
+            set: GlyphSet::Text,
+            glyph_count: 0,
+            baseline_frac: 0.7,
+            px_per_em_frac: (1.0 / cell.cell_em()) as f32,
+            ascent_em: 0.0,
+            descent_em: 0.0,
+            line_gap_em: 0.0,
+            underline_pos_em: 0.0,
+            underline_thickness_em: 0.0,
+            ink_descent_em: 0.0,
+        }];
+        a.cell_box = cell;
+        a
+    }
+
+    const TEXTURINA_BOX: CellBox = CellBox {
+        above_em: 0.179,
+        below_em: -0.073,
+    };
+
+    /// **The cell box round-trips, at 5:0.2.0 with a `CELL` table, and an
+    /// atlas whose cells are the line box is written exactly as before**
+    /// (per-atlas cell box plan, section 4.2).
+    #[test]
+    fn a_cell_box_round_trips_at_0_2_and_the_line_box_stays_0_1() {
+        let line = boxed(CellBox::LINE_BOX).to_bytes();
+        assert_eq!(&line[4..8], &[5, 0, 1, 0]);
+        assert_eq!(u32::from_le_bytes(line[32..36].try_into().unwrap()), 0);
+        assert_eq!(
+            FontAtlas::from_bytes(&line).unwrap().cell_box(),
+            CellBox::LINE_BOX
+        );
+
+        let bytes = boxed(TEXTURINA_BOX).to_bytes();
+        assert_eq!(&bytes[4..8], &[5, 0, 2, 0]);
+        let back = FontAtlas::from_bytes(&bytes).expect("5:0.2.0 with CELL");
+        let c = back.cell_box();
+        assert!((c.above_em - 0.179).abs() < 1e-6 && (c.below_em + 0.073).abs() < 1e-6);
+        assert!((c.cell_em() - 1.406).abs() < 1e-6);
+        assert_eq!(
+            back.to_bytes(),
+            bytes,
+            "a second round trip is a fixed point"
+        );
+    }
+
+    /// A reader of 5:0.1.0, libmsdf 0.5, refuses an atlas with a cell box
+    /// rather than drawing its cells onto a 1.3 em box.
+    #[test]
+    fn a_0_1_reader_refuses_a_cell_box() {
+        assert!(
+            ATLAS_FORMAT_VERSION_LINE_BOX
+                .reads(ATLAS_FORMAT_VERSION)
+                .is_err()
+        );
+        assert!(
+            ATLAS_FORMAT_VERSION
+                .reads(ATLAS_FORMAT_VERSION_LINE_BOX)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_bad_cell_table_is_refused() {
+        let body = |a: f32, b: f32| [a.to_le_bytes(), b.to_le_bytes()].concat();
+        let with = |v: [u8; 4], body: &[u8]| {
+            let mut bytes = boxed(CellBox::LINE_BOX).write_v5(&[table(
+                &CELL_TABLE_TAG,
+                ATLAS_TABLE_FACE_ALL,
+                body,
+            )]);
+            bytes[4..8].copy_from_slice(&v);
+            bytes
+        };
+        // A box that agrees with the set's 1/1.3 is accepted at 0.2.
+        assert!(FontAtlas::from_bytes(&with([5, 0, 2, 0], &body(0.1, -0.1))).is_ok());
+        for (v, b, says) in [
+            ([5, 0, 1, 0], body(0.1, -0.1), "before 5:0.2.0"),
+            ([5, 0, 2, 0], vec![0; 4], "8 bytes"),
+            ([5, 0, 2, 0], body(f32::NAN, 0.0), "not finite"),
+            ([5, 0, 2, 0], body(3.0, 0.0), "0.5 to 4.0"),
+            ([5, 0, 2, 0], body(0.2, 0.0), "px_per_em_frac"),
+        ] {
+            let err = FontAtlas::from_bytes(&with(v, &b)).expect_err(says);
+            assert!(err.contains(says), "{says}: {err}");
+        }
     }
 }
 
