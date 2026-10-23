@@ -185,3 +185,48 @@ No dependency changed version.
 - Unchanged for existing callers: `DrawList::lower` lowers a list of plain
   calls exactly as before. It now debug-asserts that no text was pushed
   from a set's handle; lists that use no set never reach that assertion.
+
+## 0.5.0 — 2026-10-23 (tag `v0.5.0`)
+
+A terminal face and a symbol page, from Noto
+(`docs/design/20261023_01_TERMINAL_FONTS_PLAN.md`). Not strictly additive,
+so a minor release (Rule 5.4). `libmsdf` and `libmsdf-font` stay in
+lockstep: both are 0.5.0 and both are covered by this entry and this tag.
+The commit is the one tagged `v0.5.0`. No dependency changed version. The
+atlas format is unchanged (5:0.1.0), and every atlas bundled before this
+release is byte-identical.
+
+- **Breaking:** `BundledAtlas` gains `NotoSansMono` and `TerminalSymbols`,
+  and is now `#[non_exhaustive]`: a downstream exhaustive match stops
+  compiling. `BundledAtlas::ALL` is `[BundledAtlas; 9]` (was 7).
+- **Breaking:** `BakeOptions` gains the public field `cap: CapPlacement`
+  (default `CapPlacement::DEFAULT`, the placement every earlier bake used),
+  and `FaceReport` gains `ink_outside: Vec<InkOutside>`: struct literals of
+  either outside libmsdf need them.
+- **Breaking (rendering):** a text run's glyphs are composited as one
+  shape (each pixel takes the largest coverage any glyph of the run gives
+  it, composited once), and a glyph sample is clamped to its cell's last
+  texel centre. Pixels where two glyphs of one run overlap with partial
+  coverage draw lighter than before (the golden scene: 4 of 320,000 pixels,
+  by at most 25 levels); everything else draws as before.
+- Added: `CapPlacement` (`top_frac`, `height_em`; `DEFAULT`,
+  `TERMINAL_TOP_FRAC`, `cap_units`, `window`), `glyph_projection_with`,
+  `default_cell_metrics_with`, `FontAtlasBuilder::with_cap_placement` and
+  `cap_placement`, and `InkOutside` (`glyph_id`, `above`, `below`,
+  `wider`); the bake report's "ink past the cell window" lines.
+- Added: `CoverageGroupId::TerminalSymbols` (3) and `TerminalEmoji` (4)
+  (the enum was already `#[non_exhaustive]`), with `COVERAGE_TERMINAL` (583
+  codepoints) and `COVERAGE_TERMINAL_EMOJI` (23).
+- Added: `BundledAtlas::coverage`, `columns` and `cap`; `is_ofl` is true
+  for the two new atlases.
+- Added: the module `libmsdf_font::terminal` (`libmsdf::font::terminal`),
+  with `TerminalShaper` (`new`, `cell_em`, `line_pitch_em`, `line`),
+  `TerminalLine`, `TerminalSegment`, `TerminalSource`, `TerminalError`,
+  `TERMINAL_WIDE_FORMS` and `TERMINAL_WIDE_FORM`, re-exported from
+  `libmsdf::font`; the five types also at the `libmsdf` root.
+- Added: `DrawList::push_terminal_line`.
+- Added: the features `font-ofl-noto-sans-mono`,
+  `font-ofl-noto-terminal-symbols` and the preset `fonts-ofl-terminal`,
+  with `NOTO_SANS_MONO_REGULAR_TTF`, `NOTO_SANS_MONO_BOLD_TTF`,
+  `TERMINAL_SYMBOLS_TTF` (each with `shaper`), `NOTO_SANS_MONO_ATLAS` and
+  `TERMINAL_SYMBOLS_ATLAS`, at the root and in `libmsdf::font`.
