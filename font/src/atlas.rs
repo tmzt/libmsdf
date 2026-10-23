@@ -1629,7 +1629,13 @@ pub fn glyph_projection(
     glyph_id: u16,
     glyph_size: u32,
 ) -> Option<GlyphProjection> {
-    glyph_projection_with(face, glyph_id, glyph_size, CapPlacement::DEFAULT)
+    glyph_projection_with(
+        face,
+        glyph_id,
+        glyph_size,
+        CapPlacement::DEFAULT,
+        CellBox::LINE_BOX,
+    )
 }
 
 /// **Where a bake puts a face's cap height in the cell**
@@ -1675,12 +1681,32 @@ impl CapPlacement {
     }
 
     /// The cell window for `face` in font units, `(bottom, top)`: the y
-    /// range a cell holds. Ink outside it is clipped by the cell.
+    /// range a cell with box `cell` holds. Ink outside it is clipped by the
+    /// cell.
     #[cfg(feature = "shaper")]
-    pub fn window(&self, face: &ttf_parser::Face) -> (f64, f64) {
-        let cell = face.units_per_em() as f64 * CELL_EM_RATIO;
-        let top = self.cap_units(face) + self.top_frac * cell;
-        (top - cell, top)
+    pub fn window(&self, face: &ttf_parser::Face, cell: CellBox) -> (f64, f64) {
+        let upem = face.units_per_em() as f64;
+        if cell.is_line_box() {
+            let cell = upem * CELL_EM_RATIO;
+            let top = self.cap_units(face) + self.top_frac * cell;
+            return (top - cell, top);
+        }
+        let top = self.cap_units(face) + (self.top_frac * CELL_EM_RATIO + cell.above_em) * upem;
+        (top - cell.cell_em() * upem, top)
+    }
+
+    /// **Where the cap height sits in a cell with box `cell`**, as a
+    /// fraction of the cell from its top. `top_frac` is a fraction of the
+    /// LINE BOX, so a cell that reaches `above_em` past the line box's top
+    /// puts the cap that much further down it; for [`CellBox::LINE_BOX`] it
+    /// is `top_frac` itself, computed no other way, so line-box bakes keep
+    /// their bytes.
+    pub fn top_frac_in(&self, cell: CellBox) -> f64 {
+        if cell.is_line_box() {
+            self.top_frac
+        } else {
+            (self.top_frac * CELL_EM_RATIO + cell.above_em) / cell.cell_em()
+        }
     }
 }
 
@@ -1764,17 +1790,18 @@ impl Default for CellBox {
     }
 }
 
-/// [`glyph_projection`] with a [`CapPlacement`].
+/// [`glyph_projection`] with a [`CapPlacement`] and a [`CellBox`].
 #[cfg(feature = "shaper")]
 pub fn glyph_projection_with(
     face: &ttf_parser::Face,
     glyph_id: u16,
     glyph_size: u32,
     cap: CapPlacement,
+    cell: CellBox,
 ) -> Option<GlyphProjection> {
     let gs = glyph_size as f64;
     let upem = face.units_per_em() as f64;
-    let em_scale = gs / (upem * CELL_EM_RATIO);
+    let em_scale = gs / (upem * cell.cell_em());
 
     let gid = ttf_parser::GlyphId(glyph_id);
     let advance_x = face.glyph_hor_advance(gid).unwrap_or(0) as f32 / upem as f32;
@@ -1788,9 +1815,9 @@ pub fn glyph_projection_with(
     let target_px_x = (gs - ink_w) * 0.5;
     let g_tx = target_px_x / em_scale - bbox.x_min as f64;
 
-    // Vertical: align the font's cap height to 15% from the cell top so all
-    // digits and caps share a level top boundary.
-    let target_top_px = gs * cap.top_frac;
+    // Vertical: align the font's cap height to `top_frac` of the line box
+    // (15% by default) so all digits and caps share a level top boundary.
+    let target_top_px = gs * cap.top_frac_in(cell);
     let g_ty = (gs - target_top_px) / em_scale - cap_y_max;
 
     Some(GlyphProjection {
@@ -1874,21 +1901,22 @@ pub const FALLBACK_MAX_INK_DESCENT_EM: f32 = 0.25;
 /// [`FontAtlas::set_metrics`] answers it properly on top of that.
 #[cfg(feature = "shaper")]
 pub fn default_cell_metrics(face: &ttf_parser::Face, glyph_size: u32) -> (f32, f32, f32) {
-    default_cell_metrics_with(face, glyph_size, CapPlacement::DEFAULT)
+    default_cell_metrics_with(face, glyph_size, CapPlacement::DEFAULT, CellBox::LINE_BOX)
 }
 
-/// [`default_cell_metrics`] with a [`CapPlacement`].
+/// [`default_cell_metrics`] with a [`CapPlacement`] and a [`CellBox`].
 #[cfg(feature = "shaper")]
 pub fn default_cell_metrics_with(
     face: &ttf_parser::Face,
     glyph_size: u32,
     cap: CapPlacement,
+    cell: CellBox,
 ) -> (f32, f32, f32) {
     let gs = glyph_size as f64;
     let upem = face.units_per_em() as f64;
-    let em_scale = gs / (upem * CELL_EM_RATIO);
+    let em_scale = gs / (upem * cell.cell_em());
     (
-        (gs * cap.top_frac + em_scale * cap.cap_units(face)) as f32,
+        (gs * cap.top_frac_in(cell) + em_scale * cap.cap_units(face)) as f32,
         // The same 0.15 as [`crate::drawlist::X_MARGIN_FRAC`], written out
         // because that constant is an `f32` and `0.15f32 as f64` is
         // 0.1500000059604645 - enough to land on a different `f32` here.
@@ -2063,6 +2091,9 @@ pub struct FontAtlasBuilder {
     /// Where every cell puts its face's cap height
     /// ([`FontAtlasBuilder::with_cap_placement`]).
     cap: CapPlacement,
+    /// Where the cells sit relative to the line box
+    /// ([`FontAtlasBuilder::with_cell_box`]).
+    cell: CellBox,
 }
 
 #[cfg(feature = "shaper")]
@@ -2082,6 +2113,7 @@ impl FontAtlasBuilder {
             licences: Vec::new(),
             columns: ATLAS_COLS,
             cap: CapPlacement::DEFAULT,
+            cell: CellBox::LINE_BOX,
         }
     }
 
@@ -2095,6 +2127,18 @@ impl FontAtlasBuilder {
     /// The cap placement every cell is baked with.
     pub fn cap_placement(&self) -> CapPlacement {
         self.cap
+    }
+
+    /// Bake cells with box `cell` instead of [`CellBox::LINE_BOX`], for a
+    /// face whose ink does not fit the line box (per-atlas cell box plan,
+    /// section 4.3). The atlas carries it in a `CELL` table.
+    pub fn with_cell_box(&mut self, cell: CellBox) {
+        self.cell = cell;
+    }
+
+    /// The cell box this builder bakes with.
+    pub fn cell_box(&self) -> CellBox {
+        self.cell
     }
 
     /// **Bake `columns` cell columns per layer** instead of [`ATLAS_COLS`]:
@@ -2616,10 +2660,10 @@ impl FontAtlasBuilder {
         let gs = self.glyph_size;
         let channels = 3u32;
         let (baseline_def, x_margin_def, px_per_em) =
-            default_cell_metrics_with(&face25, gs, self.cap);
+            default_cell_metrics_with(&face25, gs, self.cap, self.cell);
 
         let gid18 = ttf_parser_018::GlyphId(glyph_id);
-        let projection = glyph_projection_with(&face25, glyph_id, gs, self.cap);
+        let projection = glyph_projection_with(&face25, glyph_id, gs, self.cap, self.cell);
         let has_outline = face18.glyph_shape(gid18).is_some() && projection.is_some();
 
         // Default to fully OUTSIDE the field (0 → median < 0.5 → renders
@@ -3056,7 +3100,7 @@ impl FontAtlasBuilder {
             licences: Vec::new(),
             read_version: AtlasFileVersion::Split(ATLAS_FORMAT_VERSION),
             coverage: Vec::new(),
-            cell_box: CellBox::LINE_BOX,
+            cell_box: self.cell,
         })
     }
 

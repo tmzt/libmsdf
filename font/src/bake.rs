@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use crate::atlas::{BuildError, FontAtlasBuilder};
 use crate::bundled::{BUNDLED_ATLAS_GLYPH_SIZE, BUNDLED_ATLAS_PX_RANGE, BundledAtlas, hex_of};
 use crate::coverage::{Coverage, CoverageGroupId, FaceCoverage, GroupCoverage, MissingPolicy};
-use crate::{ATLAS_COLS, CapPlacement, GlyphSet, GlyphStyle, LayoutError, LayoutOptions};
+use crate::{ATLAS_COLS, CapPlacement, CellBox, GlyphSet, GlyphStyle, LayoutError, LayoutOptions};
 
 /// One face to bake, and how. Every field is an input to the bytes.
 #[derive(Debug, Clone, PartialEq)]
@@ -43,6 +43,9 @@ pub struct BakeOptions {
     /// Where each cell puts its face's cap height
     /// ([`CapPlacement::DEFAULT`] unless a face's ink needs another).
     pub cap: CapPlacement,
+    /// Where the cells sit relative to the line box ([`CellBox::LINE_BOX`]
+    /// unless a face's ink does not fit it).
+    pub cell: CellBox,
 }
 
 impl BakeOptions {
@@ -60,6 +63,7 @@ impl BakeOptions {
             columns: ATLAS_COLS,
             waive: Vec::new(),
             cap: CapPlacement::DEFAULT,
+            cell: CellBox::LINE_BOX,
         }
     }
 }
@@ -241,16 +245,18 @@ impl core::fmt::Display for BakeReport {
     }
 }
 
-/// The glyphs of `style` in `atlas` whose ink, laid out with `cap`, passes
-/// the cell window of `face`.
+/// The glyphs of `style` in `atlas` whose ink, laid out with `cap` in cells
+/// with box `cell`, passes the cell window of `face`: above or below it, or
+/// wider than the cell (cells are square).
 fn ink_outside(
     atlas: &crate::FontAtlas,
     face: &ttf_parser::Face,
     style: GlyphStyle,
     cap: CapPlacement,
+    cell: CellBox,
 ) -> Vec<InkOutside> {
-    let (bottom, top) = cap.window(face);
-    let cell = face.units_per_em() as f64 * crate::CELL_EM_RATIO;
+    let (bottom, top) = cap.window(face, cell);
+    let cell = face.units_per_em() as f64 * cell.cell_em();
     let mut out: Vec<InkOutside> = atlas
         .glyphs
         .iter()
@@ -320,6 +326,7 @@ impl Baker {
         let mut builder = FontAtlasBuilder::new(regular, opts.glyph_size, opts.px_range);
         builder.with_columns(opts.columns);
         builder.with_cap_placement(opts.cap);
+        builder.with_cell_box(opts.cell);
         let mut report = BakeReport::default();
         let mut coverage: Vec<FaceCoverage> = Vec::new();
         match &opts.coverage {
@@ -437,7 +444,8 @@ impl Baker {
                 .1;
             let face = ttf_parser::Face::parse(data, 0)
                 .map_err(|e| BakeError::Build(format!("{:?} face: {e}", face_report.style)))?;
-            face_report.ink_outside = ink_outside(&atlas, &face, face_report.style, opts.cap);
+            face_report.ink_outside =
+                ink_outside(&atlas, &face, face_report.style, opts.cap, opts.cell);
         }
         let bytes = atlas
             .try_to_bytes()
