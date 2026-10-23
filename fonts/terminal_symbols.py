@@ -28,7 +28,9 @@ output is deterministic: the same inputs give the same bytes.
      cells join without a seam; the shades U+2591-2593 are only remapped;
    - every other glyph takes n cells (2 for a wide emoji or a wide form,
      otherwise 1), is fitted inside them less 30 units a side and inside the
-     window less 30, and is centred in them.
+     window less 30, and has its source advance box centred in them, so a
+     family such as Braille keeps one position for every pattern (its ink
+     is nudged inside the margins only where it would cross them).
 4. The face has cmap, glyf, hmtx and names only: no GSUB, GPOS or hinting.
 5. The output's sha256 is printed.
 """
@@ -216,7 +218,9 @@ def fitted(font: TTFont, gname: str, cells: int):
     if box is None:
         return draw(font, gname, lambda x, y: (round(x * s), round(y * s))), cells * CELL
     x0, y0, x1, y1 = (v * s for v in box)
-    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    # The advance box's centre, not the ink's: every glyph of a family
+    # (Braille above all) keeps its place in the cell.
+    cx, cy = font["hmtx"][gname][0] * s / 2, (y0 + y1) / 2
     k = 1.0
     room = cells * CELL - 2 * MARGIN
     if x1 - x0 > room:
@@ -227,6 +231,13 @@ def fitted(font: TTFont, gname: str, cells: int):
     if half > fit:
         k *= fit / half
     mid = cells * CELL / 2
+    # Nudge the ink inside the margins if the advance box's centring put it
+    # across one (k already makes it narrow enough to fit).
+    left, right = (x0 - cx) * k + mid, (x1 - cx) * k + mid
+    if left < MARGIN:
+        mid += MARGIN - left
+    elif right > cells * CELL - MARGIN:
+        mid -= right - (cells * CELL - MARGIN)
 
     def point(x, y):
         return (round((x * s - cx) * k + mid), round((y * s - cy) * k + cy))

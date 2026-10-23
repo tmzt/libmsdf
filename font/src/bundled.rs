@@ -143,7 +143,7 @@ const NOTO_SANS_MONO_BOLD: BundledFace = BundledFace {
 
 const TERMINAL_SYMBOLS: BundledFace = BundledFace {
     file: "LibmsdfTerminalSymbols-Regular.ttf",
-    sha256: hex("ecd8c840da5ab1c15975f76a0fd23322730a79c760a70fa8a636b7436781bcf8"),
+    sha256: hex("67d21cce1f1223a380d368f6a3027251bb773aec1b7a87bd836f55217c43d2f7"),
     upstream_sha256: None,
     style: GlyphStyle::Regular,
 };
