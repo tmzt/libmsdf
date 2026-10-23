@@ -109,14 +109,15 @@ pub use drawlist::{
     SdfInstance, SdfKind, SdfRotate, rotate_rect,
 };
 pub use font::{
-    ATLAS_COLS, ATLAS_FILE_MAJOR, ATLAS_FORMAT_VERSION, ATLAS_HEADER_SIZE, ATLAS_HEADER_SIZE_V5,
-    ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION, ATLAS_VERSION_LAYERED, AtlasFileVersion,
-    AtlasFormatVersion, AtlasLayer, AtlasLayout, AtlasManager, AtlasRegion, AtlasShaper, CellKey,
-    FALLBACK_BASELINE_FRAC, FALLBACK_MAX_INK_DESCENT_EM, FaceLayout, FontAtlas, GlyphEntry,
-    GlyphSet, GlyphStyle, HIGHBAY_ICONS, HIGHBAY_ICONS_BLOCK, LICENCE_REGISTRY, LayerNotBaked,
-    LicenceRecord, MARKER_ARROW, MARKERS, MAX_ATLAS_LAYERS, MAX_RAW_GLYPH_ID, MSYMBOLS_ICONS,
-    NoLayout, OWNED_BLOCKS, RunShaper, SetMetrics, ShapedRun, StyledGlyphError, TEXT_RANGES,
-    TerminalError, TerminalLine, TerminalSegment, TerminalShaper, TerminalSource, atlas_capacity,
+    ATLAS_COLS, ATLAS_FILE_MAJOR, ATLAS_FORMAT_VERSION, ATLAS_FORMAT_VERSION_LINE_BOX,
+    ATLAS_HEADER_SIZE, ATLAS_HEADER_SIZE_V5, ATLAS_MAGIC, ATLAS_ROWS, ATLAS_VERSION,
+    ATLAS_VERSION_LAYERED, AtlasFileVersion, AtlasFormatVersion, AtlasLayer, AtlasLayout,
+    AtlasManager, AtlasRegion, AtlasShaper, CellBox, CellKey, FALLBACK_BASELINE_FRAC,
+    FALLBACK_MAX_INK_DESCENT_EM, FaceLayout, FontAtlas, GlyphEntry, GlyphSet, GlyphStyle,
+    HIGHBAY_ICONS, HIGHBAY_ICONS_BLOCK, LICENCE_REGISTRY, LayerNotBaked, LicenceRecord,
+    MARKER_ARROW, MARKERS, MAX_ATLAS_LAYERS, MAX_RAW_GLYPH_ID, MSYMBOLS_ICONS, NoLayout,
+    OWNED_BLOCKS, RunShaper, SetMetrics, ShapedRun, StyledGlyphError, TEXT_RANGES, TerminalError,
+    TerminalLine, TerminalSegment, TerminalShaper, TerminalSource, atlas_capacity,
     highbay_codepoint, msymbols_codepoint,
 };
 #[cfg(feature = "shaper")]

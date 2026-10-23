@@ -9,8 +9,8 @@
 //! * **Nothing that exists moved.** The layer index went into two bytes of
 //!   `GlyphEntry` that were already pad and into `g1.w`, which was the literal
 //!   `0` and was read nowhere. (Since file-major 5 every atlas is written at
-//!   `ATLAS_FORMAT_VERSION`; the v3 fixture still loads and survives a v5
-//!   round trip unchanged.)
+//!   one version, `ATLAS_FORMAT_VERSION_LINE_BOX` unless it has a cell box;
+//!   the v3 fixture still loads and survives a v5 round trip unchanged.)
 //! * **A styled bake fits.** `add_shipped_coverage` plus both bundled style
 //!   faces is 669 cells, which no single grid holds and three layers do.
 //! * **A layer the atlas lacks is REFUSED**, never answered with layer 0 - the
@@ -21,13 +21,13 @@ mod common;
 #[cfg(feature = "cpu-bake")]
 use common::faces::{ROBOTO_ASCII_MSYMBOLS, ROBOTO_BOLD_ASCII, ROBOTO_ITALIC_ASCII};
 use libmsdf::font::{
-    ATLAS_FORMAT_VERSION, ATLAS_VERSION, ATLAS_VERSION_LAYERED, AtlasFileVersion, AtlasLayer,
-    FontAtlas, GlyphEntry, GlyphStyle, LayerNotBaked, MAX_ATLAS_LAYERS,
+    ATLAS_FORMAT_VERSION_LINE_BOX, ATLAS_VERSION, ATLAS_VERSION_LAYERED, AtlasFileVersion,
+    AtlasLayer, FontAtlas, GlyphEntry, GlyphStyle, LayerNotBaked, MAX_ATLAS_LAYERS,
 };
 
 /// The version bytes this build writes.
 fn written_version() -> [u8; 4] {
-    let v = ATLAS_FORMAT_VERSION;
+    let v = ATLAS_FORMAT_VERSION_LINE_BOX;
     [v.file_major, v.major, v.minor, v.patch]
 }
 
@@ -46,8 +46,8 @@ fn atlas() -> FontAtlas {
 /// to file-major 5 unchanged.**
 ///
 /// The committed legacy fixture is a v3 file. It loads as `Legacy(3)`, is
-/// re-serialized at `ATLAS_FORMAT_VERSION` (the only version this build
-/// writes), and the v5 file reads back identical in every field and every
+/// re-serialized at `ATLAS_FORMAT_VERSION_LINE_BOX` (the version this build
+/// writes an atlas without a cell box at), and the v5 file reads back identical in every field and every
 /// pixel; the v5 bytes are then a fixed point.
 #[test]
 fn the_legacy_fixture_survives_a_v5_round_trip() {
@@ -55,12 +55,12 @@ fn the_legacy_fixture_survives_a_v5_round_trip() {
     assert_eq!(atlas.read_version, AtlasFileVersion::Legacy(ATLAS_VERSION));
     assert_eq!(&ATLAS_FIXTURE[4..8], &[3, 0, 0, 0]);
     let out = atlas.to_bytes();
-    let v = ATLAS_FORMAT_VERSION;
+    let v = ATLAS_FORMAT_VERSION_LINE_BOX;
     assert_eq!(&out[4..8], &[v.file_major, v.major, v.minor, v.patch]);
     let back = FontAtlas::from_bytes(&out).expect("the v5 copy loads");
     assert_eq!(
         back.read_version,
-        AtlasFileVersion::Split(ATLAS_FORMAT_VERSION)
+        AtlasFileVersion::Split(ATLAS_FORMAT_VERSION_LINE_BOX)
     );
     assert_eq!(back.width, atlas.width);
     assert_eq!(back.height, atlas.height);

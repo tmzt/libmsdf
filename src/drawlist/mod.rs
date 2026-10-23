@@ -61,6 +61,37 @@ pub fn screen_px_range(atlas_px_range: f32, cell_px: f32, font_size: f32) -> f32
     (atlas_px_range * font_size * LINE_BOX_RATIO / cell_px).max(MIN_SCREEN_PX_RANGE)
 }
 
+/// [`screen_px_range`] for a cell of any height: the atlas field spans
+/// `atlas_px_range` texels, and a glyph is drawn at `font_size / px_per_em`
+/// screen pixels per texel, whatever its cell box. `px_per_em` is the
+/// glyph's [`GlyphEntry::px_per_em`](crate::font::GlyphEntry). For a 1.3 em
+/// cell it is [`screen_px_range`]; that one is kept for the 1.3 em cells it
+/// was written for.
+pub fn screen_px_range_in(atlas_px_range: f32, px_per_em: f32, font_size: f32) -> f32 {
+    if px_per_em <= 0.0 {
+        return MIN_SCREEN_PX_RANGE;
+    }
+    (atlas_px_range * font_size / px_per_em).max(MIN_SCREEN_PX_RANGE)
+}
+
+/// **How tall a run's box is per unit of font size**: the atlas's cell
+/// height in em (per-atlas cell box plan, section 4.4). Exactly
+/// [`LINE_BOX_RATIO`] for an atlas whose cells are the line box, so every
+/// box drawn from one is the box it was before cell boxes existed.
+fn cell_em_of(atlas: &FontAtlas) -> f32 {
+    let cell = atlas.cell_box();
+    if cell.is_line_box() {
+        LINE_BOX_RATIO
+    } else {
+        cell.cell_em() as f32
+    }
+}
+
+/// How far the atlas's cell top is above the line box top, in em.
+fn cell_above_em_of(atlas: &FontAtlas) -> f32 {
+    atlas.cell_box().above_em as f32
+}
+
 /// The SDF shape an instance renders. Geometry parameters that aren't the
 /// bounding box live here; color/animation are per-instance fields.
 ///
@@ -1147,8 +1178,14 @@ impl DrawList {
             count += 1;
         }
 
-        let line_box_h = font_size * LINE_BOX_RATIO;
-        let left_margin = X_MARGIN_FRAC * line_box_h;
+        // The instance box is the CELL box: the shader maps it onto the cell
+        // (`scale = atlas_gh / cmd.size.y`). For an atlas whose cells are the
+        // line box that is the line box at `pos`; a taller or shifted cell
+        // overhangs it, `above_em` above `pos` (per-atlas cell box plan,
+        // section 4.4), and the baseline lands where the line box puts it.
+        let box_h = font_size * cell_em_of(atlas);
+        let box_top = pos[1] - cell_above_em_of(atlas) * font_size;
+        let left_margin = X_MARGIN_FRAC * box_h;
         let box_w = total_advance + 2.0 * left_margin;
 
         self.push(SdfInstance {
@@ -1158,8 +1195,8 @@ impl DrawList {
                 px_range,
             },
             // The shader recovers the pen origin via pos.x + margin.
-            position: [pos[0] - left_margin, pos[1]],
-            size: [box_w, line_box_h],
+            position: [pos[0] - left_margin, box_top],
+            size: [box_w, box_h],
             color,
             anim: 0,
         });
@@ -1299,14 +1336,15 @@ impl DrawList {
         }
 
         let font_size = size / entry.advance_x;
-        let line_h = font_size * LINE_BOX_RATIO;
-        // `sdf_render.wgsl` case 8u maps the cell onto the line box with
-        // `scale = atlas_gh / line_h` and reads `acy = (py - line_y) * scale`,
-        // so the baseline lands at `line_y + baseline_row / scale`. This is
-        // that, solved for `line_y`.
+        let cell_h = font_size * cell_em_of(atlas);
+        // `sdf_render.wgsl` case 8u maps the cell onto the instance box with
+        // `scale = atlas_gh / cell_h` and reads `acy = (py - box_y) * scale`,
+        // so the baseline lands at `box_y + baseline_row / scale`. This is
+        // that, solved for `box_y`, then moved to the line box top that
+        // `push_shaped_text` takes (the same point for a line-box atlas).
         let pos = [
             anchor[0] - size,
-            anchor[1] - entry.baseline_row * line_h / cell_px,
+            anchor[1] - entry.baseline_row * cell_h / cell_px + cell_above_em_of(atlas) * font_size,
         ];
 
         let rotation = SdfRotate::Radians(angle_rad);
@@ -1383,14 +1421,16 @@ impl DrawList {
         if !(em > 0.0) || cell_px <= 0.0 {
             return None;
         }
-        let line_h = em * LINE_BOX_RATIO;
-        let ink_w = (cell_px - 2.0 * entry.x_margin) * line_h / cell_px;
+        let cell_h = em * cell_em_of(atlas);
+        let ink_w = (cell_px - 2.0 * entry.x_margin) * cell_h / cell_px;
         // The em box spans `em` upward from the baseline, so centring it in the
         // rect puts the baseline half an em below the rect's middle.
         let baseline_y = rect_pos[1] + rect_size[1] * 0.5 + em * 0.5;
+        // The line box top `push_shaped_text` takes: the cell top, moved down
+        // by the cell's overhang (the same point for a line-box atlas).
         let pos = [
             rect_pos[0] + (rect_size[0] - ink_w) * 0.5,
-            baseline_y - entry.baseline_row * line_h / cell_px,
+            baseline_y - entry.baseline_row * cell_h / cell_px + cell_above_em_of(atlas) * em,
         ];
         self.push_shaped_text(run, atlas, pos, em, px_range, color);
         Some(pos)

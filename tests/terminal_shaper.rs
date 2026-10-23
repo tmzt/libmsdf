@@ -161,6 +161,16 @@ fn atlases_that_disagree_are_refused() {
         Err(TerminalError::Mismatch { what, .. }) => assert_eq!(what, "baseline"),
         other => panic!("expected a baseline mismatch, got {other:?}"),
     }
+    // A different cell box.
+    let mut taller = symbols.clone();
+    taller.cell_box = libmsdf::font::CellBox {
+        above_em: 0.1,
+        below_em: 0.0,
+    };
+    match TerminalShaper::new(&text, &taller) {
+        Err(TerminalError::Mismatch { what, .. }) => assert_eq!(what, "cell box"),
+        other => panic!("expected a cell box mismatch, got {other:?}"),
+    }
     // No layout tables.
     let mut bare = symbols;
     bare.layout = None;

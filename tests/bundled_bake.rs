@@ -120,3 +120,43 @@ fn a_cell_box_bakes_texturina_and_grenze_whole_on_the_same_baseline() {
         );
     }
 }
+
+/// **A run from a cell-box atlas overhangs the line box, on the same
+/// baseline** (per-atlas cell box plan, step 3): its instance box is the
+/// 1.406 em cell with its top 0.179 em above the line box, and its baseline
+/// lands where the committed line-box atlas puts it, to 1e-3 px.
+#[test]
+fn a_cell_box_run_overhangs_the_line_box_on_the_same_baseline() {
+    use libmsdf::font::CellBox;
+    let (ttf, mut opts) = Baker::bundled_options(BundledAtlas::Texturina, &fonts());
+    opts.cell = CellBox {
+        above_em: 0.179,
+        below_em: -0.073,
+    };
+    let boxed = FontAtlas::from_bytes(&Baker::bake_face(&ttf, &opts).unwrap()).unwrap();
+    let line =
+        FontAtlas::from_bytes(&std::fs::read(fonts().join("atlases/texturina-48.atlas")).unwrap())
+            .unwrap();
+    let (pos, size) = ([10.0, 20.0], 32.0);
+    let draw = |atlas: &FontAtlas| {
+        let shaper = libmsdf::AtlasShaper::new(atlas, GlyphStyle::Regular).unwrap();
+        let run = shaper.shape("H\u{13A}\u{C2}");
+        let mut list = libmsdf::DrawList::new();
+        list.push_shaped_text(&run, atlas, pos, size, 6.0, [1.0; 4]);
+        let inst = list.instances[0];
+        let entry = *atlas.get_glyph(run.glyphs[0].glyph_id).unwrap();
+        let baseline = inst.position[1] + entry.baseline_row * inst.size[1] / entry.atlas_h as f32;
+        (inst, baseline)
+    };
+    let (li, lb) = draw(&line);
+    let (bi, bb) = draw(&boxed);
+    assert_eq!(li.position[1], pos[1]);
+    assert_eq!(li.size[1], size * libmsdf::drawlist::LINE_BOX_RATIO);
+    assert!((bi.size[1] - size * 1.406).abs() < 1e-3, "{}", bi.size[1]);
+    assert!(
+        (bi.position[1] - (pos[1] - 0.179 * size)).abs() < 1e-3,
+        "{}",
+        bi.position[1]
+    );
+    assert!((bb - lb).abs() < 1e-3, "baseline {bb}, line-box atlas {lb}");
+}

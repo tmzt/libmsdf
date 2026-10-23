@@ -11,6 +11,7 @@ use std::collections::HashMap;
 
 use crate::core::sdf::{DRAW_TYPE_BOX, DRAW_TYPE_MSDF_TEXT, DRAW_TYPE_TEXT, SdfDrawCmd};
 use crate::drawlist::SdfFrame;
+use crate::font::CellBox;
 
 /// Font index that selects bitmap rendering for pictographic glyphs.
 pub const FONT_INDEX_PICTOGRAPHIC: u8 = 255;
@@ -231,12 +232,38 @@ pub struct CommandStream {
 ///
 /// MSDF char_buffer entries: `[16b glyph_table_index | 16b advance_delta_biased]`
 /// Bitmap char_buffer entries: `[32b codepoint]`
+///
+/// For an atlas whose cells are the line box; [`lower_stream_with_cell_box`]
+/// takes the atlas's [`CellBox`].
 pub fn lower_stream(
     stream: &CommandStream,
     glyph_id_to_table_index: &HashMap<u16, u16>,
     standard_advances: &HashMap<u16, f32>,
     font_size: f32,
     px_range: f32,
+) -> SdfFrame {
+    lower_stream_with_cell_box(
+        stream,
+        glyph_id_to_table_index,
+        standard_advances,
+        font_size,
+        px_range,
+        CellBox::LINE_BOX,
+    )
+}
+
+/// [`lower_stream`] for an atlas with cell box `cell`
+/// ([`FontAtlas::cell_box`](crate::FontAtlas::cell_box)): each MSDF text box
+/// is the cell box, overhanging the line box by `cell.above_em` above it
+/// (per-atlas cell box plan, section 4.4). Lines still advance by the line
+/// box.
+pub fn lower_stream_with_cell_box(
+    stream: &CommandStream,
+    glyph_id_to_table_index: &HashMap<u16, u16>,
+    standard_advances: &HashMap<u16, f32>,
+    font_size: f32,
+    px_range: f32,
+    cell: CellBox,
 ) -> SdfFrame {
     let mut draws = Vec::new();
     let mut char_buffer: Vec<u32> = Vec::new();
@@ -249,6 +276,16 @@ pub fn lower_stream(
     // Line box height matches the atlas cell proportions (1.3 = the 30%
     // safety margin added by the atlas builder).
     let line_box_h = font_size * crate::drawlist::LINE_BOX_RATIO;
+    // The MSDF text box: the cell box, exactly the line box for a line-box
+    // atlas.
+    let (cell_h, cell_above) = if cell.is_line_box() {
+        (line_box_h, 0.0)
+    } else {
+        (
+            font_size * cell.cell_em() as f32,
+            font_size * cell.above_em as f32,
+        )
+    };
 
     let mut batch_start_x: f32 = 0.0;
     let mut batch_y: f32 = 0.0;
@@ -288,13 +325,13 @@ pub fn lower_stream(
             // MSDF path — default for all text. The atlas cell has a 15%
             // horizontal margin; expand the box to include it.
             let x_margin_frac = crate::drawlist::X_MARGIN_FRAC;
-            let left_margin = x_margin_frac * line_box_h;
-            let right_margin = x_margin_frac * line_box_h;
+            let left_margin = x_margin_frac * cell_h;
+            let right_margin = x_margin_frac * cell_h;
             let box_w = total_advance + left_margin + right_margin;
 
             draws.push(SdfDrawCmd {
-                pos: [start_x - left_margin, y],
-                size: [box_w, line_box_h],
+                pos: [start_x - left_margin, y - cell_above],
+                size: [box_w, cell_h],
                 color,
                 // params.z = x_margin_frac so the shader can re-derive the pen origin
                 params: [

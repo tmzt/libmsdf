@@ -14,7 +14,7 @@ fn the_fixture_shapes_without_a_ttf() {
     let atlas = FontAtlas::from_bytes(ATLAS_FIXTURE).expect("the fixture loads");
     assert_eq!(
         atlas.file_version(),
-        AtlasFileVersion::Split(libmsdf::ATLAS_FORMAT_VERSION)
+        AtlasFileVersion::Split(libmsdf::ATLAS_FORMAT_VERSION_LINE_BOX)
     );
     let shaper = AtlasShaper::new(&atlas, GlyphStyle::Regular).expect("it carries layout");
     let run = shaper.shape("fifty Tax");
