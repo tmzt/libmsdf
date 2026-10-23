@@ -1,7 +1,7 @@
 ---
 title: A per-atlas cell box, and atlas format 5:0.2.0
 date: 2026-10-23
-status: In implementation
+status: Implemented
 covers: >
   Let an atlas's glyph cells be taller than, or offset from, the 1.3 em
   line box, set per atlas at bake time, so that a face whose ink does not
@@ -376,3 +376,18 @@ direction"). That is a separate plan and release after 0.6.0.
 
 Implementation starts with this amendment; the document is now immutable
 except by the owner's explicit instruction (Rule 1.5).
+
+## Amendment — 2026-10-23 14:51 EDT: implemented
+
+Every step is done and its **Done when** holds; released as 0.6.0
+(`4de319c`, tag `v0.6.0`) on the owner's approval. The commits:
+
+- Step 1, the cell box and the format: `07f642c`, `f403dc1`.
+- Step 2, baking with a box: `d756a62`, `4978313`.
+- Step 3, drawing from the box: `087314d`, `6f690e5`.
+- Step 4, the bundled faces, section 4.6's coverage and the tests:
+  `bb13dd7`, `78c8cd3`, `9c47e68`, `0037efb`; evidence in
+  out/fonts/20261023_04_cell_box_release/ and the FONT documents
+  (`6997d85`).
+- Step 5, the release: `4de319c`; departures recorded in CHANGES.md
+  (`37e0e7e`).
