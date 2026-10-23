@@ -484,6 +484,7 @@ impl Baker {
         opts.coverage = atlas.coverage();
         opts.columns = atlas.columns();
         opts.cap = atlas.cap();
+        opts.cell = atlas.cell();
         opts.waive = atlas.waivers().to_vec();
         (fonts_dir.join(faces[0].file), opts)
     }

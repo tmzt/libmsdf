@@ -257,8 +257,8 @@ def main() -> None:
     updir, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
     g = groups()
     terminal, emoji = expand(g["TERMINAL"]), expand(g["TERMINAL_EMOJI"])
-    assert len(terminal) == 583, f"TERMINAL is {len(terminal)} codepoints, not 583"
-    assert len(emoji) == 23, f"TERMINAL_EMOJI is {len(emoji)} codepoints, not 23"
+    assert len(terminal) == 591, f"TERMINAL is {len(terminal)} codepoints, not 591"
+    assert len(emoji) == 24, f"TERMINAL_EMOJI is {len(emoji)} codepoints, not 24"
     assert all(cp in emoji for cp in WIDE_FORMS), "a wide form outside TERMINAL_EMOJI"
 
     fonts = {key: load(updir, key) for key in SOURCES}
@@ -339,7 +339,7 @@ def main() -> None:
     fb.save(out)
 
     built = TTFont(out)
-    assert len(built.getBestCmap()) == 583 + 23
+    assert len(built.getBestCmap()) == 591 + 24
     print(f"{out}: {len(order)} glyphs, {len(cmap)} codepoints; from {sources}")
     print(f"sha256 {sha256(out.read_bytes())}")
 

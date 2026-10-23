@@ -23,7 +23,7 @@ named with each one is enabled.
     Upstream: google/fonts 98931f43a8dcf8ca908949780e0d03a6e4195227,
     ofl/grenzegotisch/GrenzeGotisch[wght].ttf,
     sha256 701b299d8dc002a2b4bea2ff0f1272c0e4081a2835914354804565c410d0c637
-    This file: sha256 17d705ef35289801832ff0f7563cb042b7818b329a06372b75ed8ad421d15001
+    This file: sha256 19f01d3ccd8d1abcc29db790d3e94f68166797e05727dc798b3045086042f9e7
 
   fonts/Texturina[opsz,wght]-subset.ttf, and the atlas texturina-48.atlas
   baked from it
@@ -38,7 +38,7 @@ named with each one is enabled.
     Upstream: google/fonts f4a8ff8c122abc147e5fd19fc46cb2396b67b2bb,
     ofl/texturina/Texturina[opsz,wght].ttf,
     sha256 478a15d7145cf94565cfc1aeb33596aeb0118c7d86a84d061ddf46de3d7dfda3
-    This file: sha256 f7ec0c7534a0f534964826cef6118475590061f9265c882c3c44e45ea2a0f108
+    This file: sha256 399fd6669e246d50d47ec89904fb4df9efea7597768663b391f3847f4614737e
 
   fonts/NotoSansMono-Regular-subset.ttf and fonts/NotoSansMono-Bold-subset.ttf,
   and the atlas noto-sans-mono-48.atlas baked from them
@@ -55,8 +55,8 @@ named with each one is enabled.
     Upstream: google/fonts e7db6ca603fd4862010383ff17ffd6cc4ffac1c0,
     ofl/notosansmono/NotoSansMono[wdth,wght].ttf,
     sha256 2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081
-    Regular: sha256 7bbaa03bc1ee2695e2cad69b0d2d01fe5878b08b4e9acb4062ec91458f752d7e
-    Bold: sha256 4b39f5aec21bbc121931af3619eb88cab62d620dce1bbd83a76e64c337bc2de2
+    Regular: sha256 436c580a03128211bf11c4ef1cb10d2f5ab31473829ee4585f8ebdb75313c37e
+    Bold: sha256 b77c8dee8ec3fb5e01553b9d4323e1723dc686f77bd9eb7cd31918316c82a06f
 
   fonts/LibmsdfTerminalSymbols-Regular.ttf ("Libmsdf Terminal Symbols"), and
   the atlas terminal-symbols-48.atlas baked from it
@@ -87,7 +87,7 @@ named with each one is enabled.
     the terminal symbol groups in fonts/coverage-groups.txt are taken from
     them, scaled to 1000 units per em, remapped and fitted onto Noto Sans
     Mono's 600-unit cell, and renamed; no layout tables or hinting are kept.
-    This file: sha256 67d21cce1f1223a380d368f6a3027251bb773aec1b7a87bd836f55217c43d2f7
+    This file: sha256 de25281b41790c0ef6cede3c815751d7c1ad15d8eeff8c6e6b81a2e5b4c1c2b2
 
 -----------------------------------------------------------------------------
 This Font Software is licensed under the SIL Open Font License, Version 1.1.

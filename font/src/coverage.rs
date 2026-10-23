@@ -79,8 +79,8 @@ impl CoverageGroup {
     }
 }
 
-/// **TEXT**: 287 codepoints. Basic Latin, no-break space, soft hyphen, the
-/// Latin-1 letters and Latin Extended-A.
+/// **TEXT**: 291 codepoints. Basic Latin, no-break space, soft hyphen, the
+/// Latin-1 letters, Latin Extended-A, and Ș ș Ț ț (U+0218-021B, Romanian).
 pub const COVERAGE_TEXT: CoverageGroup = CoverageGroup {
     id: CoverageGroupId::Text,
     ranges: &[
@@ -91,6 +91,7 @@ pub const COVERAGE_TEXT: CoverageGroup = CoverageGroup {
         ('\u{00D8}', '\u{00F6}'),
         ('\u{00F8}', '\u{00FF}'),
         ('\u{0100}', '\u{017F}'),
+        ('\u{0218}', '\u{021B}'),
     ],
     missing: MissingPolicy::Fail,
 };
@@ -159,22 +160,30 @@ pub const COVERAGE_MATH: CoverageGroup = CoverageGroup {
     missing: MissingPolicy::Skip,
 };
 
-/// **TERMINAL**: 583 codepoints, the terminal symbol page's symbols
+/// **TERMINAL**: 591 codepoints, the terminal symbol page's symbols
 /// (terminal fonts plan, section 4.5): box drawing U+2500-257F, block
 /// elements U+2580-259F, geometric shapes U+25A0-25FF and Braille
 /// U+2800-28FF in full; 25 arrows, 15 technical symbols, 24 dingbats, and
-/// ★ ☆ ☐ ☑ ☒ ⚙ ⧉.
+/// ★ ☆ ☐ ☑ ☒ ⚙ ⧉; and the eight glyphs of Claude Code's interface no
+/// terminal atlas carried, ※ ↯ ∙ ∴ ∵ ∷ ⌕ ⑂ (per-atlas cell box plan, 13:23
+/// EDT amendment). Ranges are ascending, as `CVRG` requires.
 pub const COVERAGE_TERMINAL: CoverageGroup = CoverageGroup {
     id: CoverageGroupId::TerminalSymbols,
     ranges: &[
+        ('\u{203B}', '\u{203B}'),
         ('\u{2190}', '\u{2199}'),
+        ('\u{21AF}', '\u{21AF}'),
         ('\u{21B0}', '\u{21B3}'),
         ('\u{21B5}', '\u{21B5}'),
         ('\u{21BA}', '\u{21BB}'),
         ('\u{21D0}', '\u{21D5}'),
         ('\u{21E5}', '\u{21E5}'),
         ('\u{21E7}', '\u{21E7}'),
+        ('\u{2219}', '\u{2219}'),
+        ('\u{2234}', '\u{2235}'),
+        ('\u{2237}', '\u{2237}'),
         ('\u{2303}', '\u{2303}'),
+        ('\u{2315}', '\u{2315}'),
         ('\u{2318}', '\u{2318}'),
         ('\u{2325}', '\u{2325}'),
         ('\u{2328}', '\u{2328}'),
@@ -184,6 +193,7 @@ pub const COVERAGE_TERMINAL: CoverageGroup = CoverageGroup {
         ('\u{23BF}', '\u{23BF}'),
         ('\u{23CE}', '\u{23CE}'),
         ('\u{23F5}', '\u{23FA}'),
+        ('\u{2442}', '\u{2442}'),
         ('\u{2500}', '\u{257F}'),
         ('\u{2580}', '\u{259F}'),
         ('\u{25A0}', '\u{25FF}'),
@@ -205,10 +215,11 @@ pub const COVERAGE_TERMINAL: CoverageGroup = CoverageGroup {
     missing: MissingPolicy::Skip,
 };
 
-/// **TERMINAL_EMOJI**: 23 codepoints, the curated monochrome emoji (21) and
+/// **TERMINAL_EMOJI**: 24 codepoints, the curated monochrome emoji (21) and
 /// the wide forms of the two that are narrow under `wcwidth`, ⚠ and ➡, at
-/// U+F0000 and U+F0001 (terminal fonts plan, 02:32 EDT amendment).
-/// Extendable by appending.
+/// U+F0000 and U+F0001 (terminal fonts plan, 02:32 EDT amendment), and ✨
+/// U+2728 (per-atlas cell box plan, 13:23 EDT amendment). Ranges are
+/// ascending, as `CVRG` requires.
 pub const COVERAGE_TERMINAL_EMOJI: CoverageGroup = CoverageGroup {
     id: CoverageGroupId::TerminalEmoji,
     ranges: &[
@@ -216,6 +227,7 @@ pub const COVERAGE_TERMINAL_EMOJI: CoverageGroup = CoverageGroup {
         ('\u{23F3}', '\u{23F3}'),
         ('\u{26A0}', '\u{26A0}'),
         ('\u{2705}', '\u{2705}'),
+        ('\u{2728}', '\u{2728}'),
         ('\u{274C}', '\u{274C}'),
         ('\u{27A1}', '\u{27A1}'),
         ('\u{2B50}', '\u{2B50}'),
@@ -539,18 +551,18 @@ mod tests {
             }
         }
         assert_eq!(from_file, from_rust);
-        assert_eq!(COVERAGE_TEXT.codepoints().len(), 287);
+        assert_eq!(COVERAGE_TEXT.codepoints().len(), 291);
         assert_eq!(COVERAGE_SYMBOLS.codepoints().len(), 63);
         assert_eq!(COVERAGE_MATH.codepoints().len(), 77);
-        assert_eq!(COVERAGE_TERMINAL.codepoints().len(), 583);
-        assert_eq!(COVERAGE_TERMINAL_EMOJI.codepoints().len(), 23);
+        assert_eq!(COVERAGE_TERMINAL.codepoints().len(), 591);
+        assert_eq!(COVERAGE_TERMINAL_EMOJI.codepoints().len(), 24);
         let all = Coverage::Groups(vec![COVERAGE_TEXT, COVERAGE_SYMBOLS, COVERAGE_MATH]);
         let n: u32 = all
             .ranges()
             .iter()
             .map(|&(lo, hi)| hi as u32 - lo as u32 + 1)
             .sum();
-        assert_eq!(n, 411);
+        assert_eq!(n, 415);
     }
 
     /// A `CVRG` whose missing codepoint is in the face's `Cmap` is refused on

@@ -11,6 +11,7 @@ TEXT fail U+00C0-00D6
 TEXT fail U+00D8-00F6
 TEXT fail U+00F8-00FF
 TEXT fail U+0100-017F
+TEXT fail U+0218-021B
 SYMBOLS skip U+00A1-00AC
 SYMBOLS skip U+00AE-00BF
 SYMBOLS skip U+00D7
@@ -57,15 +58,25 @@ MATH skip U+2282-2283
 # The terminal symbol page (docs/design/20261023_01_TERMINAL_FONTS_PLAN.md,
 # section 4.5 and the 02:32 EDT amendment), read by fonts/terminal_symbols.py
 # and compared with COVERAGE_TERMINAL and COVERAGE_TERMINAL_EMOJI. Not part of
-# the OFL text subsets, which keep TEXT, SYMBOLS and MATH only.
+# the OFL text subsets, which keep TEXT, SYMBOLS and MATH only. TERMINAL's
+# U+203B, 21AF, 2219, 2234-2235, 2237, 2315 and 2442 and TERMINAL_EMOJI's
+# U+2728 are the glyphs of Claude Code's interface no terminal atlas carried
+# (per-atlas cell box plan, 13:23 EDT amendment). Ranges are ascending, as
+# the CVRG table requires.
+TERMINAL skip U+203B
 TERMINAL skip U+2190-2199
+TERMINAL skip U+21AF
 TERMINAL skip U+21B0-21B3
 TERMINAL skip U+21B5
 TERMINAL skip U+21BA-21BB
 TERMINAL skip U+21D0-21D5
 TERMINAL skip U+21E5
 TERMINAL skip U+21E7
+TERMINAL skip U+2219
+TERMINAL skip U+2234-2235
+TERMINAL skip U+2237
 TERMINAL skip U+2303
+TERMINAL skip U+2315
 TERMINAL skip U+2318
 TERMINAL skip U+2325
 TERMINAL skip U+2328
@@ -75,6 +86,7 @@ TERMINAL skip U+238B
 TERMINAL skip U+23BF
 TERMINAL skip U+23CE
 TERMINAL skip U+23F5-23FA
+TERMINAL skip U+2442
 TERMINAL skip U+2500-257F
 TERMINAL skip U+2580-259F
 TERMINAL skip U+25A0-25FF
@@ -96,6 +108,7 @@ TERMINAL_EMOJI skip U+231B
 TERMINAL_EMOJI skip U+23F3
 TERMINAL_EMOJI skip U+26A0
 TERMINAL_EMOJI skip U+2705
+TERMINAL_EMOJI skip U+2728
 TERMINAL_EMOJI skip U+274C
 TERMINAL_EMOJI skip U+27A1
 TERMINAL_EMOJI skip U+2B50

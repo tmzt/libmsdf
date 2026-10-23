@@ -21,7 +21,7 @@ commits named in `FONTS-LICENSE-OFL.txt`.
    `wght=400,wdth=100` and `wght=700,wdth=100`), and the variation data goes
    with it. Without it, the variable face is kept whole.
 3. The face is subset to the union of TEXT, SYMBOLS and MATH in
-   `fonts/coverage-groups.txt` (411 codepoints), keeping every layout
+   `fonts/coverage-groups.txt` (415 codepoints), keeping every layout
    feature, glyph names, the whole `name` table and any variation data, and
    dropping hinting (`prep`, `fpgm`, `cvt `, glyph instructions), `gasp` and
    `DSIG`. The `head` timestamp is not recalculated, so the output is
@@ -126,7 +126,7 @@ def main() -> None:
         sys.exit(f"{src}: sha256 {found}, expected {expected} - not the recorded upstream")
 
     cps = codepoints()
-    assert len(cps) == 411, f"the coverage groups' union is {len(cps)} codepoints, not 411"
+    assert len(cps) == 415, f"the coverage groups' union is {len(cps)} codepoints, not 415"
 
     options = subset.Options()
     options.layout_features = ["*"]

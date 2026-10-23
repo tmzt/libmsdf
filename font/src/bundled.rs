@@ -9,7 +9,7 @@ use crate::coverage::{
     COVERAGE_MATH, COVERAGE_SYMBOLS, COVERAGE_TERMINAL, COVERAGE_TERMINAL_EMOJI, COVERAGE_TEXT,
     Coverage,
 };
-use crate::{ATLAS_COLS, CapPlacement, GlyphStyle};
+use crate::{ATLAS_COLS, CapPlacement, CellBox, GlyphStyle};
 
 /// The cell size every bundled atlas is baked at.
 pub const BUNDLED_ATLAS_GLYPH_SIZE: u32 = 48;
@@ -109,7 +109,7 @@ const ROBOTO_ITALIC_AS_REGULAR: BundledFace = BundledFace {
 };
 const GRENZE_GOTISCH: BundledFace = BundledFace {
     file: "GrenzeGotisch[wght]-subset.ttf",
-    sha256: hex("17d705ef35289801832ff0f7563cb042b7818b329a06372b75ed8ad421d15001"),
+    sha256: hex("19f01d3ccd8d1abcc29db790d3e94f68166797e05727dc798b3045086042f9e7"),
     upstream_sha256: Some(hex(
         "701b299d8dc002a2b4bea2ff0f1272c0e4081a2835914354804565c410d0c637",
     )),
@@ -117,7 +117,7 @@ const GRENZE_GOTISCH: BundledFace = BundledFace {
 };
 const TEXTURINA: BundledFace = BundledFace {
     file: "Texturina[opsz,wght]-subset.ttf",
-    sha256: hex("f7ec0c7534a0f534964826cef6118475590061f9265c882c3c44e45ea2a0f108"),
+    sha256: hex("399fd6669e246d50d47ec89904fb4df9efea7597768663b391f3847f4614737e"),
     upstream_sha256: Some(hex(
         "478a15d7145cf94565cfc1aeb33596aeb0118c7d86a84d061ddf46de3d7dfda3",
     )),
@@ -126,7 +126,7 @@ const TEXTURINA: BundledFace = BundledFace {
 
 const NOTO_SANS_MONO_REGULAR: BundledFace = BundledFace {
     file: "NotoSansMono-Regular-subset.ttf",
-    sha256: hex("7bbaa03bc1ee2695e2cad69b0d2d01fe5878b08b4e9acb4062ec91458f752d7e"),
+    sha256: hex("436c580a03128211bf11c4ef1cb10d2f5ab31473829ee4585f8ebdb75313c37e"),
     upstream_sha256: Some(hex(
         "2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081",
     )),
@@ -134,7 +134,7 @@ const NOTO_SANS_MONO_REGULAR: BundledFace = BundledFace {
 };
 const NOTO_SANS_MONO_BOLD: BundledFace = BundledFace {
     file: "NotoSansMono-Bold-subset.ttf",
-    sha256: hex("4b39f5aec21bbc121931af3619eb88cab62d620dce1bbd83a76e64c337bc2de2"),
+    sha256: hex("b77c8dee8ec3fb5e01553b9d4323e1723dc686f77bd9eb7cd31918316c82a06f"),
     upstream_sha256: Some(hex(
         "2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081",
     )),
@@ -143,7 +143,7 @@ const NOTO_SANS_MONO_BOLD: BundledFace = BundledFace {
 
 const TERMINAL_SYMBOLS: BundledFace = BundledFace {
     file: "LibmsdfTerminalSymbols-Regular.ttf",
-    sha256: hex("67d21cce1f1223a380d368f6a3027251bb773aec1b7a87bd836f55217c43d2f7"),
+    sha256: hex("de25281b41790c0ef6cede3c815751d7c1ad15d8eeff8c6e6b81a2e5b4c1c2b2"),
     upstream_sha256: None,
     style: GlyphStyle::Regular,
 };
@@ -153,6 +153,19 @@ const TERMINAL_SYMBOLS: BundledFace = BundledFace {
 const TERMINAL_SYMBOLS_CAP: CapPlacement = CapPlacement {
     top_frac: CapPlacement::TERMINAL_TOP_FRAC,
     height_em: Some(0.717),
+};
+
+/// Texturina's cell box: 1.406 em, from y −312 to 1094.
+const TEXTURINA_CELL: CellBox = CellBox {
+    above_em: 0.179,
+    below_em: -0.073,
+};
+
+/// Grenze Gotisch's cell box: the 1.3 em cell moved up 0.075 em, y −410 to
+/// 890.
+const GRENZE_GOTISCH_CELL: CellBox = CellBox {
+    above_em: 0.075,
+    below_em: -0.075,
 };
 
 /// The terminal faces' cap placement
@@ -263,6 +276,22 @@ impl BundledAtlas {
             BundledAtlas::NotoSansMono => TERMINAL_CAP,
             BundledAtlas::TerminalSymbols => TERMINAL_SYMBOLS_CAP,
             _ => CapPlacement::DEFAULT,
+        }
+    }
+
+    /// **Where the atlas's cells sit relative to the line box**
+    /// (`docs/design/20261023_02_PER_ATLAS_CELL_BOX_PLAN.md`, section 4.5):
+    /// [`CellBox::LINE_BOX`] except for the two faces whose ink does not fit
+    /// it. Texturina's accents and `ĥ ĺ` rise to 1064 units and `¿` falls to
+    /// −282, more than the 1300-unit line box, so its cell is 1.406 em;
+    /// Grenze Gotisch's rings rise to 862, so its 1.3 em cell moves up
+    /// 0.075 em. Each keeps a texel of margin and its baseline where the
+    /// line box puts it.
+    pub const fn cell(self) -> CellBox {
+        match self {
+            BundledAtlas::Texturina => TEXTURINA_CELL,
+            BundledAtlas::GrenzeGotisch => GRENZE_GOTISCH_CELL,
+            _ => CellBox::LINE_BOX,
         }
     }
 
