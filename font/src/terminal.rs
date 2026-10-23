@@ -70,7 +70,8 @@ pub enum TerminalError {
     NoLayout(TerminalSource),
     /// The atlases disagree on something they must share.
     Mismatch {
-        /// What: `"units per em"`, `"cell advance"` or `"baseline"`.
+        /// What: `"units per em"`, `"cell advance"`, `"cell box"` or
+        /// `"baseline"`.
         what: &'static str,
         /// The text atlas's value.
         text: f32,
@@ -115,8 +116,8 @@ impl TerminalShaper {
     /// A shaper over `text` (Noto Sans Mono, `NOTO_SANS_MONO_ATLAS`) and
     /// `symbols` (the symbol page, `TERMINAL_SYMBOLS_ATLAS`). Refuses atlases
     /// without layout tables, and atlases that disagree on units per em, the
-    /// cell advance (the text face's `0`, against the symbol page's `─`) or
-    /// the baseline.
+    /// cell advance (the text face's `0`, against the symbol page's `─`), the
+    /// cell box or the baseline.
     pub fn new(text: &FontAtlas, symbols: &FontAtlas) -> Result<Self, TerminalError> {
         let regular = AtlasShaper::new(text, GlyphStyle::Regular)
             .map_err(|_| TerminalError::NoLayout(TerminalSource::Text))?;
@@ -144,6 +145,16 @@ impl TerminalShaper {
                 what: "cell advance",
                 text: tc as f32,
                 symbols: sc as f32,
+            });
+        }
+        // The two pages share a line box; a different cell box would put
+        // one page's runs in taller or shifted boxes than the other's.
+        let (tbox, sbox) = (text.cell_box(), symbols.cell_box());
+        if tbox != sbox {
+            return Err(TerminalError::Mismatch {
+                what: "cell box",
+                text: tbox.cell_em() as f32,
+                symbols: sbox.cell_em() as f32,
             });
         }
         let (tb, sb) = (

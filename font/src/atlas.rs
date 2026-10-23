@@ -1541,7 +1541,12 @@ impl FontAtlas {
         if px_range <= 0.0 || cell <= 0.0 {
             return 0.0;
         }
-        cell / (crate::LINE_BOX_RATIO * px_range)
+        let cell_em = if self.cell_box.is_line_box() {
+            crate::LINE_BOX_RATIO
+        } else {
+            self.cell_box.cell_em() as f32
+        };
+        cell / (cell_em * px_range)
     }
 
     /// **Whether a run at `font_size` still has ink in it** — at or above HALF
