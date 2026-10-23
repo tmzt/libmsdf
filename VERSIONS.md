@@ -230,3 +230,47 @@ release is byte-identical.
   with `NOTO_SANS_MONO_REGULAR_TTF`, `NOTO_SANS_MONO_BOLD_TTF`,
   `TERMINAL_SYMBOLS_TTF` (each with `shaper`), `NOTO_SANS_MONO_ATLAS` and
   `TERMINAL_SYMBOLS_ATLAS`, at the root and in `libmsdf::font`.
+
+## 0.6.0 — 2026-10-23 (tag `v0.6.0`)
+
+A per-atlas cell box and atlas format 5:0.2.0, and wider terminal and text
+coverage (`docs/design/20261023_02_PER_ATLAS_CELL_BOX_PLAN.md`). Not
+strictly additive, so a minor release (Rule 5.4). `libmsdf` and
+`libmsdf-font` stay in lockstep: both are 0.6.0 and both are covered by this
+entry and this tag. The commit is the one tagged `v0.6.0`. No dependency
+changed version.
+
+- **Breaking:** the atlas format moves to 5:0.2.0 (`ATLAS_FORMAT_VERSION`).
+  An atlas whose cells are not the line box carries a `CELL` table and is
+  written at 5:0.2.0, which libmsdf 0.5 and earlier refuse. Every other atlas
+  is written at 5:0.1.0 (`ATLAS_FORMAT_VERSION_LINE_BOX`), exactly as
+  before.
+- **Breaking:** the bundled Texturina and Grenze Gotisch atlases are baked
+  with cell boxes and written at 5:0.2.0. Their accents and rings, clipped
+  before, now draw whole, overhanging the line box; their baselines do not
+  move.
+- **Breaking:** `FontAtlas` gains the public field `cell_box`, and
+  `BakeOptions` the public field `cell`: struct literals of either need them.
+  `glyph_projection_with`, `default_cell_metrics_with` and
+  `CapPlacement::window` take a `CellBox`.
+- **Breaking (rendering):** text, markers and icons from an atlas with a
+  cell box are drawn in the cell box rather than the line box. Atlases whose
+  cells are the line box draw exactly as before (the golden scene is
+  unchanged).
+- **Breaking:** the TEXT coverage group gains `Ș ș Ț ț` (U+0218-021B), so the
+  Noto Sans Mono, Grenze Gotisch and Texturina subsets, and their atlases,
+  change bytes. The terminal symbol page gains `※ ↯ ∙ ∴ ∵ ∷ ⌕ ⑂`
+  (`COVERAGE_TERMINAL`, 591 codepoints) and `✨` (`COVERAGE_TERMINAL_EMOJI`,
+  24), and its atlas changes bytes (616 cells). The five Roboto atlases are
+  byte-identical.
+- **Breaking:** `TerminalShaper::new` refuses a text atlas and symbol page
+  whose cell boxes differ (`TerminalError::Mismatch { what: "cell box" }`).
+- Added: `CellBox` (`above_em`, `below_em`; `LINE_BOX`, `cell_em`,
+  `is_line_box`), `FontAtlas::cell_box`, `FontAtlasBuilder::with_cell_box`
+  and `cell_box`, `BundledAtlas::cell`, `CapPlacement::top_frac_in`,
+  `ATLAS_FORMAT_VERSION_LINE_BOX`, `CELL_TABLE_TAG`; `CellBox` and
+  `ATLAS_FORMAT_VERSION_LINE_BOX` also at the `libmsdf` root.
+- Added: `drawlist::screen_px_range_in` and
+  `drawlist::stream::lower_stream_with_cell_box`.
+- Changed: `FontAtlas::min_antialiased_font_size` uses the atlas's cell
+  height.
