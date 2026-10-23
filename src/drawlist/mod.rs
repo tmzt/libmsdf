@@ -1185,6 +1185,40 @@ impl DrawList {
         width
     }
 
+    /// **Draw a terminal line** laid out by
+    /// [`TerminalShaper::line`](crate::font::TerminalShaper::line), at `pos`
+    /// (the line box's top left): each segment with
+    /// [`DrawList::push_shaped_text_with`], from `text` or `symbols` as its
+    /// source says, at `pos.x + column * cell_em * font_size`
+    /// (`docs/design/20261023_01_TERMINAL_FONTS_PLAN.md`, section 4.7). Box
+    /// drawing joins when lines are
+    /// [`TerminalShaper::line_pitch_em`](crate::font::TerminalShaper::line_pitch_em)
+    /// `* font_size` apart.
+    ///
+    /// Returns the width of the line in pixels: its columns times the cell.
+    #[allow(clippy::too_many_arguments)]
+    pub fn push_terminal_line(
+        &mut self,
+        line: &crate::font::TerminalLine,
+        text: AtlasRef<'_>,
+        symbols: AtlasRef<'_>,
+        pos: [f32; 2],
+        font_size: f32,
+        px_range: f32,
+        color: [f32; 4],
+    ) -> f32 {
+        let cell = line.cell_em * font_size;
+        for seg in &line.segments {
+            let atlas = match seg.source {
+                crate::font::TerminalSource::Text => text,
+                crate::font::TerminalSource::Symbols => symbols,
+            };
+            let x = pos[0] + seg.column as f32 * cell;
+            self.push_shaped_text_with(&seg.run, atlas, [x, pos[1]], font_size, px_range, color);
+        }
+        line.columns as f32 * cell
+    }
+
     /// **Draw an edge marker — an arrowhead, a cardinality adornment — with
     /// its point pinned to `anchor` and its axis along `angle_rad`**, and
     /// return the axis-aligned bound of what was drawn.

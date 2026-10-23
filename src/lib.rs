@@ -116,7 +116,8 @@ pub use font::{
     GlyphSet, GlyphStyle, HIGHBAY_ICONS, HIGHBAY_ICONS_BLOCK, LICENCE_REGISTRY, LayerNotBaked,
     LicenceRecord, MARKER_ARROW, MARKERS, MAX_ATLAS_LAYERS, MAX_RAW_GLYPH_ID, MSYMBOLS_ICONS,
     NoLayout, OWNED_BLOCKS, RunShaper, SetMetrics, ShapedRun, StyledGlyphError, TEXT_RANGES,
-    atlas_capacity, highbay_codepoint, msymbols_codepoint,
+    TerminalError, TerminalLine, TerminalSegment, TerminalShaper, TerminalSource, atlas_capacity,
+    highbay_codepoint, msymbols_codepoint,
 };
 #[cfg(feature = "shaper")]
 pub use font::{

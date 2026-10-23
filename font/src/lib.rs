@@ -33,6 +33,7 @@ pub mod manager;
 pub mod outline;
 pub mod packer;
 pub mod shaper;
+pub mod terminal;
 
 pub use atlas::{
     ATLAS_COLS, ATLAS_FILE_MAJOR, ATLAS_FORMAT_VERSION, ATLAS_HEADER_SIZE, ATLAS_HEADER_SIZE_V5,
@@ -70,6 +71,10 @@ pub use packer::ShelfPacker;
 #[cfg(feature = "shaper")]
 pub use shaper::{NoFaceForStyle, StyledShaper, TextShaper};
 pub use shaper::{ShapedGlyph, ShapedRun};
+pub use terminal::{
+    TERMINAL_WIDE_FORM, TERMINAL_WIDE_FORMS, TerminalError, TerminalLine, TerminalSegment,
+    TerminalShaper, TerminalSource,
+};
 
 /// **The TEXT coverage of the bundled faces, and there is exactly one of it.**
 ///
