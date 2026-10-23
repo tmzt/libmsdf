@@ -74,3 +74,37 @@ The tools that made these images (a scratch crate against libmsdf at
 them in [out/fonts/20261023_01_cap_clipping/tool/](./out/fonts/20261023_01_cap_clipping/tool/);
 the per-case metrics are in
 [cases.jsonl](./out/fonts/20261023_01_cap_clipping/cases.jsonl).
+
+## 2026-10-23 13:04 EDT — The per-atlas cell box, prototyped (`out/fonts/20261023_02_cell_box_prototype/`)
+
+A throwaway prototype of `docs/design/20261023_02_PER_ATLAS_CELL_BOX_PLAN.md`
+(the bake and the text box only, no format change; its diff is in
+[tool/prototype.diff](./out/fonts/20261023_02_cell_box_prototype/tool/prototype.diff))
+baked Texturina with the plan's cell box, 0.179 em above the line box and
+0.073 em less below (a 1.406 em cell), and with a two-texel variant (0.212
+above, 0.042 less below, 1.470 em). The bake report lists **no ink past the
+cell** for either, `‰` included, against 54 glyphs today, and the baseline
+sits exactly where today's atlas puts it (0.70385 of the line box in all
+three).
+
+Each line's topmost ink, compared with the face's own outlines at 56 px
+([extents.json](./out/fonts/20261023_02_cell_box_prototype/extents.json)):
+
+| Line | Outlines | Today | Cell box |
+|---|---|---|---|
+| `ÁÂÀÅ…` | row 13 | row 16 (3 px cut) | row 12 |
+| `ŃŇÑÓ…` | row 118 | row 121 (3 px cut) | row 117 |
+| `ĥĺ ¿¡ ‰ …` | row 218 | row 226 (8 px cut) | row 217 |
+
+The bottoms agree with the outlines within 1 px in every case.
+
+![Outlines, today's atlas, the cell box and the two-texel cell box: the line box in red, the cell box dashed in green, the baseline in blue](./out/fonts/20261023_02_cell_box_prototype/texturina_cell_box.png)
+
+At 16 px the larger cell (7.5% fewer texels per em, 11% for two texels)
+is not visibly softer than today:
+
+![The last line at 16 px, 4x without smoothing: today, the cell box, the two-texel cell box](./out/fonts/20261023_02_cell_box_prototype/texturina_16px.png)
+
+This corrects the 12:37 entry's conclusion that only a format change and its
+own plan could save `ĥ` and `ĺ`: the plan is written, and the prototype
+shows it fixes every glyph without moving the text.

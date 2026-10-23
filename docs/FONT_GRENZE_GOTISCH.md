@@ -46,3 +46,17 @@ The tools that made these images are kept beside them in
 [out/fonts/20261023_01_cap_clipping/tool/](./out/fonts/20261023_01_cap_clipping/tool/);
 the per-case metrics are in
 [cases.jsonl](./out/fonts/20261023_01_cap_clipping/cases.jsonl).
+
+## 2026-10-23 13:04 EDT — The per-atlas cell box, prototyped (`out/fonts/20261023_02_cell_box_prototype/`)
+
+A throwaway prototype of `docs/design/20261023_02_PER_ATLAS_CELL_BOX_PLAN.md`
+(the bake and the text box only, no format change; its diff is in
+[tool/prototype.diff](./out/fonts/20261023_02_cell_box_prototype/tool/prototype.diff))
+baked Grenze Gotisch with the plan's cell box: the 1.3 em cell shifted up
+0.075 em. The bake report lists **no ink past the cell**, the rings of `Å`
+and `Ů` are whole (top ink at row 13, as in the face's outlines, against
+row 16 today), and the baseline is exactly where today's atlas puts it
+(0.62692 of the line box). Unlike the 12:37 entry's 0.20 cap placement, the
+text does not move, and the texel density is unchanged.
+
+![Outlines, today's atlas and the cell box: the line box in red, the cell box dashed in green, the baseline in blue](./out/fonts/20261023_02_cell_box_prototype/grenze-gotisch_cell_box.png)
