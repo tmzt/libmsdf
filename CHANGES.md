@@ -675,3 +675,48 @@ Nothing is implemented until the owner approves it.
 Also recorded: AGENTS.md gained Rule 3.6 (findings documents under `docs/`
 are append-only) and, in Rule 3.5, evidence directories named
 `YYYYMMDD_NN_name/`, on the owner's instruction.
+
+## 2026-10-23 14:13 EDT — Per-atlas cell box plan, steps 1-4: departures and findings
+
+Plan: `docs/design/20261023_02_PER_ATLAS_CELL_BOX_PLAN.md` (In
+implementation). Steps 1 to 4 are committed (07f642c to 6997d85); step 5,
+the 0.6.0 release, waits for the owner's approval. Small departures needed
+to make the plan work (Rule 1.7):
+
+- **Step 1, section 4.2: the `px_per_em_frac` check runs only with a
+  `CELL` table.** Without one, the plan also refused a set whose
+  `px_per_em_frac` is not `1 / 1.3`. That would refuse atlases built in
+  memory or by other tools with other values (the crate's own tests build
+  some), for no drawing benefit: such an atlas draws exactly as before.
+- **Step 1: new public items the plan did not name.**
+  `ATLAS_FORMAT_VERSION_LINE_BOX` (5:0.1.0, the version a line-box atlas is
+  written at), `CELL_TABLE_TAG` and `CapPlacement::top_frac_in` (the cap
+  as a fraction of a cell with a given box). All additive; they will be
+  listed in VERSIONS.md.
+- **Step 2: the line-box path computes exactly as before.** `top_frac_in`,
+  `CapPlacement::window` and the draw list's cell height take the old
+  expressions for `CellBox::LINE_BOX` rather than the general formula,
+  whose floating-point result can differ in the last place; that keeps all
+  nine atlases byte-identical and the bake reports unchanged.
+- **Step 3: `lower_stream_with_cell_box`.** `lower_stream` takes no atlas,
+  so it cannot read a box; it keeps the line box, and the new function takes
+  a `CellBox`. Additive.
+- **Step 4: ranges in ascending order.** `CVRG` refuses ranges that are not
+  ascending, so the new TERMINAL and TERMINAL_EMOJI codepoints are inserted
+  in order rather than appended; COVERAGE_TERMINAL_EMOJI's "extendable by
+  appending" note was wrong and is corrected. The terminal symbol face
+  sorts its codepoints anyway, so its bytes are the same either way.
+- **Step 4, section 5: the GPU check measures against `H`.** The renderer
+  puts every edge a fixed fraction of a pixel from the outline (its
+  half-texel sampling and the MSDF threshold), so the check compares each
+  tall glyph's top and bottom with the outline after removing the offset
+  measured on `H`, and counts a row as inked at quarter coverage (an
+  acute's tip never reaches half at 12 px). Run against libmsdf 0.5's
+  atlases, the check fails at every size, `ĥ ĺ` by up to 8.8 px at 56 px.
+- **A process slip.** Step 1's round-trip test (f403dc1) was committed
+  without rustfmt; 4978313 formats it.
+
+Findings: all nine atlas pages stay 400 or 800 by 2000 texels, within a
+2048 limit; the symbol page grows from 607 to 616 of its 640 cells. Claude
+Code's starburst spinner is Dingbats (`· ✢ ✳ ✶ ✻ ✽`), not Braille, and was
+already covered.
