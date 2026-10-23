@@ -93,10 +93,10 @@ trap 'rm -rf "$work"' EXIT
 # Rebuilt from upstream.
 # committed name | upstream file | upstream sha256 | output sha256 [| instance]
 OFL=(
-    "GrenzeGotisch[wght]-subset.ttf|GrenzeGotisch[wght].ttf|701b299d8dc002a2b4bea2ff0f1272c0e4081a2835914354804565c410d0c637|17d705ef35289801832ff0f7563cb042b7818b329a06372b75ed8ad421d15001"
-    "Texturina[opsz,wght]-subset.ttf|Texturina[opsz,wght].ttf|478a15d7145cf94565cfc1aeb33596aeb0118c7d86a84d061ddf46de3d7dfda3|f7ec0c7534a0f534964826cef6118475590061f9265c882c3c44e45ea2a0f108"
-    "NotoSansMono-Regular-subset.ttf|NotoSansMono[wdth,wght].ttf|2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081|7bbaa03bc1ee2695e2cad69b0d2d01fe5878b08b4e9acb4062ec91458f752d7e|wght=400,wdth=100"
-    "NotoSansMono-Bold-subset.ttf|NotoSansMono[wdth,wght].ttf|2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081|4b39f5aec21bbc121931af3619eb88cab62d620dce1bbd83a76e64c337bc2de2|wght=700,wdth=100"
+    "GrenzeGotisch[wght]-subset.ttf|GrenzeGotisch[wght].ttf|701b299d8dc002a2b4bea2ff0f1272c0e4081a2835914354804565c410d0c637|19f01d3ccd8d1abcc29db790d3e94f68166797e05727dc798b3045086042f9e7"
+    "Texturina[opsz,wght]-subset.ttf|Texturina[opsz,wght].ttf|478a15d7145cf94565cfc1aeb33596aeb0118c7d86a84d061ddf46de3d7dfda3|399fd6669e246d50d47ec89904fb4df9efea7597768663b391f3847f4614737e"
+    "NotoSansMono-Regular-subset.ttf|NotoSansMono[wdth,wght].ttf|2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081|436c580a03128211bf11c4ef1cb10d2f5ab31473829ee4585f8ebdb75313c37e|wght=400,wdth=100"
+    "NotoSansMono-Bold-subset.ttf|NotoSansMono[wdth,wght].ttf|2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081|b77c8dee8ec3fb5e01553b9d4323e1723dc686f77bd9eb7cd31918316c82a06f|wght=700,wdth=100"
 )
 for entry in "${OFL[@]}"; do
     IFS='|' read -r name src src_sha want instance <<<"$entry"
@@ -143,7 +143,7 @@ done
 # Merged from several upstream faces (the terminal symbol page).
 # committed name | script | output sha256
 MERGED=(
-    "LibmsdfTerminalSymbols-Regular.ttf|terminal_symbols.py|67d21cce1f1223a380d368f6a3027251bb773aec1b7a87bd836f55217c43d2f7"
+    "LibmsdfTerminalSymbols-Regular.ttf|terminal_symbols.py|de25281b41790c0ef6cede3c815751d7c1ad15d8eeff8c6e6b81a2e5b4c1c2b2"
 )
 for entry in "${MERGED[@]}"; do
     IFS='|' read -r name script want <<<"$entry"
