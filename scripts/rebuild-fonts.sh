@@ -143,7 +143,7 @@ done
 # Merged from several upstream faces (the terminal symbol page).
 # committed name | script | output sha256
 MERGED=(
-    "LibmsdfTerminalSymbols-Regular.ttf|terminal_symbols.py|de25281b41790c0ef6cede3c815751d7c1ad15d8eeff8c6e6b81a2e5b4c1c2b2"
+    "LibmsdfTerminalSymbols-Regular.ttf|terminal_symbols.py|0d91232725e03887601f6ea857300ea9c384ab6b89b05e171060246966640cca"
 )
 for entry in "${MERGED[@]}"; do
     IFS='|' read -r name script want <<<"$entry"
