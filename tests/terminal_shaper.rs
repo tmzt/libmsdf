@@ -188,10 +188,14 @@ fn a_line_draws_each_segment_from_its_atlas() {
     let mut set = AtlasSet::new();
     let text_id = set.register(text).unwrap();
     let page_id = set.register(symbols).unwrap();
+    // The page's columns follow its cells (coding-agent glyphs plan, the
+    // 21:05 EDT amendment), so it is wider than the 16-column text atlas.
+    let page_width = libmsdf::font::BundledAtlas::TerminalSymbols.columns() * 50;
+    assert!(page_width > 800);
     assert_eq!(
         set.extent(),
-        [800, 2000],
-        "same-width atlases need no padding"
+        [page_width, 2000],
+        "the set pads the text atlas to the page's width"
     );
     let line = t.line("\u{256D}\u{2500} ok \u{2500}\u{256E}", GlyphStyle::Regular);
     let mut list = DrawList::new();

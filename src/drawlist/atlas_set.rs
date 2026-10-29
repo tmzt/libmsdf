@@ -18,7 +18,11 @@
 //! from the table and divides by the texture's size, and checks the cell's
 //! bounds before it samples, so the margin is never read. The baker makes
 //! atlases in standard sizes (400 x 2000, or 800 x 2000 for 16 columns), so
-//! a set pads only when it mixes the two.
+//! a set pads only when it mixes them. The bundled terminal symbol page is
+//! the exception: its columns follow its cells, 18 for 0.6.2's 694, so it is
+//! 900 x 2000 (`docs/design/20261028_01_CODING_AGENT_GLYPHS_PLAN.md`, the
+//! 21:05 EDT amendment), and a set of the terminal atlases pads the text
+//! atlas's layers to 900.
 
 use std::ops::Deref;
 use std::sync::atomic::{AtomicU32, Ordering};

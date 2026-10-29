@@ -404,10 +404,13 @@ mod terminal_symbols {
         v
     }
 
-    /// The emoji drawn two cells wide: all but the two narrow ones, and the
-    /// wide forms.
+    /// The glyphs drawn two cells wide: the emoji less the three narrow ones
+    /// (⚠ ➡ 🛠), the wide forms, and the two-cell symbols ☰ ⛔ ✋
+    /// (coding-agent glyphs plan, section 5).
     fn wide(ch: char) -> bool {
-        COVERAGE_TERMINAL_EMOJI.codepoints().contains(&ch) && !matches!(ch, '\u{26A0}' | '\u{27A1}')
+        (COVERAGE_TERMINAL_EMOJI.codepoints().contains(&ch)
+            && !matches!(ch, '\u{26A0}' | '\u{27A1}' | '\u{1F6E0}'))
+            || matches!(ch, '\u{2630}' | '\u{26D4}' | '\u{270B}')
     }
 
     #[cfg(feature = "shaper")]
@@ -424,7 +427,7 @@ mod terminal_symbols {
         mapped.sort_unstable();
         mapped.dedup();
         let want: Vec<u32> = declared().iter().map(|&c| c as u32).collect();
-        assert_eq!(mapped.len(), 615);
+        assert_eq!(mapped.len(), 693);
         assert_eq!(mapped, {
             let mut w = want.clone();
             w.sort_unstable();
@@ -492,6 +495,20 @@ mod terminal_symbols {
         assert_eq!(half('\u{2580}').y_min, half('\u{2584}').y_max);
     }
 
+    /// ⊙ and ⦿ are one circle, empty and filled: both from Noto Sans Symbols
+    /// 2 (the page's one source override), fitted to the same box
+    /// (coding-agent glyphs plan, sections 3.5 and 4.2).
+    #[cfg(feature = "shaper")]
+    #[test]
+    fn the_circled_pair_shares_a_circle() {
+        let face = ttf_parser::Face::parse(libmsdf::TERMINAL_SYMBOLS_TTF, 0).unwrap();
+        let bb = |c| {
+            face.glyph_bounding_box(face.glyph_index(c).unwrap())
+                .unwrap()
+        };
+        assert_eq!(bb('\u{2299}'), bb('\u{29BF}'));
+    }
+
     /// The page shares Noto Sans Mono's cap height (717 of 1000), so it shares
     /// its baseline.
     #[cfg(all(feature = "font-ofl-noto-sans-mono", feature = "shaper"))]
@@ -514,12 +531,16 @@ mod terminal_symbols {
     #[test]
     fn the_atlas_is_one_full_page() {
         let atlas = FontAtlas::from_bytes(libmsdf::TERMINAL_SYMBOLS_ATLAS).unwrap();
-        assert_eq!((atlas.width, atlas.height), (800, 2000));
+        // The columns follow the cells (coding-agent glyphs plan, the 21:05
+        // EDT amendment): 18 of 50 texels for 0.6.2's 694.
+        let columns = libmsdf::font::BundledAtlas::TerminalSymbols.columns();
+        assert_eq!(columns, 18);
+        assert_eq!((atlas.width, atlas.height), (columns * 50, 2000));
         assert_eq!(atlas.layer_count(), 1);
         assert_eq!(
             atlas.glyphs.len(),
-            616,
-            "591 symbols, 24 emoji and the placeholder"
+            694,
+            "654 symbols, 39 emoji and the placeholder"
         );
         let cov = atlas.coverage(GlyphStyle::Regular).unwrap();
         let ids: Vec<u8> = cov.groups.iter().map(|g| g.id).collect();
