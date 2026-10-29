@@ -206,8 +206,8 @@ pub const PRIVATE_USE: (char, char) = ('\u{E000}', '\u{F8FF}');
 /// one comparison: `cp >= U+F800`.
 ///
 /// Everything above this line is drawn in `fonts/` by a script in this repo;
-/// everything below is borrowed at some vendor's codepoints (the eighteen
-/// [`MSYMBOLS_ICONS`] top out at `U+F0D3`, more than two thousand codepoints
+/// everything below is borrowed at some vendor's codepoints (the 71
+/// [`MSYMBOLS_ICONS`] top out at `U+F20B`, more than 1,500 codepoints
 /// clear). `owned_blocks_are_the_top_of_the_carveout` checks it rather than
 /// leaving it to memory.
 ///
@@ -255,7 +255,7 @@ pub const HIGHBAY_ICONS_BLOCK: (char, char) = ('\u{F800}', '\u{F8EF}');
 /// from [`MARKER_ARROW`]. Both halves of that matter:
 ///
 /// * **At the top**, because Material Symbols' codepoints are the vendor's and
-///   run far below here (the bundled eighteen top out at `U+F0D3`), so a
+///   run far below here (the bundled 71 top out at `U+F20B`), so a
 ///   borrowed icon and a drawn marker can never land on the same codepoint — checked by
 ///   `icons_sort_below_the_marker_block`, not by remembering.
 /// * **Upward**, so a marker added above every existing one never renumbers a
@@ -315,8 +315,9 @@ pub const MARKER_ARROW: char = '\u{F8F0}';
 /// anyway — the key a cell is fetched by is a GLYPH ID, which is what the
 /// shaper hands back. Glyph ids are not ours either: re-merge Roboto with
 /// Material Symbols differently and every id moves (in the shipped merged face
-/// the borrowed icons are glyphs 111..=119, 231..=234 and 247..=251, three
-/// merge waves, with 107 Latin-1 glyphs sitting between the first two). The
+/// the borrowed icons are glyphs 111..=119, 231..=234, 247..=251 and
+/// 262..=314, four merge waves, with 107 Latin-1 glyphs sitting between the
+/// first two). The
 /// SET is the part of the order that is ours; the glyph id orders within it,
 /// and it does so append-only because every script in `fonts/` appends.
 ///
@@ -329,8 +330,9 @@ pub const MARKER_ARROW: char = '\u{F8F0}';
 ///
 /// It also buys a property across the two bundled faces: the borrowed half is
 /// LAST, so [`ROBOTO_REGULAR_ASCII`] and [`ROBOTO_ASCII_MSYMBOLS`] bake to the
-/// same 221 cells in the same places, and the merged face simply appends its
-/// 18 borrowed ones. Before this the merged bake shifted Latin-1 and the
+/// same cells in the same places, and the merged face simply appends its
+/// borrowed ones (18 when this was written, 71 since the core set of
+/// docs/design/20261029_01_MATERIAL_SYMBOLS_CORE_SET_PLAN.md). Before this the merged bake shifted Latin-1 and the
 /// placeholder by 13 cells relative to the plain one, because a vendor's
 /// `U+E0xx` sorts below our `U+F8xx` in a codepoint scan.
 ///
@@ -784,6 +786,15 @@ pub(crate) const fn test_style_face(style: GlyphStyle) -> Option<&'static [u8]> 
 /// Sorted by name so [`msymbols_codepoint`] can binary-search it, and so the
 /// list reads as a list.
 ///
+/// **71 icons, a common Android and Material 3 set**, in five groups
+/// (navigation, actions, media, status, things). The list is the data file
+/// `fonts/msymbols-icons.txt`, which `fonts/msymbols.py` merges from and
+/// `tests/msymbols_icons.rs` compares with this constant, line for line
+/// (docs/design/20261029_01_MATERIAL_SYMBOLS_CORE_SET_PLAN.md, section 3.2).
+/// Two names are not here: Material's `error`, declared only at `U+F8B6`
+/// inside [`OWNED_BLOCKS`] (`report`, `U+F052`, takes its place), and
+/// Material's `folder`, whose name [`HIGHBAY_ICONS`] already holds.
+///
 /// **The codepoint is the one Material's own `.codepoints` manifest declares**,
 /// not the lowest or the highest alias the face happens to answer to: several
 /// names carry legacy Material Icons aliases as well, and `edit` answers to
@@ -808,24 +819,77 @@ pub(crate) const fn test_style_face(style: GlyphStyle) -> Option<&'static [u8]> 
 /// row, and it is the same chevron rotated. A caller wanting "the chevron
 /// pointing north" asks for `expand_less`.
 pub const MSYMBOLS_ICONS: &[(&str, char)] = &[
+    ("account_circle", '\u{F20B}'),
+    ("add", '\u{E145}'),
+    ("arrow_back", '\u{E5C4}'),
+    ("arrow_downward", '\u{E5DB}'),
+    ("arrow_forward", '\u{E5C8}'),
+    ("arrow_upward", '\u{E5D8}'),
+    ("attach_file", '\u{E226}'),
+    ("bookmark", '\u{E8E7}'),
+    ("cancel", '\u{E888}'),
     ("chat", '\u{E0C9}'),
     ("check", '\u{E668}'),
+    ("check_circle", '\u{F0BE}'),
     ("chevron_left", '\u{E5CB}'),
     ("chevron_right", '\u{E5CC}'),
+    ("close", '\u{E5CD}'),
     ("code", '\u{E86F}'),
+    ("content_copy", '\u{E14D}'),
+    ("content_paste", '\u{E14F}'),
+    ("delete", '\u{E92E}'),
+    ("description", '\u{E873}'),
+    ("done_all", '\u{E877}'),
+    ("download", '\u{F090}'),
     ("edit", '\u{F097}'),
     ("expand_less", '\u{E5CE}'),
     ("expand_more", '\u{E5CF}'),
+    ("filter_list", '\u{E152}'),
+    ("graphic_eq", '\u{E1B8}'),
+    ("help", '\u{E8FD}'),
+    ("history", '\u{E8B3}'),
     ("home", '\u{E9B2}'),
+    ("info", '\u{E88E}'),
     ("library_books", '\u{E02F}'),
+    ("lightbulb", '\u{E90F}'),
+    ("link", '\u{E250}'),
+    ("lock", '\u{E899}'),
+    ("logout", '\u{E9BA}'),
+    ("mail", '\u{E159}'),
     ("menu", '\u{E5D2}'),
+    ("mic", '\u{E31D}'),
+    ("mic_off", '\u{E02B}'),
+    ("more_horiz", '\u{E5D3}'),
     ("more_vert", '\u{E5D4}'),
+    ("notifications", '\u{E7F5}'),
+    ("open_in_new", '\u{E89E}'),
+    ("pause", '\u{E034}'),
     ("person", '\u{F0D3}'),
+    ("play_arrow", '\u{E037}'),
+    ("record_voice_over", '\u{E91F}'),
     ("redo", '\u{E15A}'),
+    ("refresh", '\u{E5D5}'),
+    ("remove", '\u{E15B}'),
+    ("replay", '\u{E042}'),
+    ("report", '\u{F052}'),
+    ("schedule", '\u{EFD6}'),
     ("search", '\u{EF7A}'),
     ("send", '\u{E163}'),
     ("settings", '\u{E8B8}'),
+    ("share", '\u{E80D}'),
+    ("skip_next", '\u{E044}'),
+    ("sort", '\u{E164}'),
+    ("star", '\u{F09A}'),
+    ("stop", '\u{E047}'),
+    ("timer", '\u{E425}'),
+    ("tune", '\u{E429}'),
     ("undo", '\u{E166}'),
+    ("upload", '\u{F09B}'),
+    ("visibility", '\u{E8F4}'),
+    ("visibility_off", '\u{E8F5}'),
+    ("volume_off", '\u{E04F}'),
+    ("volume_up", '\u{E050}'),
+    ("warning", '\u{F083}'),
 ];
 
 /// The codepoint [`ROBOTO_ASCII_MSYMBOLS`] draws `name` at, or `None` when the

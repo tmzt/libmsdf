@@ -84,7 +84,7 @@ const ROBOTO_REGULAR: BundledFace = BundledFace {
 };
 const ROBOTO_MSYMBOLS: BundledFace = BundledFace {
     file: "Roboto-Regular-ascii-msymbols.ttf",
-    sha256: hex("12f0fe674e25ebb3763c37e838c408f2fd128ce17c393d504e5bfe94e65237de"),
+    sha256: hex("ca1b0a75db35aea6babdeed265aa7a1f875436f69d0adfbd3b6e7252e3e22f0b"),
     upstream_sha256: None,
     style: GlyphStyle::Regular,
 };

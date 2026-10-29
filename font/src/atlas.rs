@@ -1966,7 +1966,8 @@ pub fn cap_height(face: &ttf_parser::Face) -> f64 {
 ///
 /// What would still want columns is a wider vocabulary AT ONE SIZE AND CUT -
 /// a symbol set that outgrew 320 cells of regular text plus icons. That has
-/// not happened; the shipped layer is 239 of 320.
+/// not happened; the shipped layer is 302 of 320 (2026-10-29, after the core
+/// set of Material Symbols; see [`ATLAS_ROWS`]).
 pub const ATLAS_COLS: u32 = 8;
 
 /// **Rows of glyph cells the atlas is baked to, whether or not they are used**
@@ -2034,6 +2035,13 @@ pub const ATLAS_COLS: u32 = 8;
 /// set quintupled - or, if it is the text side asking again, what the last ten
 /// bought (`widening_the_text_ranges_moved_cells_but_no_texel` records what
 /// they cost: 320 raw bytes, 9,343 gzipped, and no moved texel).
+///
+/// **2026-10-29: 302 of 320, 18 free.** The table above is the 2026-08-29
+/// count. The drawn icons grew to 14 (249 cells), and the core set of
+/// Material Symbols (docs/design/20261029_01_MATERIAL_SYMBOLS_CORE_SET_PLAN.md)
+/// took the borrowed icons from 18 to 71, the owner's choice of a common
+/// Android and Material 3 set over the ~16 estimate: 249 + 53 = **302**. A
+/// later wave of more than 18 needs more columns or a layer of its own.
 ///
 /// Raising it past 40 rows is not a packing decision — at 48px cells it puts
 /// the texture over 2048 and becomes a question about which GPUs we support.

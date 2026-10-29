@@ -39,11 +39,13 @@ with each one is enabled.
     Roboto: Copyright 2011 Google Inc. All Rights Reserved.
     Material Symbols: Copyright 2026 Google LLC.  All Rights Reserved.
     Sources: googlefonts/roboto v2.138, roboto-android.zip; and
-    google/material-design-icons variablefont/, Material Symbols Outlined
-    (https://github.com/google/material-design-icons/tree/master/variablefont)
+    google/material-design-icons variablefont/, Material Symbols Outlined,
+    at commit 49d4db35df873165d6bd6ba09b063c7dafbac2f4
+    (https://github.com/google/material-design-icons/tree/49d4db35df873165d6bd6ba09b063c7dafbac2f4/variablefont)
     Changes: subset to TEXT_RANGES and extended by libmsdf's fonts/*.py
-    scripts; a subset of Material Symbols Outlined instanced at its default
-    location, scaled to 2048 units per em and merged in by fonts/msymbols.py.
+    scripts; a subset of Material Symbols Outlined (the 71 icons listed in
+    fonts/msymbols-icons.txt) instanced at its default location, scaled to
+    2048 units per em and merged in by fonts/msymbols.py.
 
   The atlas roboto-msymbols-styled-48.atlas (the merged face with Bold and
   Italic as style layers)

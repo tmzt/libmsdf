@@ -85,9 +85,29 @@ pub const ROBOTO_REGULAR_ASCII: &[u8] = include_bytes!("../../fonts/Roboto-Regul
 /// default location (FILL 0, GRAD 0, opsz 24, wght 400), subset to the names
 /// below, and scaled from 960 to Roboto's 2048 upem.
 ///
-/// Declared coverage, and deliberately small — a name outside this list has no
-/// glyph, which is a missing-asset error for the caller to report rather than
-/// substitute:
+/// Declared coverage — a name outside the list has no glyph, which is a
+/// missing-asset error for the caller to report rather than substitute. The
+/// list is [`MSYMBOLS_ICONS`](crate::MSYMBOLS_ICONS), 71 icons read from
+/// `fonts/msymbols-icons.txt` (each with its codepoint and group), in five
+/// groups:
+///
+/// ```text
+/// navigation  arrows, close, menu, more_vert/_horiz, the chevrons, home, open_in_new
+/// actions     add, remove, check, edit, delete, content_copy/_paste, share, search,
+///             refresh, undo, redo, download, upload, send, attach_file, link, ...
+/// media       mic, mic_off, play_arrow, pause, stop, replay, skip_next, volume_*, ...
+/// status      info, help, warning, report, check_circle, cancel, lock, visibility, ...
+/// things      person, account_circle, chat, mail, description, lightbulb, code, ...
+/// ```
+///
+/// Two Material names are deliberately absent. `error` is declared only at
+/// `U+F8B6`, inside this repo's [`OWNED_BLOCKS`](crate::OWNED_BLOCKS), where
+/// no borrowed icon may sit; `report` (`U+F052`) takes its place. Material's
+/// `folder` is left out because [`HIGHBAY_ICONS`](crate::HIGHBAY_ICONS)
+/// already has a drawn `folder`, and one name never crosses between the two
+/// vocabularies.
+///
+/// The original eighteen were these:
 ///
 /// ```text
 /// menu U+E5D2   more_vert U+E5D4   send U+E163   chat U+E0C9   person U+F0D3
