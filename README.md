@@ -197,6 +197,28 @@ symbol page, `☰`, `⛔` and `✋` are two cells (East Asian Width W, as
 follows. The page carries the glyphs Claude Code, Codex, Gemini CLI and
 Antigravity print, the control pictures among them. Italic draws upright.
 
+**Icons.** `font-apache-roboto-msymbols` is Roboto Regular with 71 Material
+Symbols merged in (Outlined, FILL 0, weight 400, at Material's declared
+codepoints): a common Android and Material 3 set in five groups,
+navigation, actions, media and voice, status and things, named by
+`MSYMBOLS_ICONS` (the list is `fonts/msymbols-icons.txt`). Resolve a name
+with `msymbols_codepoint`, and an icon this repository drew (the
+`HIGHBAY_ICONS`, in both Roboto Regular faces) with `highbay_codepoint`.
+`None` is a missing asset to report, not a cue for a fallback shape.
+
+```rust
+let icons = libmsdf::FontAtlas::from_bytes(libmsdf::ROBOTO_MSYMBOLS_ATLAS)?;
+let shaper = libmsdf::TextShaper::new(libmsdf::ROBOTO_ASCII_MSYMBOLS.to_vec())?;
+let copy = libmsdf::msymbols_codepoint("content_copy").expect("bundled icon");
+let run = shaper.shape(copy.encode_utf8(&mut [0; 4]));
+list.push_icon(&run, &icons, [x, y], [24.0, 24.0], 24.0, px_range, white);
+```
+
+The two merged atlases (`ROBOTO_MSYMBOLS_ATLAS`,
+`ROBOTO_MSYMBOLS_STYLED_ATLAS`) use a cell 0.1 em above the line box
+(format 5:0.2.0, since 0.7.0), so the whole 24 dp square of every icon
+draws; text from them sits on the same baseline as before.
+
 **Verifying the bundled atlases:**
 `cargo run -p libmsdf-font --features bake --bin libmsdf-bake -- bundled --check fonts/atlases`
 re-bakes them in memory and compares, and
