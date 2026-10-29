@@ -315,3 +315,35 @@ changed version.
   page's cells (at most 40); an `AtlasSet` holding the page is 900 wide and
   pads a 16-column atlas to it. The other eight bundled atlases are
   byte-identical.
+
+## 0.7.0 — 2026-10-29 (tag `v0.7.0`)
+
+A core set of Material Symbols in the merged Roboto face
+(`docs/design/20261029_01_MATERIAL_SYMBOLS_CORE_SET_PLAN.md`). The icons
+alone are additive, but the two merged atlases' new cell box is not, so a
+minor release, by the owner's answer to the plan's open question 1 ("0.7.0
+with the cell fix"; Rule 5.4). `libmsdf` and `libmsdf-font` stay in
+lockstep: both are 0.7.0 and both are covered by this entry and this tag.
+The commit is the one tagged `v0.7.0`. No dependency changed version.
+
+- **Breaking:** `ROBOTO_MSYMBOLS_ATLAS` and `ROBOTO_MSYMBOLS_STYLED_ATLAS`
+  move to atlas format 5:0.2.0 with a `CELL` table (the cell 0.1 em above
+  the line box), which libmsdf 0.5 and earlier refuse.
+  `BundledAtlas::RobotoMsymbols.cell()` and `RobotoMsymbolsStyled.cell()`
+  return `CellBox { above_em: 0.1, below_em: -0.1 }` instead of the line
+  box.
+- **Breaking (rendering):** text and icons from those two atlases are drawn
+  from a cell 0.1 em higher. Positions and baselines do not change. What was
+  clipped at the top now draws whole: the 22 dp and 23 dp icons (chat,
+  library_books and settings among those already shipped) and `Å`.
+- Changed: `MSYMBOLS_ICONS` gains 53 entries (71: a common Android and
+  Material 3 set, listed in `fonts/msymbols-icons.txt`), and
+  `msymbols_codepoint` resolves them, `content_copy`, `close`, `mic`,
+  `play_arrow`, `stop` and `delete` among them. `error` is not there
+  (`report` is) and Material's `folder` is not there (`highbay_codepoint`
+  keeps the drawn one). The type of `MSYMBOLS_ICONS` and the signature of
+  `msymbols_codepoint` do not change.
+- Changed: the bytes of `ROBOTO_ASCII_MSYMBOLS` (sha256 `ca1b0a75…`, 315
+  glyphs; every earlier glyph id unchanged) and of the two merged atlases
+  (302 of 320 cells in the Regular layer). The other seven bundled atlases
+  are byte-identical.
