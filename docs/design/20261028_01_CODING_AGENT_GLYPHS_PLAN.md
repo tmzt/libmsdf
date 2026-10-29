@@ -551,3 +551,32 @@ body stands as written:
 
 The status stays `Draft`: these answer the plan's questions and do not
 start implementation.
+
+## Amendment — 2026-10-28 21:05 EDT: the page's columns follow its cells
+
+The owner (2026-10-28): "decide on columns as atlas is adaptable, 2k
+width limit". This replaces section 4.3's fixed 18 (its constant
+`TERMINAL_SYMBOLS_COLUMNS: u32 = 18`) and the previous amendment's
+answer 2; the rest of section 4.3, and the 18 columns this release
+measures, stand.
+
+1. **The columns are computed, not chosen.** The terminal symbol page is
+   baked at the fewest columns that hold its cells: `columns =
+   max(16, ceil(cells / 40))`, where `cells` counts every one-cell glyph
+   once and every two-cell glyph twice (as section 3 counts them), and 40
+   is the cells one column holds at 2000 texels high. Today's 694 cells
+   give 18 columns, 900 × 2000.
+2. **The limit is the 2048 texture width.** At 50 texels a column, 40
+   columns (2000 texels) is the widest page, 1600 cells. A coverage that
+   needs more fails the bake with an error naming the cell count and the
+   limit; a second layer would then be its own plan (section 3's last
+   note).
+3. **Where it is computed.** `BundledAtlas::columns` returns, for
+   `TerminalSymbols`, a `const fn` over the TERMINAL and TERMINAL_EMOJI
+   ranges and the page's two-cell set (the 16 of the other OFL faces is
+   unchanged), so the bake, the tests and `AtlasSet`'s padding all read
+   one number. A later coverage change moves the width by itself; the
+   evidence sheet and the extent tests of section 5 assert the computed
+   width, not a literal 900.
+4. **Tests** add: the formula at 640, 641, 694 and 1600 cells (16, 17,
+   18 and 40 columns), and 1601 cells refused.
