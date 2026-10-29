@@ -1,7 +1,7 @@
 ---
 title: Coding-agent interface glyphs on the terminal symbol page
 date: 2026-10-28
-status: In implementation
+status: Implemented
 covers: >
   Adding the interface glyphs that Claude Code, Codex, Gemini CLI and
   Antigravity print, and that no bundled terminal atlas carries, to the
@@ -597,3 +597,20 @@ Implementation has started, on the owner's approval of 2026-10-29 01:53 EDT,
 as release 0.6.2. The status is now `In implementation`, and this
 document is immutable (Rule 1.5): it changes only on the owner's explicit
 instruction, and departures are recorded in CHANGES.md (Rule 1.7).
+
+## Amendment — 2026-10-29 02:42 EDT: implemented, 0.6.2
+
+Every step is done and its **Done when:** holds; the status is now
+`Implemented`. Released as 0.6.2 (libmsdf and libmsdf-font, tag v0.6.2).
+Commits:
+1. Coverage: 9d41ce9.
+2. The symbol face: 0669afa, 911d015 (rebuild-fonts.sh).
+3. The page atlas: b14496b (columns), 99140d5 (re-bake), 6e8544f
+   (fonts/bundled.sha256), d1cfe62 (atlas-set comment, extent and page
+   tests).
+4. The glyph tests: d1cfe62.
+5. Evidence: fe1e4c9 (docs/FONT_TERMINAL_SYMBOLS.md;
+   out/fonts/20261029_01_agent_glyphs/).
+6. Release: e98c568 (README), bd7383d (0.6.2, tagged v0.6.2), and the
+   CHANGES.md entry after it.
+Departures are recorded in CHANGES.md (2026-10-29 02:42 EDT entry).
