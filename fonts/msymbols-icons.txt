@@ -1,0 +1,81 @@
+# The borrowed Material Symbols of Roboto-Regular-ascii-msymbols.ttf, one
+# per line: <name> U+XXXX <group>. Sorted by name. The codepoint is the one
+# Material's .codepoints manifest declares at MSYMBOLS_COMMIT
+# (scripts/fetch-upstream-fonts.sh), always below U+F800. Read by
+# fonts/msymbols.py; tests/msymbols_icons.rs compares it with MSYMBOLS_ICONS.
+# docs/design/20261029_01_MATERIAL_SYMBOLS_CORE_SET_PLAN.md, section 3.2.
+#
+# Groups: navigation, actions, media, status, things. Not here: `error`
+# (declared only at U+F8B6, inside the owned blocks; `report` takes its
+# place) and Material's `folder` (HIGHBAY_ICONS has the name).
+account_circle U+F20B things
+add U+E145 actions
+arrow_back U+E5C4 navigation
+arrow_downward U+E5DB navigation
+arrow_forward U+E5C8 navigation
+arrow_upward U+E5D8 navigation
+attach_file U+E226 actions
+bookmark U+E8E7 status
+cancel U+E888 status
+chat U+E0C9 things
+check U+E668 actions
+check_circle U+F0BE status
+chevron_left U+E5CB navigation
+chevron_right U+E5CC navigation
+close U+E5CD navigation
+code U+E86F things
+content_copy U+E14D actions
+content_paste U+E14F actions
+delete U+E92E actions
+description U+E873 things
+done_all U+E877 actions
+download U+F090 actions
+edit U+F097 actions
+expand_less U+E5CE navigation
+expand_more U+E5CF navigation
+filter_list U+E152 actions
+graphic_eq U+E1B8 media
+help U+E8FD status
+history U+E8B3 status
+home U+E9B2 navigation
+info U+E88E status
+library_books U+E02F things
+lightbulb U+E90F things
+link U+E250 actions
+lock U+E899 status
+logout U+E9BA actions
+mail U+E159 things
+menu U+E5D2 navigation
+mic U+E31D media
+mic_off U+E02B media
+more_horiz U+E5D3 navigation
+more_vert U+E5D4 navigation
+notifications U+E7F5 status
+open_in_new U+E89E navigation
+pause U+E034 media
+person U+F0D3 things
+play_arrow U+E037 media
+record_voice_over U+E91F media
+redo U+E15A actions
+refresh U+E5D5 actions
+remove U+E15B actions
+replay U+E042 media
+report U+F052 status
+schedule U+EFD6 status
+search U+EF7A actions
+send U+E163 actions
+settings U+E8B8 actions
+share U+E80D actions
+skip_next U+E044 media
+sort U+E164 actions
+star U+F09A status
+stop U+E047 media
+timer U+E425 status
+tune U+E429 actions
+undo U+E166 actions
+upload U+F09B actions
+visibility U+E8F4 status
+visibility_off U+E8F5 status
+volume_off U+E04F media
+volume_up U+E050 media
+warning U+F083 status

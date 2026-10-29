@@ -134,7 +134,8 @@ for entry in "${FIXED[@]}"; do
     last="$work/$base.icon.ttf"
     if [ "$name" = "Roboto-Regular-ascii-msymbols.ttf" ]; then
         py "$epoch" "$fonts/msymbols.py" "$last" "$work/$base.msymbols.ttf" \
-            "$up/MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].ttf" >/dev/null
+            "$up/MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].ttf" \
+            "$up/MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].codepoints" >/dev/null
         last="$work/$base.msymbols.ttf"
     fi
     compare "$last" "$name" "$want"
