@@ -221,6 +221,22 @@ const GRENZE_GOTISCH_CELL: CellBox = CellBox {
     below_em: -0.075,
 };
 
+/// The two merged Roboto atlases' cell box: the 1.3 em cell moved up 0.1 em,
+/// y −602.24 to 2060.16 in Roboto's 2048 units
+/// (`docs/design/20261029_01_MATERIAL_SYMBOLS_CORE_SET_PLAN.md`, section
+/// 3.5). The line box held y −807.04..1855.36, and 25 of the 71 Material
+/// Symbols reach above it (22 dp icons at 1873–1877; `content_paste`, `lock`,
+/// `replay` and `timer` at 1963), as does Roboto's `Å` (1939). Moved up, the
+/// whole em box (0..2048) is inside the cell, with margins of 97 units
+/// (1.75 texels at the 48 px cell) above the highest icon and 90 units
+/// (1.63 texels) below the lowest edge marker (−512). The cell keeps its
+/// size, so no resolution is lost, and the baseline stays where the line box
+/// puts it.
+const ROBOTO_MSYMBOLS_CELL: CellBox = CellBox {
+    above_em: 0.1,
+    below_em: -0.1,
+};
+
 /// The terminal faces' cap placement
 /// (`docs/design/20261023_01_TERMINAL_FONTS_PLAN.md`, section 4.2).
 const TERMINAL_CAP: CapPlacement = CapPlacement {
@@ -344,16 +360,21 @@ impl BundledAtlas {
 
     /// **Where the atlas's cells sit relative to the line box**
     /// (`docs/design/20261023_02_PER_ATLAS_CELL_BOX_PLAN.md`, section 4.5):
-    /// [`CellBox::LINE_BOX`] except for the two faces whose ink does not fit
+    /// [`CellBox::LINE_BOX`] except for the atlases whose ink does not fit
     /// it. Texturina's accents and `ĥ ĺ` rise to 1064 units and `¿` falls to
     /// −282, more than the 1300-unit line box, so its cell is 1.406 em;
     /// Grenze Gotisch's rings rise to 862, so its 1.3 em cell moves up
-    /// 0.075 em. Each keeps a texel of margin and its baseline where the
-    /// line box puts it.
+    /// 0.075 em; the two merged Roboto atlases' Material Symbols rise to the
+    /// top of the 24 dp em box, so their 1.3 em cell moves up 0.1 em
+    /// (`docs/design/20261029_01_MATERIAL_SYMBOLS_CORE_SET_PLAN.md`). Each
+    /// keeps a texel of margin and its baseline where the line box puts it.
     pub const fn cell(self) -> CellBox {
         match self {
             BundledAtlas::Texturina => TEXTURINA_CELL,
             BundledAtlas::GrenzeGotisch => GRENZE_GOTISCH_CELL,
+            BundledAtlas::RobotoMsymbols | BundledAtlas::RobotoMsymbolsStyled => {
+                ROBOTO_MSYMBOLS_CELL
+            }
             _ => CellBox::LINE_BOX,
         }
     }
