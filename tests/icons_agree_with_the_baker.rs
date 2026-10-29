@@ -62,10 +62,10 @@ fn baker_manifest() -> BTreeMap<String, u32> {
 
 /// The `ICONS = [("name", 0x....), ...]` list out of one of `fonts/`'s bakers.
 ///
-/// Two scripts declare a manifest in exactly this shape - `icon.py` for the
-/// glyphs this repo DRAWS and `msymbols.py` for the ones it BORROWS - and both
-/// are restated in Rust, so both need the same check. The parse stays narrow on
-/// purpose (see above); each caller has its own `*_were_actually_found` guard.
+/// `icon.py` declares the glyphs this repo DRAWS in this shape (`msymbols.py`
+/// did too until its list moved to `fonts/msymbols-icons.txt`, read by
+/// `msymbols_manifest` below). The parse stays narrow on purpose (see above);
+/// each caller has its own `*_were_actually_found` guard.
 fn icons_list(rel: &str) -> BTreeMap<String, u32> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
     let text =
@@ -310,7 +310,11 @@ fn every_name_rust_resolves_reaches_a_baked_cell() {
 
 // ── the BORROWED set: the same duplication, one file over ───────────────
 
-/// The `ICONS = [...]` list out of `fonts/msymbols.py`, as `(name, codepoint)`.
+/// The borrowed manifest, `fonts/msymbols-icons.txt` (`<name> U+XXXX
+/// <group>` per line), as `(name, codepoint)`. `fonts/msymbols.py` reads it
+/// since the core set of Material Symbols
+/// (docs/design/20261029_01_MATERIAL_SYMBOLS_CORE_SET_PLAN.md, section 4.1);
+/// before that the script carried the list as `ICONS = [...]`.
 ///
 /// The borrowed manifest is stated twice for the same reason the drawn one is,
 /// and the codepoints are hand-maintained for a sharper reason: they are
@@ -320,7 +324,26 @@ fn every_name_rust_resolves_reaches_a_baked_cell() {
 /// derive its value from the font, and nothing compiled either against the
 /// other until this.
 fn msymbols_manifest() -> BTreeMap<String, u32> {
-    icons_list("fonts/msymbols.py")
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts/msymbols-icons.txt");
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let mut out = BTreeMap::new();
+    for line in text.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut fields = line.split_whitespace();
+        let (Some(name), Some(code)) = (fields.next(), fields.next()) else {
+            panic!("`{line}` in msymbols-icons.txt is not `<name> U+XXXX <group>`");
+        };
+        let Some(hex) = code.strip_prefix("U+") else {
+            panic!("{name}'s codepoint in msymbols-icons.txt is `{code}`, not `U+XXXX`");
+        };
+        let value = u32::from_str_radix(hex, 16)
+            .unwrap_or_else(|e| panic!("{name}'s codepoint `{code}` is not hex: {e}"));
+        out.insert(name.to_string(), value);
+    }
+    out
 }
 
 #[test]
