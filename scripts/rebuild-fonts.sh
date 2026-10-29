@@ -123,7 +123,7 @@ done
 # committed name | SOURCE_DATE_EPOCH (its head.modified) | sha256
 FIXED=(
     "Roboto-Regular-ascii.ttf|1789684994|b7ba6ab7d6dca2d1611e5e3c287f30e40116758928e922b440ce8666db1d6a85"
-    "Roboto-Regular-ascii-msymbols.ttf|1789684994|12f0fe674e25ebb3763c37e838c408f2fd128ce17c393d504e5bfe94e65237de"
+    "Roboto-Regular-ascii-msymbols.ttf|1789684994|ca1b0a75db35aea6babdeed265aa7a1f875436f69d0adfbd3b6e7252e3e22f0b"
 )
 for entry in "${FIXED[@]}"; do
     IFS='|' read -r name epoch want <<<"$entry"
