@@ -1,7 +1,7 @@
 ---
 title: A scoped append, for kept lists placed under open scopes
 date: 2026-10-28
-status: Draft
+status: In implementation
 covers: >
   One additive `DrawList` method, `append_scoped(&mut self, other:
   &DrawList, offset: [f32; 2])`, that splices a separately recorded list
@@ -518,3 +518,10 @@ not changed here; `Render for DrawList` and `PaneGate` stay on
 by release order it is **0.6.1** (libmsdf and libmsdf-font in lockstep),
 and the glyphs plan takes the next patch. The status stays `Draft` until
 the first implementing commit (Rule 1.5).
+
+## Amendment — 2026-10-28 23:46 EDT: implementation started; the plan is immutable
+
+Implementation has started, on the owner's approval recorded in the 23:39
+EDT amendment. The status is now `In implementation`, and the document is
+immutable (Rule 1.5): it changes only on the owner's explicit instruction,
+and departures are recorded in `CHANGES.md` (Rule 1.7).

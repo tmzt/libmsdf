@@ -23,7 +23,8 @@ use super::DrawList;
 /// rotation the caller has open. Ink appended with
 /// [`DrawList::append_from`] (a kept list, as [`DrawList`]'s own
 /// implementation does) carries its own scopes and must be rendered at top
-/// level: `append_from` asserts the destination has none open.
+/// level: `append_from` asserts the destination has none open. To place a
+/// kept list inside open scopes, use [`DrawList::append_scoped`].
 ///
 /// # Names
 ///

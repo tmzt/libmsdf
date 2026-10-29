@@ -412,6 +412,30 @@ impl RotationTransform {
             self.c * v[0] + self.d * v[1] + self.ty,
         ]
     }
+
+    /// The axis-aligned bounding box of `rect`'s four corners under this
+    /// transform: [`rotate_rect`]'s computation, which calls it, and the
+    /// clip mapping of [`DrawList::append_scoped`]. Exact for translates
+    /// and quarter turns, whose image of a box is a box; the looser bound
+    /// for a free angle.
+    fn map_rect(&self, rect: ClipRect) -> ClipRect {
+        let corners = [
+            [rect.min[0], rect.min[1]],
+            [rect.max[0], rect.min[1]],
+            [rect.min[0], rect.max[1]],
+            [rect.max[0], rect.max[1]],
+        ];
+        let mut min = [f32::MAX, f32::MAX];
+        let mut max = [f32::MIN, f32::MIN];
+        for c in corners {
+            let p = self.apply(c);
+            min[0] = min[0].min(p[0]);
+            min[1] = min[1].min(p[1]);
+            max[0] = max[0].max(p[0]);
+            max[1] = max[1].max(p[1]);
+        }
+        ClipRect { min, max }
+    }
 }
 
 /// Rotate the axis-aligned rect `(pos, size)` by `rotation` about the
@@ -433,21 +457,10 @@ pub fn rotate_rect(
     pivot: [f32; 2],
 ) -> ([f32; 2], [f32; 2]) {
     let t = RotationTransform::about(rotation, pivot);
-    let corners = [
-        [pos[0], pos[1]],
-        [pos[0] + size[0], pos[1]],
-        [pos[0], pos[1] + size[1]],
-        [pos[0] + size[0], pos[1] + size[1]],
-    ];
-    let mut min = [f32::MAX, f32::MAX];
-    let mut max = [f32::MIN, f32::MIN];
-    for c in corners {
-        let p = t.apply(c);
-        min[0] = min[0].min(p[0]);
-        min[1] = min[1].min(p[1]);
-        max[0] = max[0].max(p[0]);
-        max[1] = max[1].max(p[1]);
-    }
+    let ClipRect { min, max } = t.map_rect(ClipRect {
+        min: pos,
+        max: [pos[0] + size[0], pos[1] + size[1]],
+    });
     (min, [max[0] - min[0], max[1] - min[1]])
 }
 
@@ -728,6 +741,9 @@ impl DrawList {
     /// [`DrawList::push_fill`] is named for the same reason and says so: the
     /// API picks names the check can read, rather than asking the check to
     /// guess. `_from` follows [`DrawList::translate_from`].
+    ///
+    /// To place a kept list INSIDE open scopes (a cached section under a
+    /// scroll pane's clip and translate), use [`DrawList::append_scoped`].
     pub fn append_from(&mut self, other: &DrawList) {
         debug_assert!(
             self.active_clips.is_empty()
@@ -763,6 +779,183 @@ impl DrawList {
         self.instance_effects
             .extend_from_slice(&other.instance_effects);
         self.instance_clips.extend_from_slice(&other.instance_clips);
+        self.instance_atlas.extend_from_slice(&other.instance_atlas);
+    }
+
+    /// **Splice a separately recorded list onto the end of this one as if its
+    /// calls were made now**, moved by `offset`, inside the clip, effects and
+    /// rotate/translate scopes open on this list.
+    ///
+    /// For a kept list that is placed under open scopes rather than at top
+    /// level: a scroll pane's cached section, recorded once in its own
+    /// coordinates (top-left `[0, 0]`) and spliced every frame it is in range,
+    /// inside the pane's viewport clip and scroll translate.
+    /// [`DrawList::append_from`] cannot do that: it keeps each instance's own
+    /// tags and asserts that nothing is open.
+    ///
+    /// # The rule
+    ///
+    /// The result is what replaying `other`'s calls now would give, with every
+    /// coordinate moved by `offset`, except that **`other`'s own clips are
+    /// mapped through the open transform** (below). With no transform open it
+    /// is exactly the replay. Per appended instance, with `O` the open clip,
+    /// `T` the open transform and `E` the open effects:
+    ///
+    /// - **geometry**: `other`'s, moved by `offset` - `position`, the absolute
+    ///   points a stroke carries in its kind, and a path's segments;
+    /// - **transform**: an instance `other` did not rotate takes `T` (none if
+    ///   none is open); one `other` tagged with its entry `S` takes
+    ///   `T ∘ S'`, where `S' = (M, t + d - M d)` is `S` moved by `offset`.
+    ///   `other`'s rotations nest inside the open one, so an open rotation
+    ///   turns the whole appended list about its pivot. Every entry of
+    ///   `other`'s bank is mapped in order, so a tagged instance's id moves by
+    ///   this list's bank length, as in `append_from`;
+    /// - **clip**: an instance `other` did not clip takes `O`; one with a
+    ///   resolved clip `C` takes `O ∩ map_T(C + offset)`, where `map_T` is the
+    ///   bounding box of `T` applied to the rect's corners ([`rotate_rect`]'s
+    ///   computation). That is exact for translates and quarter turns; under a
+    ///   free angle it is the bounding box, the best a screen scissor can do.
+    ///   A clip that misses `O` is empty, as a nested
+    ///   [`DrawList::push_clip`] is;
+    /// - **effects**: an instance's own, unless it is `DrawEffects::default()`,
+    ///   when it takes `E` (or the default when none is open). An inner scope
+    ///   replaces an outer one, as [`DrawList::begin_effects`] does. The one
+    ///   case this cannot tell apart is `other` explicitly opening
+    ///   `begin_effects(DrawEffects::default())` to cancel an outer effect:
+    ///   appended under `E`, that ink takes `E`;
+    /// - elevation, atlas, colour and anim copy unchanged, and `char_start` /
+    ///   `seg_start` are rebased by this list's bank lengths.
+    ///
+    /// An `offset` of `[0.0, 0.0]` adds nothing, so at top level with nothing
+    /// open the result is bit for bit [`DrawList::append_from`]'s.
+    ///
+    /// # Why the clips follow the open transform here and not in `push_clip`
+    ///
+    /// A [`DrawList::push_clip`] call is made by code that knows the screen
+    /// and passes screen pixels; an open translate does not move it, which is
+    /// why a router pushes a pane's clip already shifted. A kept list was
+    /// recorded without knowing where it would be placed, so its clips are only
+    /// right on screen if they move with its ink. Changing `push_clip` to do
+    /// the same would change every existing caller.
+    ///
+    /// # `offset` or `push_translate`
+    ///
+    /// `push_translate(dx, dy)`, `append_scoped(&other, [0.0, 0.0])`,
+    /// `push_translate_end()` and `append_scoped(&other, [dx, dy])` draw the
+    /// same pixels. The offset form moves ink and clips on the CPU and adds no
+    /// bank entry, so unrotated ink stays untagged when no transform is open.
+    ///
+    /// # Preconditions
+    ///
+    /// `other` must have no scope open (a `debug_assert!`): its open scopes
+    /// are not resolved, and lowering it would assert too. This list may have
+    /// any open; none is opened, closed or changed.
+    ///
+    /// # Why `append_scoped`
+    ///
+    /// For the drawing gates, as [`DrawList::append_from`]'s name is: it
+    /// collides with no std method, so `libhbui/tests/drawing_allowlist.rs`
+    /// and its two siblings can match `.append_scoped(` outright. It does not
+    /// contain `append_from`, so it needs a needle of its own there.
+    pub fn append_scoped(&mut self, other: &DrawList, offset: [f32; 2]) {
+        debug_assert!(
+            other.active_clips.is_empty()
+                && other.active_effects.is_empty()
+                && other.active_transform.is_empty(),
+            "append_scoped from a list with a clip/effect/rotate scope still open: \
+             its open scopes are not resolved onto its instances",
+        );
+        let [dx, dy] = offset;
+        let moved = dx != 0.0 || dy != 0.0;
+        let open_clip = self.active_clip();
+        let open_id = self.active_transform();
+        let open_transform = (open_id != 0).then(|| self.transforms[(open_id - 1) as usize]);
+        let open_effects = self.active_effects.last().copied().unwrap_or_default();
+
+        let char_base = self.chars.len() as u32;
+        let seg_base = self.path_segments.len() as u32;
+        let transform_base = self.transforms.len() as u32;
+
+        // Glyph entries are atlas indices and advance deltas, not positions.
+        self.chars.extend_from_slice(&other.chars);
+        // Every segment belongs to exactly one of `other`'s paths, so each
+        // moves once.
+        self.path_segments.reserve(other.path_segments.len());
+        for &seg in &other.path_segments {
+            let mut seg = seg;
+            if moved {
+                seg.translate(dx, dy);
+            }
+            self.path_segments.push(seg);
+        }
+        // `S' = (M, t + d - M d)` draws `S`'s picture moved by `d`, then the
+        // open transform applies after it.
+        self.transforms.reserve(other.transforms.len());
+        for &entry in &other.transforms {
+            let mut entry = entry;
+            if moved {
+                entry.tx += dx - (entry.a * dx + entry.b * dy);
+                entry.ty += dy - (entry.c * dx + entry.d * dy);
+            }
+            if let Some(open) = &open_transform {
+                entry = RotationTransform::compose(open, &entry);
+            }
+            self.transforms.push(entry);
+        }
+
+        let n = other.instances.len();
+        self.instances.reserve(n);
+        self.instance_transforms.reserve(n);
+        self.instance_effects.reserve(n);
+        self.instance_clips.reserve(n);
+        for (index, instance) in other.instances.iter().enumerate() {
+            let mut instance = *instance;
+            if moved {
+                instance.position[0] += dx;
+                instance.position[1] += dy;
+                instance.kind.translate(dx, dy);
+            }
+            match &mut instance.kind {
+                SdfKind::MsdfText { char_start, .. } => *char_start += char_base,
+                SdfKind::PathFill { seg_start, .. } => *seg_start += seg_base,
+                _ => {}
+            }
+            self.instances.push(instance);
+
+            let id = other.instance_transforms[index];
+            self.instance_transforms.push(if id == 0 {
+                open_id
+            } else {
+                id + transform_base
+            });
+
+            let effects = other.instance_effects[index];
+            self.instance_effects
+                .push(if effects == DrawEffects::default() {
+                    open_effects
+                } else {
+                    effects
+                });
+
+            let clip = other.instance_clips[index];
+            self.instance_clips.push(if clip.is_unbounded() {
+                open_clip
+            } else {
+                let mut clip = clip;
+                if moved {
+                    clip.min[0] += dx;
+                    clip.min[1] += dy;
+                    clip.max[0] += dx;
+                    clip.max[1] += dy;
+                }
+                if let Some(open) = &open_transform {
+                    clip = open.map_rect(clip);
+                }
+                open_clip.intersect(clip)
+            });
+        }
+        self.instance_elevation
+            .extend_from_slice(&other.instance_elevation);
         self.instance_atlas.extend_from_slice(&other.instance_atlas);
     }
 
@@ -2198,6 +2391,525 @@ mod tests {
         composed.append_from(&first);
         composed.append_from(&second);
         assert_eq!(composed.instance_transforms, vec![1, 0]);
+    }
+
+    // ── scoped append ────────────────────────────────────────────────────
+
+    /// Every channel and the lowered frame are equal. With `text_tol`, an
+    /// `MsdfText` instance's `position` (and its draw's `pos`) is compared
+    /// within it instead of exactly: a run's position comes from the pen
+    /// through metrics that are not dyadic, so `(pen + d) - k` and
+    /// `(pen - k) + d` may differ in the last bit.
+    fn assert_same_list(a: &DrawList, b: &DrawList, text_tol: Option<f32>) {
+        assert_eq!(a.instances.len(), b.instances.len());
+        for (i, (x, y)) in a.instances.iter().zip(&b.instances).enumerate() {
+            match (text_tol, x.kind) {
+                (Some(tol), SdfKind::MsdfText { .. }) => {
+                    assert_eq!(
+                        (x.kind, x.size, x.color, x.anim),
+                        (y.kind, y.size, y.color, y.anim)
+                    );
+                    for k in 0..2 {
+                        assert!(
+                            (x.position[k] - y.position[k]).abs() <= tol,
+                            "text {i}: {:?} vs {:?}",
+                            x.position,
+                            y.position,
+                        );
+                    }
+                }
+                _ => assert_eq!(x, y, "instance {i}"),
+            }
+        }
+        assert_eq!(a.chars, b.chars);
+        assert_eq!(a.path_segments, b.path_segments);
+        assert_eq!(a.transforms, b.transforms);
+        assert_eq!(a.instance_transforms, b.instance_transforms);
+        assert_eq!(a.instance_elevation, b.instance_elevation);
+        assert_eq!(a.instance_effects, b.instance_effects);
+        assert_eq!(a.instance_clips, b.instance_clips);
+        assert_eq!(a.instance_atlas, b.instance_atlas);
+        let (fa, fb) = (a.lower(), b.lower());
+        assert_eq!(fa.char_buffer, fb.char_buffer);
+        assert_eq!(fa.param_bank, fb.param_bank);
+        assert_eq!(fa.draws.len(), fb.draws.len());
+        for (x, y) in fa.draws.iter().zip(&fb.draws) {
+            assert_eq!(
+                (x.size, x.color, x.params, x.xform, x.clip),
+                (y.size, y.color, y.params, y.xform, y.clip)
+            );
+            match text_tol {
+                Some(tol) if x.params[0] == DRAW_TYPE_MSDF_TEXT => {
+                    for k in 0..2 {
+                        assert!((x.pos[k] - y.pos[k]).abs() <= tol);
+                    }
+                }
+                _ => assert_eq!(x.pos, y.pos),
+            }
+        }
+        if text_tol.is_none() {
+            assert_eq!(frame_digest(&fa), frame_digest(&fb));
+        }
+    }
+
+    fn clip(min: [f32; 2], max: [f32; 2]) -> ClipRect {
+        ClipRect { min, max }
+    }
+
+    const BLUR: DrawEffects = DrawEffects {
+        blur_radius: 2.0,
+        alpha_ombre: 0.0,
+    };
+
+    /// Plan test 1: At top level, with no offset, the scoped append IS `append_from`,
+    /// for every kind under every scope a list can record.
+    #[test]
+    fn append_scoped_at_top_level_is_append_from() {
+        let mut other = every_existing_kind();
+        other
+            .push_path_fill(&tri(3.0, 4.0), [1.0; 4], Elevation::Raised)
+            .unwrap();
+        let mut from = DrawList::new();
+        from.append_from(&other);
+        let mut scoped = DrawList::new();
+        scoped.append_scoped(&other, [0.0, 0.0]);
+        assert_same_list(&scoped, &from, None);
+        // And into a list that already holds some of everything.
+        let mut from = every_existing_kind();
+        let mut scoped = from.clone();
+        from.append_from(&other);
+        scoped.append_scoped(&other, [0.0, 0.0]);
+        assert_same_list(&scoped, &from, None);
+    }
+
+    /// Plan test 2: Ink the kept list did not clip takes the destination's open clip,
+    /// wherever it lies; closing the clip afterwards still closes it.
+    #[test]
+    fn an_appended_list_is_clipped_by_the_open_clip() {
+        let mut other = DrawList::new();
+        other.push(box_at([0.0, 0.0]));
+        other.push(box_at([100.0, 100.0]));
+        let mut list = DrawList::new();
+        list.push_clip([10.0, 10.0], [50.0, 50.0]);
+        list.append_scoped(&other, [0.0, 0.0]);
+        list.push_clip_end();
+        list.push(box_at([1.0, 1.0]));
+        let viewport = clip([10.0, 10.0], [60.0, 60.0]);
+        assert_eq!(list.instance_clip(0), Some(viewport));
+        assert_eq!(list.instance_clip(1), Some(viewport));
+        assert_eq!(list.instance_clip(2), None, "the scope closed as usual");
+        let frame = list.lower();
+        assert_eq!(frame.draws[0].clip, [10.0, 10.0, 60.0, 60.0]);
+        assert_eq!(frame.draws[1].clip, [10.0, 10.0, 60.0, 60.0]);
+        assert_eq!(frame.draws[2].clip, SdfDrawCmd::NO_CLIP);
+    }
+
+    /// Plan test 3: The offset moves every point an instance has, wherever it is kept:
+    /// the same result as `append_from` then `translate_from`.
+    #[test]
+    fn an_appended_list_moves_by_its_offset() {
+        let mut other = DrawList::new();
+        other.push(box_at([1.0, 2.0]));
+        other.push_line([3.0, 4.0], [50.0, 6.0], 2.0, [1.0; 4]);
+        other.push_bezier(
+            [0.0, 0.0],
+            [10.0, 30.0],
+            [40.0, -10.0],
+            [60.0, 20.0],
+            2.0,
+            [1.0; 4],
+        );
+        other.push_clip([0.0, 0.0], [80.0, 40.0]);
+        other.push(SdfInstance {
+            kind: SdfKind::Outline {
+                radius: 3.0,
+                thickness: 1.0,
+            },
+            position: [7.0, 8.0],
+            size: [20.0, 10.0],
+            color: [1.0; 4],
+            anim: 0,
+        });
+        other
+            .push_path_fill(&tri(10.0, 20.0), [1.0; 4], Elevation::Flat)
+            .unwrap();
+        other.push(SdfInstance {
+            kind: SdfKind::MsdfText {
+                char_start: 0,
+                char_count: 0,
+                px_range: 4.0,
+            },
+            position: [13.0, 14.0],
+            size: [80.0, 16.0],
+            color: [1.0; 4],
+            anim: 0,
+        });
+        other.push_clip_end();
+
+        let mut scoped = DrawList::new();
+        scoped.push(box_at([0.0, 0.0]));
+        let mut expected = scoped.clone();
+        scoped.append_scoped(&other, [30.0, -5.0]);
+        expected.append_from(&other);
+        expected.translate_from(1, 30.0, -5.0);
+        assert_same_list(&scoped, &expected, None);
+
+        assert_eq!(scoped.instances[1].position, [31.0, -3.0]);
+        assert!(matches!(
+            scoped.instances[2].kind,
+            SdfKind::Line {
+                end: [80.0, 1.0],
+                ..
+            }
+        ));
+        match scoped.instances[3].kind {
+            SdfKind::BezierStroke { c1, c2, end, .. } => {
+                assert_eq!(scoped.instances[3].position, [30.0, -5.0]);
+                assert_eq!((c1, c2, end), ([40.0, 25.0], [70.0, -15.0], [90.0, 15.0]));
+            }
+            other => panic!("{other:?}"),
+        }
+        for (a, b) in scoped.path_segments.iter().zip(&other.path_segments) {
+            let mut b = *b;
+            b.translate(30.0, -5.0);
+            assert_eq!(*a, b);
+        }
+        assert_eq!(scoped.instances[6].position, [43.0, 9.0]);
+    }
+
+    /// Plan test 4: A clip nested inside the kept list needs nothing beyond the one
+    /// intersection with the open clip; a miss is empty, never inverted.
+    #[test]
+    fn a_nested_clip_intersects_the_open_one() {
+        let mut other = DrawList::new();
+        other.push_clip([0.0, 0.0], [40.0, 40.0]);
+        other.push(box_at([1.0, 1.0])); // outer only
+        other.push_clip([20.0, 20.0], [60.0, 60.0]);
+        other.push(box_at([21.0, 21.0])); // resolved [20, 20]-[40, 40]
+        other.push_clip_end();
+        other.push_clip_end();
+        assert_eq!(other.instance_clips[1], clip([20.0, 20.0], [40.0, 40.0]));
+
+        let mut list = DrawList::new();
+        list.push_clip([25.0, 0.0], [75.0, 100.0]);
+        list.append_scoped(&other, [5.0, 5.0]);
+        list.push_clip_end();
+        assert_eq!(list.instance_clips[0], clip([25.0, 5.0], [45.0, 45.0]));
+        assert_eq!(list.instance_clips[1], clip([25.0, 25.0], [45.0, 45.0]));
+
+        let mut miss = DrawList::new();
+        miss.push_clip([0.0, 0.0], [10.0, 10.0]);
+        miss.push(box_at([1.0, 1.0]));
+        miss.push_clip_end();
+        let mut list = DrawList::new();
+        list.push_clip([50.0, 50.0], [10.0, 10.0]);
+        list.append_scoped(&miss, [0.0, 0.0]);
+        list.push_clip_end();
+        let got = list.instance_clips[0];
+        assert!(got.is_empty(), "{got:?}");
+        assert_eq!(got.max, got.min, "empty, not inverted");
+    }
+
+    /// Plan test 5: The kept list's own clips move with its ink through the open
+    /// transform, which is what a router's `shift` does by hand for
+    /// `push_clip`.
+    #[test]
+    fn a_kept_lists_clips_follow_the_open_translate() {
+        let mut other = DrawList::new();
+        other.push_clip([0.0, 40.0], [100.0, 20.0]);
+        other.push(box_at([0.0, 45.0]));
+        other.push_clip_end();
+
+        let mut list = DrawList::new();
+        list.push_clip([0.0, 0.0], [100.0, 100.0]);
+        list.push_translate(0.0, -30.0);
+        list.append_scoped(&other, [0.0, 0.0]);
+        list.push_translate_end();
+        list.push_clip_end();
+        assert_eq!(list.instance_clips[0], clip([0.0, 10.0], [100.0, 30.0]));
+        assert_eq!(list.instance_transforms[0], 1, "the open translate's id");
+        assert_eq!(list.transforms.len(), 1, "and no entry of its own");
+
+        // Under a quarter turn, the moved clip is rotate_rect'ed about the
+        // pivot, bit for bit, then cut to the viewport.
+        let pivot = [50.0, 50.0];
+        let mut list = DrawList::new();
+        list.push_clip([0.0, 0.0], [100.0, 100.0]);
+        list.push_rotate(SdfRotate::Quarter(1), pivot);
+        list.append_scoped(&other, [5.0, 0.0]);
+        list.push_rotate_end();
+        list.push_clip_end();
+        let (pos, size) = rotate_rect([5.0, 40.0], [100.0, 20.0], SdfRotate::Quarter(1), pivot);
+        let rotated = clip(pos, [pos[0] + size[0], pos[1] + size[1]]);
+        assert_eq!(rotated, clip([40.0, 5.0], [60.0, 105.0]));
+        assert_eq!(
+            list.instance_clips[0],
+            clip([0.0, 0.0], [100.0, 100.0]).intersect(rotated)
+        );
+        assert_eq!(list.instance_clips[0], clip([40.0, 5.0], [60.0, 100.0]));
+    }
+
+    /// Plan test 6: The kept list's rotations compose inside the open one: one bank
+    /// entry per entry it had, and its unrotated ink takes the open id.
+    #[test]
+    fn rotations_nest_inside_the_open_one() {
+        let build = |inner: SdfRotate| {
+            let mut other = DrawList::new();
+            other.push_rotate(inner, [10.0, 10.0]);
+            other.push(box_at([5.0, 5.0]));
+            other.push_rotate_end();
+            other.push(box_at([30.0, 5.0]));
+            other
+        };
+        let other = build(SdfRotate::Quarter(2));
+        let mut list = DrawList::new();
+        list.push_rotate(SdfRotate::Quarter(1), [50.0, 50.0]);
+        let open = list.transforms[0];
+        let base = list.transforms.len() as u32;
+        list.append_scoped(&other, [20.0, 0.0]);
+        list.push_rotate_end();
+        assert_eq!(list.transforms.len(), 2, "exactly one entry more");
+        assert_eq!(list.instance_transforms, vec![base + 1, 1]);
+        let moved = RotationTransform::about(SdfRotate::Quarter(2), [30.0, 10.0]);
+        assert_eq!(
+            list.transforms[1],
+            RotationTransform::compose(&open, &moved),
+            "bit for bit"
+        );
+
+        // A free angle: within rounding of recording it in place.
+        let other = build(SdfRotate::Radians(0.3));
+        let mut scoped = DrawList::new();
+        scoped.push_rotate(SdfRotate::Quarter(1), [50.0, 50.0]);
+        scoped.append_scoped(&other, [20.0, 0.0]);
+        scoped.push_rotate_end();
+        let mut direct = DrawList::new();
+        direct.push_rotate(SdfRotate::Quarter(1), [50.0, 50.0]);
+        direct.push_rotate(SdfRotate::Radians(0.3), [30.0, 10.0]);
+        direct.push(box_at([25.0, 5.0]));
+        direct.push_rotate_end();
+        direct.push(box_at([50.0, 5.0]));
+        direct.push_rotate_end();
+        assert_eq!(scoped.instances, direct.instances);
+        assert_eq!(scoped.instance_transforms, direct.instance_transforms);
+        let (a, b) = (scoped.lower(), direct.lower());
+        assert_eq!(a.param_bank.len(), b.param_bank.len());
+        for (x, y) in a.param_bank.iter().zip(&b.param_bank) {
+            for k in 0..4 {
+                assert!((x[k] - y[k]).abs() <= 1e-5, "{x:?} vs {y:?}");
+            }
+        }
+    }
+
+    /// Plan test 7: An inner effects scope replaces the open one; ink the kept list
+    /// recorded with none inherits it.
+    #[test]
+    fn effects_are_inherited_only_where_the_list_had_none() {
+        let ombre = DrawEffects {
+            blur_radius: 0.0,
+            alpha_ombre: 0.5,
+        };
+        let mut other = DrawList::new();
+        other.push(box_at([0.0, 0.0]));
+        other.begin_effects(ombre);
+        other.push(box_at([10.0, 0.0]));
+        other.end_effects();
+
+        let mut list = DrawList::new();
+        list.begin_effects(BLUR);
+        list.append_scoped(&other, [0.0, 0.0]);
+        list.end_effects();
+        assert_eq!(list.instance_effects, vec![BLUR, ombre]);
+
+        let mut list = DrawList::new();
+        list.append_scoped(&other, [0.0, 0.0]);
+        assert_eq!(list.instance_effects, vec![DrawEffects::default(), ombre]);
+    }
+
+    /// Plan test 8: Text and paths name their banks by index; appended into a list that
+    /// already holds both, they still name their own.
+    #[cfg(feature = "shaper")]
+    #[test]
+    fn text_and_paths_rebase_into_a_non_empty_list() {
+        let (shaper, atlas) = text_fixture();
+        let mut list = DrawList::new();
+        list.push_shaped_text(&shaper.shape("Hi"), &atlas, [0.0, 0.0], 16.0, 4.0, [1.0; 4]);
+        list.push_path_fill(&tri(0.0, 10.0), [1.0; 4], Elevation::Flat)
+            .unwrap();
+        let (chars, segs) = (list.chars.len() as u32, list.path_segments.len() as u32);
+        assert!(chars > 0 && segs > 0);
+
+        let mut other = DrawList::new();
+        other.push_shaped_text(&shaper.shape("ok"), &atlas, [5.0, 5.0], 16.0, 4.0, [1.0; 4]);
+        other
+            .push_path_fill(&tri(50.0, 60.0), [0.5; 4], Elevation::Raised)
+            .unwrap();
+        list.append_scoped(&other, [10.0, 20.0]);
+
+        match (list.instances[2].kind, other.instances[0].kind) {
+            (
+                SdfKind::MsdfText { char_start, .. },
+                SdfKind::MsdfText {
+                    char_start: own, ..
+                },
+            ) => assert_eq!(char_start, own + chars),
+            kinds => panic!("{kinds:?}"),
+        }
+        match (list.instances[3].kind, other.instances[1].kind) {
+            (SdfKind::PathFill { seg_start, .. }, SdfKind::PathFill { seg_start: own, .. }) => {
+                assert_eq!(seg_start, own + segs)
+            }
+            kinds => panic!("{kinds:?}"),
+        }
+
+        let (whole, alone) = (list.lower(), other.lower());
+        assert_eq!(
+            whole.char_buffer[chars as usize..],
+            alone.char_buffer[..],
+            "the appended run's glyphs are the ones it lowered alone"
+        );
+        let (path, own) = (whole.draws[3], alone.draws[1]);
+        assert_eq!(path.params[1], own.params[1], "the same segment count");
+        let rows = 2 * own.params[1] as usize;
+        let (pi, oi) = (
+            path.params[3].to_bits() as usize,
+            own.params[3].to_bits() as usize,
+        );
+        let mut moved_rows = alone.param_bank[oi..oi + rows].to_vec();
+        for row in moved_rows.iter_mut().step_by(2) {
+            // Row 0 of a segment is `p0`, `ctrl`; row 1 is `p2`, kind, 0.
+            *row = [row[0] + 10.0, row[1] + 20.0, row[2] + 10.0, row[3] + 20.0];
+        }
+        for row in moved_rows.iter_mut().skip(1).step_by(2) {
+            row[0] += 10.0;
+            row[1] += 20.0;
+        }
+        assert_eq!(
+            whole.param_bank[pi..pi + rows],
+            moved_rows[..],
+            "the segment rows it lowered alone, moved by the offset"
+        );
+    }
+
+    /// The kept pane of tests 9 and 10, in its own coordinates, or recorded
+    /// in place moved by `d` with its clips moved by `d + shift`.
+    #[cfg(feature = "shaper")]
+    fn kept_pane(
+        list: &mut DrawList,
+        shaper: &crate::font::TextShaper,
+        atlas: &FontAtlas,
+        d: [f32; 2],
+        shift: [f32; 2],
+    ) {
+        let p = |x: f32, y: f32| [x + d[0], y + d[1]];
+        let c = |x: f32, y: f32| [x + d[0] + shift[0], y + d[1] + shift[1]];
+        // `pane_one`, moved.
+        list.push_clip(c(0.0, 0.0), [100.0, 100.0]);
+        list.push(box_at(p(0.0, 0.0)));
+        list.push_shaped_text(
+            &shaper.shape("Hi"),
+            atlas,
+            p(10.0, 10.0),
+            16.0,
+            4.0,
+            [1.0; 4],
+        );
+        list.push_clip_end();
+        list.push_line(p(1.0, 2.0), p(90.0, 40.0), 3.0, [1.0, 0.0, 0.0, 1.0]);
+        list.push_bezier(
+            p(0.0, 0.0),
+            p(10.0, 30.0),
+            p(40.0, -10.0),
+            p(60.0, 20.0),
+            2.0,
+            [1.0; 4],
+        );
+        list.push_path_fill(
+            &tri(p(10.0, 20.0)[0], p(10.0, 20.0)[1]),
+            [1.0; 4],
+            Elevation::Flat,
+        )
+        .unwrap();
+        list.push_rotate(SdfRotate::Quarter(1), p(50.0, 50.0));
+        list.push(box_at(p(20.0, 30.0)));
+        list.push_rotate_end();
+    }
+
+    /// Plan test 9: **The equivalence.** Appending the kept pane under an open clip and
+    /// effects is recording it in place, moved.
+    #[cfg(feature = "shaper")]
+    #[test]
+    fn a_scoped_append_lowers_to_what_recording_in_place_would_have() {
+        let (shaper, atlas) = text_fixture();
+        let mut pane = DrawList::new();
+        kept_pane(&mut pane, &shaper, &atlas, [0.0, 0.0], [0.0, 0.0]);
+
+        let open = |list: &mut DrawList| {
+            list.push_clip([0.0, 0.0], [300.0, 200.0]);
+            list.begin_effects(DrawEffects {
+                blur_radius: 1.0,
+                alpha_ombre: 0.0,
+            });
+        };
+        let close = |list: &mut DrawList| {
+            list.end_effects();
+            list.push_clip_end();
+        };
+        let mut scoped = DrawList::new();
+        open(&mut scoped);
+        scoped.append_scoped(&pane, [40.0, 60.0]);
+        close(&mut scoped);
+        let mut direct = DrawList::new();
+        open(&mut direct);
+        kept_pane(&mut direct, &shaper, &atlas, [40.0, 60.0], [0.0, 0.0]);
+        close(&mut direct);
+        assert_same_list(&scoped, &direct, Some(1e-4));
+    }
+
+    /// Plan test 10: Under an open translate, the scoped append equals a router that
+    /// records in place and shifts its `push_clip` rects by hand.
+    #[cfg(feature = "shaper")]
+    #[test]
+    fn under_an_open_translate_it_matches_a_router_that_shifts_its_clips() {
+        let (shaper, atlas) = text_fixture();
+        let mut pane = DrawList::new();
+        kept_pane(&mut pane, &shaper, &atlas, [0.0, 0.0], [0.0, 0.0]);
+
+        let open = |list: &mut DrawList| {
+            list.push_clip([0.0, 0.0], [300.0, 200.0]);
+            list.begin_effects(DrawEffects {
+                blur_radius: 1.0,
+                alpha_ombre: 0.0,
+            });
+            list.push_translate(0.0, -120.0);
+        };
+        let close = |list: &mut DrawList| {
+            list.push_translate_end();
+            list.end_effects();
+            list.push_clip_end();
+        };
+        let mut scoped = DrawList::new();
+        open(&mut scoped);
+        scoped.append_scoped(&pane, [40.0, 60.0]);
+        close(&mut scoped);
+        let mut direct = DrawList::new();
+        open(&mut direct);
+        kept_pane(&mut direct, &shaper, &atlas, [40.0, 60.0], [0.0, -120.0]);
+        close(&mut direct);
+        assert_same_list(&scoped, &direct, Some(1e-4));
+    }
+
+    /// Plan test 11: A kept list with a scope still open has not resolved it.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(
+        expected = "append_scoped from a list with a clip/effect/rotate scope still open"
+    )]
+    fn appending_a_list_with_an_open_scope_asserts() {
+        let mut other = DrawList::new();
+        other.push_clip([0.0, 0.0], [10.0, 10.0]);
+        other.push(box_at([1.0, 1.0]));
+        DrawList::new().append_scoped(&other, [0.0, 0.0]);
     }
 
     fn boxy(x: f32) -> SdfInstance {
