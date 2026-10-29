@@ -28,6 +28,10 @@
 #       google/material-design-icons at a pinned commit; fonts/msymbols.py
 #       checks the borrowed icons of Roboto-Regular-ascii-msymbols.ttf
 #       against it outline for outline.
+#   MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].codepoints
+#       the same commit's manifest of declared codepoints (`<name> <hex>`,
+#       4,301 lines); fonts/msymbols.py checks every line of
+#       fonts/msymbols-icons.txt against it.
 #
 # Needs only curl, python3 and shasum or sha256sum. A file already present
 # with the right SHA-256 is not downloaded again.
@@ -46,6 +50,7 @@ DIRECT=(
     "GrenzeGotisch[wght].ttf|$GOOGLE_FONTS/98931f43a8dcf8ca908949780e0d03a6e4195227/ofl/grenzegotisch/GrenzeGotisch%5Bwght%5D.ttf|701b299d8dc002a2b4bea2ff0f1272c0e4081a2835914354804565c410d0c637"
     "Texturina[opsz,wght].ttf|$GOOGLE_FONTS/f4a8ff8c122abc147e5fd19fc46cb2396b67b2bb/ofl/texturina/Texturina%5Bopsz%2Cwght%5D.ttf|478a15d7145cf94565cfc1aeb33596aeb0118c7d86a84d061ddf46de3d7dfda3"
     "MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].ttf|https://raw.githubusercontent.com/google/material-design-icons/$MSYMBOLS_COMMIT/variablefont/MaterialSymbolsOutlined%5BFILL%2CGRAD%2Copsz%2Cwght%5D.ttf|77ff1c20896afc6f1abf7d57fc408234dfd021ab050b63e0442e71d6c9f0d6b8"
+    "MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].codepoints|https://raw.githubusercontent.com/google/material-design-icons/$MSYMBOLS_COMMIT/variablefont/MaterialSymbolsOutlined%5BFILL%2CGRAD%2Copsz%2Cwght%5D.codepoints|0c9dae3ed678a81549c3be046bc8045335e5f57f2cbe2287360fbf0c2cc1355f"
     "NotoSansMono[wdth,wght].ttf|$GOOGLE_FONTS/$NOTO_COMMIT/ofl/notosansmono/NotoSansMono%5Bwdth%2Cwght%5D.ttf|2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081"
     "NotoSansSymbols2-Regular.ttf|$GOOGLE_FONTS/$NOTO_COMMIT/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf|7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21"
     "NotoSansSymbols[wght].ttf|$GOOGLE_FONTS/$NOTO_COMMIT/ofl/notosanssymbols/NotoSansSymbols%5Bwght%5D.ttf|f7e7e04b4a24b6c78893d50cbfd2b2f6cae49617ab047bfef668d252adb128f7"

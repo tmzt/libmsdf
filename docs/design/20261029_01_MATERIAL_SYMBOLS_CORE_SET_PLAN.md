@@ -1,7 +1,7 @@
 ---
 title: A core set of Material Symbols in the merged Roboto face
 date: 2026-10-29
-status: Draft
+status: In implementation
 covers: >
   Growing the borrowed half of the merged face (`font-apache-roboto-msymbols`:
   `ROBOTO_ASCII_MSYMBOLS`, `roboto-msymbols-48.atlas`,
@@ -711,3 +711,34 @@ release of its own.
    `bookmark`, `play_arrow`, `stop` and `check_circle` are outlines. M3
    uses filled forms for selected states. A filled set would be a second,
    separately named set of glyphs, not in this plan. Wanted later?
+
+## Amendment — 2026-10-29 17:53 EDT: approved; the answers to section 8
+
+The owner approved this plan on 2026-10-29 ("approve all four plans and
+build them"; "push them when built, then update roundtwo"). The answers to
+section 8, which replace its questions:
+1. Asked "0.6.3, no cell fix" or "0.7.0 with the cell fix", the owner chose
+   **"0.7.0 with the cell fix"**: all 71 icons of section 3.2, the two merged
+   atlases' cell moved up 0.1 em (section 3.5, format 5:0.2.0), released as
+   **0.7.0** (libmsdf and libmsdf-font in lockstep, tag v0.7.0) with the
+   cell box marked **Breaking** (section 6).
+2. `report` (U+F052) is merged in place of `error`, as section 3.3 proposes.
+3. Material's `folder` is left out; the drawn `HIGHBAY_ICONS` `folder` keeps
+   its name.
+4. The plain Roboto atlases are not changed for `Å` in this release; the
+   cell box goes to the two merged atlases only.
+5. 18 free cells is enough for now.
+6. Outline icons only (FILL 0); no filled set.
+
+The owner's approval to build and release the whole plan is the agreement
+step 5 asks for: `fonts/bundled.sha256` takes the new hashes in its own
+commit (AGENTS.md, "Bundled fonts and atlases", item 2). The status stays
+`Draft` until the next amendment, in the first implementing commit
+(Rule 1.5).
+
+## Amendment — 2026-10-29 17:53 EDT: implementation started; this document is immutable
+
+Implementation has started, on the owner's approval above, as release
+0.7.0. The status is now `In implementation`, and this document is
+immutable (Rule 1.5): it changes only on the owner's explicit instruction,
+and departures are recorded in CHANGES.md (Rule 1.7).
