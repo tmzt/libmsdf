@@ -742,3 +742,17 @@ glyph's outline filled as a path), output to the next free
 `out/fonts/YYYYMMDD_NN_<name>/` with metrics and a printed log entry. No
 public API change, so no release. Nothing is implemented until the owner
 approves it.
+
+## 2026-10-28 21:00 EDT — Planned: coding-agent interface glyphs on the terminal symbol page
+
+Plan: `docs/design/20261028_01_CODING_AGENT_GLYPHS_PLAN.md` (Draft).
+
+The owner asked, through flankr's session, for ⊙ and ⦿ and the other
+glyphs that Claude Code, Codex, Gemini CLI and Antigravity print to be on
+the terminal symbol page. The plan adds 63 codepoints to TERMINAL (591 to
+654) and 14 emoji and one wide form to TERMINAL_EMOJI (24 to 39), all from
+the Noto faces the page already merges, with ⊙ taken from Noto Sans
+Symbols 2 to match ⦿. ✋ ⛔ ☰ are the page's first two-cell symbols. At 694
+cells the page outgrows its 640-cell layer, so it is baked at 18 columns
+(900 x 2000, 720 cells). Proposed as 0.6.1, with the version question open
+for the owner. Nothing is implemented until the owner approves it.
