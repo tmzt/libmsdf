@@ -821,3 +821,70 @@ the top of the line-box cell; the shipped coverage becomes 302 of 320
 cells, about +1.9 KB per atlas. Proposed as 0.7.0 for the cell box, or
 0.6.3 without it (the plan's open question 1). RoundTwo is the first user
 (content_copy). Nothing is implemented until the owner approves the plan.
+
+## 2026-10-29 18:53 EDT — The core set of Material Symbols, 0.7.0
+
+Plan: docs/design/20261029_01_MATERIAL_SYMBOLS_CORE_SET_PLAN.md, approved by
+the owner with "0.7.0 with the cell fix". Landed as 0.7.0 (tag v0.7.0,
+97b0f07): 71 Material Symbols in the merged face (53 new, the 18 kept with
+their glyph ids; new glyphs 262..=314), listed in fonts/msymbols-icons.txt
+and checked by fonts/msymbols.py against Material's `.codepoints` at the
+pinned commit; the face is sha256 ca1b0a75…; the two merged atlases bake
+with a cell 0.1 em above the line box (5:0.2.0) and hold 302 of 320 cells;
+the other seven atlases are byte-identical (`bundled --check`, and the
+determinism step of scripts/check-font-features.sh); the reference hashes
+updated in their own commit under the plan's approval.
+
+Sizes (`wc -c`; `gzip -9 -c | wc -c`):
+
+| Atlas | Before | After | Plan's estimate |
+| --- | --- | --- | --- |
+| roboto-msymbols-48.atlas | 2,414,684; gzip 323,716 | 2,416,404 (+1,720); gzip 417,054 (+93,338) | about 2,416,600 |
+| roboto-msymbols-styled-48.atlas | 7,269,308; gzip 1,010,382 | 7,271,028 (+1,720); gzip 1,108,040 (+97,658) | about 7,271,200 |
+
+The raw sizes are within 0.2 KB of the estimate (the tables grew by 32
+bytes per glyph record plus layout entries and the `CELL` table). The
+gzipped size grows about 93 KB per atlas, which section 3.6 did not
+estimate: the cell box moves every glyph 0.1 em down inside its cell, so
+the texels of all 302 cells change, not only the 53 new ones, and the
+shifted fields compress worse. The texture's dimensions and GPU memory do
+not change.
+
+The clipping check (tests/msymbols_icons.rs,
+`every_carried_glyph_fits_the_cell`, and a fontTools check of the face):
+against the old line-box window (y −807.04..1855.36) 32 glyphs of the
+merged face reach past the top, 25 of them icons (content_paste, lock,
+replay and timer at 1963; 21 at 1873-1877) and Å at 1939. Against the new
+window (y −602.24..2060.16) none does, and none comes within a texel:
+the highest ink (1963) has 97.2 units to spare and the lowest (−512, the
+edge markers) 90.2. The Bold and Italic faces of the styled atlas pass
+too. Evidence: out/fonts/20261029_02_msymbols_core/ (out/fonts/LOG.md).
+
+Departures (Rule 1.7):
+1. Step 5, `every_icon_is_in_the_face_and_both_atlases`: icons are shaped
+   with `TextShaper` on the merged face, not through the atlas's
+   `AtlasShaper`. An atlas's layout `cmap` covers `TEXT_RANGES` only
+   (`LayoutOptions::default`), so `AtlasShaper` has never mapped an icon
+   codepoint, in 0.6.2 either; the test checks the face's glyph id has a
+   cell in each atlas instead. A new test, `an_atlas_shaper_maps_no_icon`,
+   pins that behaviour. For the owner: a consumer built without `shaper`
+   cannot resolve icons from the merged atlas alone; the README's example
+   uses `TextShaper`, as section 4.7 has it.
+2. Step 5: tests/icons_agree_with_the_baker.rs parsed `ICONS = [...]` out
+   of fonts/msymbols.py, which section 4.3 moved to the manifest file. The
+   plan's test list did not name it; it now reads fonts/msymbols-icons.txt
+   (1e7daa5). It landed after the atlas commit, so 19f0e4b..5bd5bb7 fail
+   that one test; the full suite passed before the version commit.
+3. Step 6: content_paste, lock, replay and timer are new, so the 0.6.2
+   atlas cannot draw them. The before row is the 0.7.0 face baked in memory
+   at the line box (the release without the cell fix), with chat from the
+   0.6.2 atlas beside it.
+4. Step 3: fonts/msymbols.py's docstring also points at font/src/ instead
+   of the old src/font/mod.rs, and prints one line in both cases.
+5. Step 7: the VERSIONS.md heading follows the file's existing
+   "(tag `v0.7.0`)" form, as 0.6.1 and 0.6.2 did.
+
+Step 8 (RoundTwo, the first user) is done in RoundTwo's session, so the
+plan stays In implementation until its Done when holds. RoundTwo pins
+libmsdf through libcontrols, which takes 0.7.0 in a minor release of its
+own (Rule 5.5).
