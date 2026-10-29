@@ -742,3 +742,20 @@ Implementation has started, on the owner's approval above, as release
 0.7.0. The status is now `In implementation`, and this document is
 immutable (Rule 1.5): it changes only on the owner's explicit instruction,
 and departures are recorded in CHANGES.md (Rule 1.7).
+
+## Amendment — 2026-10-29 18:53 EDT: steps 1 to 7 implemented, 0.7.0
+
+Steps 1 to 7 are done and their **Done when:** holds; released as 0.7.0
+(libmsdf and libmsdf-font, tag v0.7.0). Commits:
+1. The upstream manifest: 573a411.
+2. The manifest file and the merge script: 777c916.
+3. The face: 4a9d361, 799e59f (rebuild-fonts.sh).
+4. The cell box: 6d0fd87.
+5. The re-bake: 19f0e4b (atlases and tests), 5bd5bb7
+   (fonts/bundled.sha256), 1e7daa5 (icons_agree_with_the_baker.rs).
+6. Evidence: out/fonts/20261029_02_msymbols_core/ (out/fonts/LOG.md).
+7. Release: 1c117ba (README), 97b0f07 (0.7.0, tagged v0.7.0), and the
+   CHANGES.md entry after it.
+Step 8 is RoundTwo's and its **Done when:** is still open, so the status
+stays `In implementation`. Sizes, the clipping check and the departures
+are in CHANGES.md (2026-10-29 18:53 EDT entry).
