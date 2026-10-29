@@ -289,3 +289,29 @@ No dependency changed version.
   `offset`, inside the clip, effects and rotate/translate scopes open on
   this list. `append_from` is unchanged and still asserts that nothing is
   open.
+
+## 0.6.2 — 2026-10-29 (tag `v0.6.2`)
+
+Coding-agent interface glyphs on the terminal symbol page
+(`docs/design/20261028_01_CODING_AGENT_GLYPHS_PLAN.md`). Additive coverage,
+so a patch release, by the owner's answer to the plan's open question 1
+(Rule 5.4): no type, signature or field changes, and every codepoint that
+drew before draws the same outline at the same width. `libmsdf` and
+`libmsdf-font` stay in lockstep: both are 0.6.2 and both are covered by this
+entry and this tag. The commit is the one tagged `v0.6.2`. No dependency
+changed version.
+
+- Changed: `COVERAGE_TERMINAL` gains 63 codepoints (654): the interface
+  marks `⋮ ⋯ ⊷ ⟳ ⊠ ⛁ ℹ ⓘ ≡ ⌐ ‖`, the key hints `⌦ ⇞ ⇟ ␣`, the control
+  pictures U+2400-241F, `␡` and `␤`, `☰ ⌂ ⬢ ♥ ♪ ☺ Ⓘ ⓞ ⓧ`, `✋ ⏲ ⛔`, and
+  `⊙ ⦿`. `☰ ⛔ ✋` are two cells; the rest are one.
+- Changed: `COVERAGE_TERMINAL_EMOJI` gains 15 (39): `🟢 🟡 🔴 🔄 💭 🧠 🛠 🧑
+  💻 📎 🚧 🔔 📂 🔐` and the wide form U+F0002.
+- Changed: `TERMINAL_WIDE_FORM` gains `('\u{1F6E0}', '\u{F0002}')`: `🛠` is
+  one cell, and two when U+FE0F follows it.
+- Changed: the bytes of `TERMINAL_SYMBOLS_TTF` (sha256 `0d912327…`) and
+  `TERMINAL_SYMBOLS_ATLAS` (694 cells). The page is 900 x 2000 texels, and
+  `BundledAtlas::TerminalSymbols.columns()` is 18, computed from the
+  page's cells (at most 40); an `AtlasSet` holding the page is 900 wide and
+  pads a 16-column atlas to it. The other eight bundled atlases are
+  byte-identical.
