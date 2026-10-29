@@ -580,3 +580,13 @@ measures, stand.
    width, not a literal 900.
 4. **Tests** add: the formula at 640, 641, 694 and 1600 cells (16, 17,
    18 and 40 columns), and 1601 cells refused.
+
+## Amendment — 2026-10-29 01:53 EDT: approved; the next patch
+
+The owner approved the plan on 2026-10-29 ("approve media requests and
+glyphs"), with the 2026-10-28 answers to section 8 and the columns
+amendment. 0.6.1 went to the scoped append (plan 20261028_02), so this is
+**0.6.2** by release order (libmsdf and libmsdf-font in lockstep). Step 3's
+re-bake changes the atlas bytes and their hash; the owner's approval of the
+plan covers that change (AGENTS.md's atlas rule). The status stays `Draft`
+until the first implementing commit (Rule 1.5).
