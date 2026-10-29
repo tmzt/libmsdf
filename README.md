@@ -127,8 +127,10 @@ The atlases are baked by `libmsdf::bake::Baker` and committed under
 host beyond Rust: no C++ compiler and no bake at build time. (Baking them in
 `build.rs` was the plan's first choice; it was too slow for a build script
 at the default `opt-level` - see CHANGES.md.) The OFL atlases are 16 cell
-columns wide (800 x 2000 texels); `FontAtlas::padded_to` pads an 8-column
-atlas to match before stacking atlases into one texture array.
+columns wide (800 x 2000 texels), except the terminal symbol page, whose
+columns follow its cells: 18 (900 x 2000) for its 694, at most 40 under the
+2048 texture width (`BundledAtlas::columns`). `FontAtlas::padded_to` pads a
+narrower atlas to match before stacking atlases into one texture array.
 
 **Your own faces.** A build script can bake with the same baker by
 depending on the `libmsdf-font` crate (no wgpu) with its `bake` feature:
@@ -188,8 +190,12 @@ for (i, s) in ["╭─ ⠋ Working… ─╮", "│ ✔ done  🤖  │", "╰�
 ```
 
 Box drawing joins only when lines are `line_pitch_em()` (1.3 em, the line
-box) apart. Emoji are two cells, except `⚠` and `➡`, which are one cell and
-become two when U+FE0F follows them, as in terminals. Italic draws upright.
+box) apart. Emoji are two cells, except `⚠`, `➡` and `🛠`, which are one
+cell and become two when U+FE0F follows them, as in terminals. On the
+symbol page, `☰`, `⛔` and `✋` are two cells (East Asian Width W, as
+`wcwidth` counts them); every other symbol is one, whatever selector
+follows. The page carries the glyphs Claude Code, Codex, Gemini CLI and
+Antigravity print, the control pictures among them. Italic draws upright.
 
 **Verifying the bundled atlases:**
 `cargo run -p libmsdf-font --features bake --bin libmsdf-bake -- bundled --check fonts/atlases`
