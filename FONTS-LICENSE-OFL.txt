@@ -87,7 +87,7 @@ named with each one is enabled.
     the terminal symbol groups in fonts/coverage-groups.txt are taken from
     them, scaled to 1000 units per em, remapped and fitted onto Noto Sans
     Mono's 600-unit cell, and renamed; no layout tables or hinting are kept.
-    This file: sha256 de25281b41790c0ef6cede3c815751d7c1ad15d8eeff8c6e6b81a2e5b4c1c2b2
+    This file: sha256 0d91232725e03887601f6ea857300ea9c384ab6b89b05e171060246966640cca
 
 -----------------------------------------------------------------------------
 This Font Software is licensed under the SIL Open Font License, Version 1.1.

@@ -18,16 +18,17 @@ output is deterministic: the same inputs give the same bytes.
    the file format, so its coordinates are the integers a saved face stores.
 2. For each codepoint of the TERMINAL group in `fonts/coverage-groups.txt`,
    the glyph comes from the first of Noto Sans Mono, Noto Sans Symbols 2,
-   Noto Sans Symbols and Noto Sans Math that maps it; for TERMINAL_EMOJI,
-   from Noto Emoji. A wide form (U+F0000 on) takes its base's emoji glyph.
+   Noto Sans Symbols and Noto Sans Math that maps it, unless
+   `SOURCE_OVERRIDE` names its face; for TERMINAL_EMOJI, from Noto Emoji. A
+   wide form (U+F0000 on) takes its base's emoji glyph.
 3. Outlines are scaled to upem 1000 and set on Noto Sans Mono's 600-unit
    cell:
    - box drawing and block elements are remapped from their design span
      [-240, 973] onto the 1.3 em line box [-271, 1029], and every edge that
      touches the cell is pushed out (to x -40 or 640, y -371 or 1129) so
      cells join without a seam; the shades U+2591-2593 are only remapped;
-   - every other glyph takes n cells (2 for a wide emoji or a wide form,
-     otherwise 1), is fitted inside them less 30 units a side and inside the
+   - every other glyph takes n cells (2 for a wide emoji, a wide form or a
+     codepoint of `WIDE_TERMINAL`, otherwise 1), is fitted inside them less 30 units a side and inside the
      window less 30, and has its source advance box centred in them, so a
      family such as Braille keeps one position for every pattern (its ink
      is nudged inside the margins only where it would cross them).
@@ -67,13 +68,25 @@ SOURCES = {
 }
 TERMINAL_ORDER = ("mono", "symbols2", "symbols", "math")
 
+# TERMINAL codepoints taken from a named face before TERMINAL_ORDER is
+# tried. U+2299 comes from Noto Sans Symbols 2, the face and circle of
+# U+29BF, so the two draw as a pair (coding-agent glyphs plan, section 4.2).
+SOURCE_OVERRIDE = {0x2299: "symbols2"}
+
+# The TERMINAL codepoints that are two cells (East Asian Width W under
+# Unicode 16, as wcwidth counts them): U+2630, 26D4, 270B. An explicit set,
+# not unicodedata, so the face does not depend on Python's Unicode tables
+# (coding-agent glyphs plan, section 4.2). Every other TERMINAL codepoint is
+# one cell.
+WIDE_TERMINAL = {0x2630, 0x26D4, 0x270B}
+
 # The wide forms of the narrow curated emoji: wide form -> base. The same
 # pairs as libmsdf-font's `terminal::TERMINAL_WIDE_FORM`, which a test holds
-# equal to this face's cmap.
-WIDE_FORMS = {0xF0000: 0x26A0, 0xF0001: 0x27A1}
+# equal to this face's cmap. New wide forms are appended.
+WIDE_FORMS = {0xF0000: 0x26A0, 0xF0001: 0x27A1, 0xF0002: 0x1F6E0}
 # The curated emoji that are narrow under wcwidth (East Asian Width N): one
 # cell. Every other curated emoji is two.
-NARROW_EMOJI = {0x26A0, 0x27A1}
+NARROW_EMOJI = {0x26A0, 0x27A1, 0x1F6E0}
 
 UPEM = 1000
 CELL = 600
@@ -257,8 +270,10 @@ def main() -> None:
     updir, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
     g = groups()
     terminal, emoji = expand(g["TERMINAL"]), expand(g["TERMINAL_EMOJI"])
-    assert len(terminal) == 591, f"TERMINAL is {len(terminal)} codepoints, not 591"
-    assert len(emoji) == 24, f"TERMINAL_EMOJI is {len(emoji)} codepoints, not 24"
+    assert len(terminal) == 654, f"TERMINAL is {len(terminal)} codepoints, not 654"
+    assert len(emoji) == 39, f"TERMINAL_EMOJI is {len(emoji)} codepoints, not 39"
+    assert WIDE_TERMINAL <= set(terminal), "a WIDE_TERMINAL codepoint outside TERMINAL"
+    assert set(SOURCE_OVERRIDE) <= set(terminal), "an override outside TERMINAL"
     assert all(cp in emoji for cp in WIDE_FORMS), "a wide form outside TERMINAL_EMOJI"
 
     fonts = {key: load(updir, key) for key in SOURCES}
@@ -271,7 +286,11 @@ def main() -> None:
     cmap = {}
     sources: dict[str, int] = {}
     for cp in terminal:
-        key = next((k for k in TERMINAL_ORDER if cp in cmaps[k]), None)
+        key = SOURCE_OVERRIDE.get(cp)
+        if key is not None and cp not in cmaps[key]:
+            sys.exit(f"U+{cp:04X}: its override face {key} does not map it")
+        if key is None:
+            key = next((k for k in TERMINAL_ORDER if cp in cmaps[k]), None)
         if key is None:
             sys.exit(f"U+{cp:04X}: no Noto face maps it")
         font, gname = fonts[key], cmaps[key][cp]
@@ -279,7 +298,7 @@ def main() -> None:
             assert key == "mono", f"U+{cp:04X} is box drawing but not from Noto Sans Mono"
             glyph, adv = box_block(font, gname, cp)
         else:
-            glyph, adv = fitted(font, gname, 1)
+            glyph, adv = fitted(font, gname, 2 if cp in WIDE_TERMINAL else 1)
         name = name_of(cp)
         order.append(name)
         glyphs[name], advances[name], cmap[cp] = glyph, adv, name
@@ -339,7 +358,7 @@ def main() -> None:
     fb.save(out)
 
     built = TTFont(out)
-    assert len(built.getBestCmap()) == 591 + 24
+    assert len(built.getBestCmap()) == 654 + 39
     print(f"{out}: {len(order)} glyphs, {len(cmap)} codepoints; from {sources}")
     print(f"sha256 {sha256(out.read_bytes())}")
 
