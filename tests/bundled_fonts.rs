@@ -654,7 +654,9 @@ fn every_committed_atlas_round_trips_byte_for_byte() {
 
 /// **Each committed atlas carries its bundled cell box, at the version it
 /// needs** (per-atlas cell box plan, step 4): 5:0.2.0 with a `CELL` table
-/// for Texturina and Grenze Gotisch, 5:0.1.0 and the line box for the rest.
+/// for Texturina, Grenze Gotisch and, since the core set of Material Symbols
+/// (docs/design/20261029_01_MATERIAL_SYMBOLS_CORE_SET_PLAN.md), the two
+/// merged Roboto atlases; 5:0.1.0 and the line box for the rest.
 #[test]
 fn every_committed_atlas_carries_its_cell_box() {
     use libmsdf::font::{BundledAtlas, CellBox};

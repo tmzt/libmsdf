@@ -128,6 +128,44 @@ fn a_cell_box_bakes_texturina_and_grenze_whole_on_the_same_baseline() {
     }
 }
 
+/// **The two merged Roboto atlases take the 0.1 em cell box, on the same
+/// baseline** (core Material Symbols plan, section 3.5): `cell()` and
+/// `bundled_options(..).cell` are the box for both, the merged bake carries
+/// it at 5:0.2.0, and a text glyph's baseline sits where a line-box bake of
+/// the same face puts it.
+#[test]
+fn the_merged_atlases_take_the_cell_box() {
+    use libmsdf::font::CellBox;
+    let cell = CellBox {
+        above_em: 0.1,
+        below_em: -0.1,
+    };
+    for atlas in [
+        BundledAtlas::RobotoMsymbols,
+        BundledAtlas::RobotoMsymbolsStyled,
+    ] {
+        assert_eq!(atlas.cell(), cell, "{atlas:?}");
+        let (_, opts) = Baker::bundled_options(atlas, &fonts());
+        assert_eq!(opts.cell, cell, "{atlas:?}");
+    }
+    let (ttf, opts) = Baker::bundled_options(BundledAtlas::RobotoMsymbols, &fonts());
+    let bytes = Baker::bake_face(&ttf, &opts).unwrap();
+    assert_eq!(&bytes[4..8], &[5, 0, 2, 0]);
+    let boxed = FontAtlas::from_bytes(&bytes).unwrap();
+    let c = boxed.cell_box();
+    assert!((c.above_em - 0.1).abs() < 1e-6 && (c.below_em + 0.1).abs() < 1e-6);
+    assert!((c.cell_em() - libmsdf::font::CELL_EM_RATIO).abs() < 1e-9);
+
+    let line = bake_with(BundledAtlas::RobotoMsymbols, CellBox::LINE_BOX);
+    let line_box_baseline = line.text_baseline_frac().unwrap() as f64;
+    let in_line_box = (boxed.text_baseline_frac().unwrap() as f64 * c.cell_em() - c.above_em)
+        / libmsdf::font::CELL_EM_RATIO;
+    assert!(
+        (in_line_box - line_box_baseline).abs() < 1e-5,
+        "baseline {in_line_box} in the line box, was {line_box_baseline}"
+    );
+}
+
 /// **A run from a cell-box atlas overhangs the line box, on the same
 /// baseline** (per-atlas cell box plan, step 3): its instance box is the
 /// 1.406 em cell with its top 0.179 em above the line box, and its baseline
