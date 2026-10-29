@@ -532,3 +532,22 @@ Under 0.6.1, libcontrols takes the patch with no release of its own.
    source override on the page. It is chosen so the pair matches. The
    alternative keeps the face order, and Noto Sans Mono's `⊙` then differs
    from `⦿` in weight. Keep the override?
+
+## Amendment — 2026-10-28 21:04 EDT: the owner's answers to section 8
+
+The owner (2026-10-28, through flankr's lead, who had listed section 8's
+questions with the plan's proposals): "on the libmsdf plan, those are
+fine and push as needed". Each question takes the plan's proposal; the
+body stands as written:
+
+1. **0.6.1** (section 6), not 0.7.0; libcontrols takes no release for it.
+2. **18 columns** (section 4), 720 cells, 26 free.
+3. **◽ U+25FD and ◾ U+25FE** become two cells in the next breaking
+   release, not in this one.
+4. **ℹ ♥ ☺ ⏲ with U+FE0F** stay one cell, with no wide forms.
+5. **☰** is two cells, as proposed.
+6. **⊙ from Noto Sans Symbols 2** is kept, the page's one source
+   override.
+
+The status stays `Draft`: these answer the plan's questions and do not
+start implementation.
