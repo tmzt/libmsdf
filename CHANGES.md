@@ -773,3 +773,33 @@ run is a hand-built `MsdfText` so it runs without the shaper; the plan's
 `kind.translate(d)` is `translate(dx, dy)`. Not yet run: step 3's
 `gpu-tests` and `scripts/check-font-features.sh` at the tag, so the plan
 stays In implementation.
+
+## 2026-10-29 02:42 EDT — The coding-agent glyphs, 0.6.2
+
+Plan: docs/design/20261028_01_CODING_AGENT_GLYPHS_PLAN.md. Landed as 0.6.2
+(tag v0.6.2): COVERAGE_TERMINAL 654, COVERAGE_TERMINAL_EMOJI 39, 🛠's wide
+form U+F0002, ☰ ⛔ ✋ two cells, ⊙ from Noto Sans Symbols 2; the face is
+sha256 0d912327… with every earlier glyph unchanged; the symbol page
+re-baked at 18 columns, 900 x 2000, 694 cells, 5,432,000 bytes, sha256
+21d34299…; the other eight atlases byte-identical; the reference hash
+updated in its own commit under the plan's approval.
+
+Departures (Rule 1.7):
+1. Step 3, the columns amendment's item 1: `cells` counts atlas cells, one
+   per glyph and the placeholder, not two-cell glyphs twice. The atlas bakes
+   a two-cell glyph into one cell, section 3.6 counts 616 and 694 that way,
+   and the amendment's own result (694 cells, 18 columns) holds only under
+   that count (counting twice gives 733 and 19). The const fn therefore
+   reads only the two coverage groups, not the two-cell set. To be put to
+   the owner; a later amendment changes it if the owner prefers the other
+   count.
+2. Step 3, the 1601-cell refusal: `page_columns` returns None past 40
+   columns; `BundledAtlas::columns` then clamps to 40, so the bake fails with
+   the builder's per-layer error, which names the cell count and the
+   1600-cell limit.
+3. Step 2: FONTS-LICENSE-OFL.txt's sha256 for the face is updated too
+   (AGENTS.md, "Bundled fonts and atlases", item 3); section 4.2 lists only
+   bundled.rs and rebuild-fonts.sh.
+4. Step 5: examples/font_sheets.rs does not exist, so the evidence used the
+   copied scratch tool, as the step allows
+   (out/fonts/20261029_01_agent_glyphs/).
