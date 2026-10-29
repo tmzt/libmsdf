@@ -756,3 +756,20 @@ Symbols 2 to match ⦿. ✋ ⛔ ☰ are the page's first two-cell symbols. At 69
 cells the page outgrows its 640-cell layer, so it is baked at 18 columns
 (900 x 2000, 720 cells). Proposed as 0.6.1, with the version question open
 for the owner. Nothing is implemented until the owner approves it.
+
+## 2026-10-28 23:48 EDT — A scoped append (20261028_02_SCOPED_APPEND_PLAN), built as 0.6.1
+
+Plan docs/design/20261028_02_SCOPED_APPEND_PLAN.md (approved 23:39 EDT,
+In implementation 23:46 EDT). Adds `DrawList::append_scoped(&other,
+offset)`, which splices a kept list as if its calls were made now, moved by
+`offset`, under the open clip, effects and rotate/translate scopes;
+`RotationTransform::map_rect` (private) is factored out of `rotate_rect`,
+whose results are unchanged. `append_from`, `Render for DrawList` and
+`PaneGate` are unchanged. Strictly additive: libmsdf and libmsdf-font move
+to 0.6.1 in lockstep (tag `v0.6.1`), ahead of the coding-agent glyphs plan,
+which takes the next patch. Departures (small, Rule 1.7): the VERSIONS.md
+heading follows the file's existing "(tag `v0.6.1`)" form; test 3's text
+run is a hand-built `MsdfText` so it runs without the shaper; the plan's
+`kind.translate(d)` is `translate(dx, dy)`. Not yet run: step 3's
+`gpu-tests` and `scripts/check-font-features.sh` at the tag, so the plan
+stays In implementation.
