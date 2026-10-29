@@ -803,3 +803,21 @@ Departures (Rule 1.7):
 4. Step 5: examples/font_sheets.rs does not exist, so the evidence used the
    copied scratch tool, as the step allows
    (out/fonts/20261029_01_agent_glyphs/).
+
+## 2026-10-29 17:40 EDT — A core set of Material Symbols in the merged Roboto face
+
+Plan: docs/design/20261029_01_MATERIAL_SYMBOLS_CORE_SET_PLAN.md (Draft), at
+the owner's "yes" in RoundTwo's session to a libmsdf plan for a standard
+set of about 64 Android/Material 3 icons. Planned: the merged face's
+borrowed icons grow from 18 to 71 (53 new, every current one kept), listed
+in a new fonts/msymbols-icons.txt that fonts/msymbols.py reads and checks
+against Material's .codepoints manifest at the pinned commit (fetched by
+scripts/fetch-upstream-fonts.sh), and that a test compares with
+MSYMBOLS_ICONS. `error` is replaced by `report` (its only declared
+codepoint, U+F8B6, is in the owned blocks) and Material's `folder` is left
+out (HIGHBAY_ICONS has the name). The two merged atlases get a 0.1 em cell
+box, because 25 of the 71 icons (three of them shipped today) reach past
+the top of the line-box cell; the shipped coverage becomes 302 of 320
+cells, about +1.9 KB per atlas. Proposed as 0.7.0 for the cell box, or
+0.6.3 without it (the plan's open question 1). RoundTwo is the first user
+(content_copy). Nothing is implemented until the owner approves the plan.
