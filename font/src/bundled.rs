@@ -5,11 +5,12 @@
 //! libmsdf's build script and tests can name the files and features without
 //! the baker.
 
+use crate::coverage::CoverageGroup;
 use crate::coverage::{
     COVERAGE_MATH, COVERAGE_SYMBOLS, COVERAGE_TERMINAL, COVERAGE_TERMINAL_EMOJI, COVERAGE_TEXT,
     Coverage,
 };
-use crate::{ATLAS_COLS, CapPlacement, CellBox, GlyphStyle};
+use crate::{ATLAS_COLS, ATLAS_ROWS, CapPlacement, CellBox, GlyphStyle};
 
 /// The cell size every bundled atlas is baked at.
 pub const BUNDLED_ATLAS_GLYPH_SIZE: u32 = 48;
@@ -148,6 +149,58 @@ const TERMINAL_SYMBOLS: BundledFace = BundledFace {
     style: GlyphStyle::Regular,
 };
 
+/// **The columns of the terminal symbol page follow its cells**
+/// (`docs/design/20261028_01_CODING_AGENT_GLYPHS_PLAN.md`, the 21:05 EDT
+/// amendment): the fewest columns that hold them, at least 16, at most
+/// [`TERMINAL_SYMBOLS_MAX_COLUMNS`]. `None` past that.
+///
+/// A cell here is a cell of the atlas: one per glyph, the placeholder
+/// included. A two-cell glyph (an emoji, a wide form, `☰ ⛔ ✋`) is fitted to
+/// its two terminal cells in the face, but is baked into one atlas cell like
+/// every other glyph, so it counts once, as section 3.6 of the plan counts
+/// the page's 616 and 694.
+const fn page_columns(cells: u32) -> Option<u32> {
+    let columns = cells.div_ceil(ATLAS_ROWS);
+    if columns > TERMINAL_SYMBOLS_MAX_COLUMNS {
+        None
+    } else if columns < 16 {
+        Some(16)
+    } else {
+        Some(columns)
+    }
+}
+
+/// The widest the symbol page may be: 40 columns of 50 texels (48 and a
+/// texel of padding a side) is 2000 texels, inside the 2048 floor of
+/// `max_texture_dimension_2d`; 41 would be 2050. That is 1600 cells.
+const TERMINAL_SYMBOLS_MAX_COLUMNS: u32 = 40;
+
+/// The codepoints a group declares, at compile time.
+const fn group_len(group: &CoverageGroup) -> u32 {
+    let mut n = 0;
+    let mut i = 0;
+    while i < group.ranges.len() {
+        let (lo, hi) = group.ranges[i];
+        n += hi as u32 - lo as u32 + 1;
+        i += 1;
+    }
+    n
+}
+
+/// The symbol page's atlas cells: every TERMINAL and TERMINAL_EMOJI
+/// codepoint, and the placeholder. 694 for 0.6.2.
+const TERMINAL_SYMBOLS_CELLS: u32 =
+    group_len(&COVERAGE_TERMINAL) + group_len(&COVERAGE_TERMINAL_EMOJI) + 1;
+
+/// The symbol page's columns, from [`page_columns`]: 18 for 0.6.2's 694
+/// cells. A coverage past 1600 cells is clamped to the widest page, so the
+/// bake fails with the builder's per-layer error, which names the cell
+/// count and the 1600-cell limit; a second layer would be its own plan.
+const TERMINAL_SYMBOLS_COLUMNS: u32 = match page_columns(TERMINAL_SYMBOLS_CELLS) {
+    Some(columns) => columns,
+    None => TERMINAL_SYMBOLS_MAX_COLUMNS,
+};
+
 /// The symbol page's placement: Noto Sans Mono's, with its cap height (717
 /// of 1000) given, since the merged face has no `A`.
 const TERMINAL_SYMBOLS_CAP: CapPlacement = CapPlacement {
@@ -263,10 +316,20 @@ impl BundledAtlas {
         }
     }
 
-    /// Cell columns per layer: 16 for the OFL faces, [`ATLAS_COLS`] (8)
-    /// for the Roboto ones.
+    /// Cell columns per layer: for the terminal symbol page, the fewest
+    /// that hold its cells (18 for its 694, 900 x 2000 texels;
+    /// `docs/design/20261028_01_CODING_AGENT_GLYPHS_PLAN.md`, the 21:05 EDT
+    /// amendment), so the bake, the tests and an `AtlasSet`'s padding read
+    /// one number that follows the coverage; 16 for the other OFL faces;
+    /// [`ATLAS_COLS`] (8) for the Roboto ones.
     pub const fn columns(self) -> u32 {
-        if self.is_ofl() { 16 } else { ATLAS_COLS }
+        if matches!(self, BundledAtlas::TerminalSymbols) {
+            TERMINAL_SYMBOLS_COLUMNS
+        } else if self.is_ofl() {
+            16
+        } else {
+            ATLAS_COLS
+        }
     }
 
     /// Where its cells put the cap height: the terminal placement for the
@@ -356,4 +419,26 @@ impl BundledAtlas {
 /// Lowercase hex of a digest.
 pub fn hex_of(digest: &[u8; 32]) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The page's columns follow its cells: 16 at least, one more for each
+    /// 40 cells past 640, 40 at most (coding-agent glyphs plan, the 21:05
+    /// EDT amendment, item 4).
+    #[test]
+    fn the_page_s_columns_follow_its_cells() {
+        assert_eq!(page_columns(1), Some(16));
+        assert_eq!(page_columns(640), Some(16));
+        assert_eq!(page_columns(641), Some(17));
+        assert_eq!(page_columns(694), Some(18));
+        assert_eq!(page_columns(1600), Some(40));
+        assert_eq!(page_columns(1601), None, "past 2000 texels wide is refused");
+        assert_eq!(TERMINAL_SYMBOLS_CELLS, 654 + 39 + 1);
+        assert_eq!(BundledAtlas::TerminalSymbols.columns(), 18);
+        assert_eq!(BundledAtlas::NotoSansMono.columns(), 16);
+        assert_eq!(BundledAtlas::RobotoRegular.columns(), ATLAS_COLS);
+    }
 }
