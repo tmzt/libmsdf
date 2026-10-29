@@ -81,3 +81,57 @@ the two terminal atlases with no placeholder, and `tests/cell_box_render.rs`
 draws both spinners' frames and checks the text after them never moves.
 
 ![Claude Code's 70 interface glyphs, then the starburst, Braille and thinking spinners and the sparkle, at 24 px, scale 2](./out/fonts/20261023_04_cell_box_release/claude-code_glyphs.png)
+
+## 2026-10-29 02:19 EDT — The coding agents' glyphs (`out/fonts/20261029_01_agent_glyphs/`)
+
+The page gains the 77 codepoints of the coding-agent glyphs plan
+(`docs/design/20261028_01_CODING_AGENT_GLYPHS_PLAN.md`, section 3.1),
+and is now one 18-column layer: 63 symbols (`COVERAGE_TERMINAL`, now 654) and 14 emoji with
+one wide form (`COVERAGE_TERMINAL_EMOJI`, now 39). The face
+(sha256 `0d912327…`) maps 693 codepoints; every glyph that was on the page
+keeps its outline and advance, checked glyph by glyph against the previous
+face. The atlas is 900 x 2000 (18 columns, computed from its 694 cells) and
+5,432,000 bytes; its bake report carries 654 of 654 and 39 of 39, and its
+135 overhanging glyphs are the same box and block codepoints, by the same
+amounts, as before.
+
+**Where each glyph came from.** By the merge's face order, with one
+override:
+- Noto Sans Mono: `ℹ ≡ ⌐ ‖` (4). Its `ℹ` is drawn as a serifed
+  letter i, which is Noto's design, not a fallback.
+- Noto Sans Symbols 2: the 34 control pictures and `␣`, and
+  `⌦ ⛁ ☰ ⬢ ♥ ✋ ⏲ ⛔ ⦿`, and `⊙` (45). `⊙` is the page's one source
+  override: Noto Sans Mono maps it first, with a different circle, so it
+  is taken from Noto Sans Symbols 2, the face of `⦿`. The two have equal
+  bounding boxes, x 30 to 570 and y 92 to 632.
+- Noto Sans Symbols: `ⓘ Ⓘ ⓞ ⓧ ⌂ ♪ ☺` (7).
+- Noto Sans Math: `⋮ ⋯ ⊷ ⟳ ⊠ ⇞ ⇟` (7).
+- Noto Emoji: the 14 emoji and the wide form of `🛠` at U+F0002.
+
+**Widths.** `☰ ⛔ ✋` are two cells (1200 units), the first two-cell
+symbols on the page; every other new symbol is one. Of the emoji, 13 are
+two cells; `🛠` is one, and its wide form, which the shaper uses when
+U+FE0F follows, is two. `ℹ ♥ ☺ ⏲` stay one cell with U+FE0F.
+
+**Scale factors** (Rule 2 fitting, plan section 3.4), as measured for the
+plan; the merged face's ink matches them:
+
+| Scale | Glyphs |
+|---|---|
+| 1.00 (unscaled) | `⋮ ℹ ≡ ⌐ ‖ ⇞ ⇟ ♪`; 30 of the 34 control pictures; `✋ ⛔ ☰` in two cells; 12 of the 14 emoji in two cells; `🛠`'s wide form |
+| 0.94 to 0.99 | `␂ ␆ ␕ ␚`; `📂` 0.98 |
+| 0.85 to 0.91 | `␣` 0.91, `⌂` 0.88, `♥` 0.85 |
+| 0.74 to 0.83 | `⊠` 0.83, `☺` 0.78, `⬢` 0.75, `⋯` 0.74 |
+| 0.64 to 0.68 | `⊙ ⦿` 0.68, `⊷` 0.67, `ⓘ Ⓘ ⓞ ⓧ` 0.66, `⛁` 0.64 |
+| 0.49 to 0.58 | `⏲` 0.58, `⟳` 0.53, `⌦` 0.49, `🛠` 0.49 in one cell |
+
+![The 77 coding-agent glyphs by row, at 24 px, scale 2: interface marks, key hints, the control pictures, Claude Code's figures fallbacks, the text-presentation symbols, Gemini CLI's emoji, and the empty and filled circles](./out/fonts/20261029_01_agent_glyphs/agent_glyphs.png)
+
+![One mock-up line per agent at 24 px between column rulers, every line 53 columns with its bar at column 52](./out/fonts/20261029_01_agent_glyphs/agent_lines_24px.png)
+
+![The same lines at 16 px, scale 2](./out/fonts/20261029_01_agent_glyphs/agent_lines_16px.png)
+
+`tests/terminal_glyphs.rs` holds all 77 to drawing from the page at their
+widths, with the selector cases; the log entry is in
+`out/fonts/LOG.md`, and the tool in
+[out/fonts/20261029_01_agent_glyphs/tool/](./out/fonts/20261029_01_agent_glyphs/tool/).
