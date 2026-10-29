@@ -24,9 +24,15 @@ pub const TERMINAL_WIDE_FORMS: (char, char) = ('\u{F0000}', '\u{F00FF}');
 
 /// **The wide forms**, as (base, wide form): a base followed by U+FE0F is
 /// drawn as its wide form, two cells; otherwise it is one cell. The same
-/// pairs as `fonts/terminal_symbols.py`'s `WIDE_FORMS`.
-pub const TERMINAL_WIDE_FORM: &[(char, char)] =
-    &[('\u{26A0}', '\u{F0000}'), ('\u{27A1}', '\u{F0001}')];
+/// pairs as `fonts/terminal_symbols.py`'s `WIDE_FORMS`: ⚠ and ➡ (terminal
+/// fonts plan, 02:32 EDT amendment) and 🛠
+/// (`docs/design/20261028_01_CODING_AGENT_GLYPHS_PLAN.md`, section 4.4),
+/// appended in that order.
+pub const TERMINAL_WIDE_FORM: &[(char, char)] = &[
+    ('\u{26A0}', '\u{F0000}'),
+    ('\u{27A1}', '\u{F0001}'),
+    ('\u{1F6E0}', '\u{F0002}'),
+];
 
 /// VARIATION SELECTOR-16, the emoji presentation selector.
 const VS16: char = '\u{FE0F}';

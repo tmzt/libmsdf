@@ -1,7 +1,7 @@
 ---
 title: Coding-agent interface glyphs on the terminal symbol page
 date: 2026-10-28
-status: Draft
+status: In implementation
 covers: >
   Adding the interface glyphs that Claude Code, Codex, Gemini CLI and
   Antigravity print, and that no bundled terminal atlas carries, to the
@@ -590,3 +590,10 @@ amendment. 0.6.1 went to the scoped append (plan 20261028_02), so this is
 re-bake changes the atlas bytes and their hash; the owner's approval of the
 plan covers that change (AGENTS.md's atlas rule). The status stays `Draft`
 until the first implementing commit (Rule 1.5).
+
+## Amendment — 2026-10-29 02:03 EDT: implementation started; this document is immutable
+
+Implementation has started, on the owner's approval of 2026-10-29 01:53 EDT,
+as release 0.6.2. The status is now `In implementation`, and this
+document is immutable (Rule 1.5): it changes only on the owner's explicit
+instruction, and departures are recorded in CHANGES.md (Rule 1.7).
