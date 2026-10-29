@@ -274,3 +274,18 @@ changed version.
   `drawlist::stream::lower_stream_with_cell_box`.
 - Changed: `FontAtlas::min_antialiased_font_size` uses the atlas's cell
   height.
+
+## 0.6.1 — 2026-10-28 (tag `v0.6.1`)
+
+A scoped append, for kept lists placed under open scopes
+(`docs/design/20261028_02_SCOPED_APPEND_PLAN.md`). Strictly additive, so a
+patch release (Rule 5.4). `libmsdf` and `libmsdf-font` stay in lockstep:
+both are 0.6.1 and both are covered by this entry and this tag, though
+`libmsdf-font` itself is unchanged. The commit is the one tagged `v0.6.1`.
+No dependency changed version.
+
+- Added: `DrawList::append_scoped(&mut self, other: &DrawList, offset:
+  [f32; 2])`, which splices `other` as if its calls were made now, moved by
+  `offset`, inside the clip, effects and rotate/translate scopes open on
+  this list. `append_from` is unchanged and still asserts that nothing is
+  open.
